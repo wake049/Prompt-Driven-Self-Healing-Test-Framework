@@ -1,0 +1,5 @@
+{
+  "error": "Unsupported intent: purchase insurance",
+  "code": "UNSUPPORTED_INTENT",
+  "details": { "hint": "Try: book one way …, select seats …" }
+}

@@ -1,0 +1,27 @@
+.PHONY: setup dev test lint up down plan-login
+
+PY_AI := services/python-ai
+VENV := .venv
+PYTHON := $(VENV)/Scripts/python.exe
+
+setup:
+	python -m venv $(VENV)
+	$(PYTHON) -m pip install -U pip && $(PYTHON) -m pip install -r $(PY_AI)/requirements.txt
+
+dev:
+	cd $(PY_AI) && $(PYTHON) app.py
+
+test:
+	cd $(PY_AI) && $(PYTHON) -m pytest tests/ -v
+
+lint:
+	. $(VENV)/bin/activate && python -m pip install ruff && ruff $(PY_AI)
+
+up:
+	docker compose up -d --build
+
+down:
+	docker compose down
+
+plan-login:
+	curl -s -X POST http://127.0.0.1:8000/plan -H "Content-Type: application/json" -d '{"prompt":"login"}' | jq

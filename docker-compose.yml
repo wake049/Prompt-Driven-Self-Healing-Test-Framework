@@ -1,0 +1,26 @@
+services:
+  planner:
+    build:
+      context: .
+      dockerfile: docker/python-ai/Dockerfile
+    container_name: ai-planner
+    ports:
+      - "8000:8000"
+    environment:
+      - PLANNER_ENV=prod
+    restart: unless-stopped
+
+  db:
+    image: postgres:16
+    container_name: planner-db
+    environment:
+      - POSTGRES_USER=planner
+      - POSTGRES_PASSWORD=planner
+      - POSTGRES_DB=planner
+    ports:
+      - "5432:5432"
+    volumes:
+      - planner_pg:/var/lib/postgresql/data
+
+volumes:
+  planner_pg:

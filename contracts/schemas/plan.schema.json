@@ -1,0 +1,48 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "plan.schema.json",
+  "title": "Action Plan",
+  "type": "object",
+  "required": ["actions"],
+  "properties": {
+    "actions": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/Action" },
+      "minItems": 1
+    },
+    "meta": {
+      "type": "object",
+      "properties": {
+        "prompt": { "type": "string" },
+        "version": { "type": "string" }
+      },
+      "additionalProperties": true
+    }
+  },
+  "definitions": {
+    "Action": {
+      "type": "object",
+      "required": ["name", "params"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "enum": [
+            "open_url",
+            "type_css",
+            "click_css",
+            "assert_title_contains",
+            "wait_for_css",
+            "assert_text_css",
+            "navigate_back",
+            "screenshot"
+          ]
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    }
+  },
+  "additionalProperties": false
+}

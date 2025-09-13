@@ -1,0 +1,8 @@
+{
+  "actions": [
+    { "name": "open_url", "params": { "url": "https://example.com" } },
+    { "name": "wait_for_css", "params": { "selector": "body" } },
+    { "name": "assert_title_contains", "params": { "text": "Example" } }
+  ],
+  "meta": { "prompt": "open example", "version": "0.1.0" }
+}
