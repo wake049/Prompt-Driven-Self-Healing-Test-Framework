@@ -1,0 +1,10 @@
+{
+  "actions": [
+    { "name": "open_url", "params": { "url": "https://the-internet.herokuapp.com/login" } },
+    { "name": "type_css", "params": { "selector": "#username", "text": "tomsmith" } },
+    { "name": "type_css", "params": { "selector": "#password", "text": "SuperSecretPassword!" } },
+    { "name": "click_css", "params": { "selector": "button[type='submit']" } },
+    { "name": "assert_title_contains", "params": { "text": "The Internet" } }
+  ],
+  "meta": { "prompt": "login", "version": "0.1.0" }
+}
