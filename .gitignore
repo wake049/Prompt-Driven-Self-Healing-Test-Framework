@@ -48,6 +48,21 @@ build/
 *.tgz
 *.tar.gz
 
+# TypeScript
+*.tsbuildinfo
+.tsbuildinfo
+
+# React
+.eslintcache
+
+# Package managers
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Parcel cache
+.parcel-cache/
+
 # Environment Variables
 .env
 .env.local
@@ -79,6 +94,19 @@ test-results/
 actual.json
 *_actual.json
 open_actual.json
+
+# AI/ML Models (if you want to exclude them)
+*.joblib
+*.pkl
+*.pickle
+models/*.joblib
+
+# Test files (our custom test files)
+test_*.py
+*_test.py
+test_duplicates.py
+test_contact_form.py
+test_verb_based_actions.py
 
 # Temporary files
 *.tmp
