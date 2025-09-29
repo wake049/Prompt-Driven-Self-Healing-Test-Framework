@@ -10,6 +10,29 @@ services:
       - PLANNER_ENV=prod
     restart: unless-stopped
 
+  mcp-server:
+    build:
+      context: services/mcp-server
+      dockerfile: Dockerfile
+    container_name: mcp-server
+    ports:
+      - "8001:8001"
+    environment:
+      - MCP_HOST=0.0.0.0
+      - MCP_PORT=8001
+      - MCP_AUTH_REQUIRED=false
+      - MCP_DEBUG=false
+      - ENVIRONMENT=production
+    restart: unless-stopped
+    depends_on:
+      - db
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
   db:
     image: postgres:16
     container_name: planner-db
