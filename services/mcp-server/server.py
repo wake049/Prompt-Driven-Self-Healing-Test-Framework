@@ -6,11 +6,13 @@ Core server class implementing the Model Context Protocol
 import asyncio
 import logging
 from typing import Dict, List, Optional, Any
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 
 from config import MCPConfig
 from tool_registry import ToolRegistry
+from schema_validator import validate_tool_request, validate_tool_response
+from error_model import MCPError, ErrorFactory, ErrorCode, get_http_status_code
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +50,7 @@ class MCPServer:
         
         # Initialize server state
         self._running = True
-        self._start_time = datetime.now()
+        self._start_time = datetime.now(timezone.utc)
         self._request_count = 0
         self._error_count = 0
         
@@ -79,7 +81,7 @@ class MCPServer:
         """Get server uptime in seconds"""
         if not self._start_time:
             return 0.0
-        return (datetime.now() - self._start_time).total_seconds()
+        return (datetime.now(timezone.utc) - self._start_time).total_seconds()
     
     async def handle_tool_call(self, tool_name: str, parameters: dict, context: dict = None) -> dict:
         """Handle a tool call request"""
@@ -88,22 +90,94 @@ class MCPServer:
             
             # Validate tool exists
             if not self.tool_registry.get_tool(tool_name):
-                raise MCPServerError(f"Tool '{tool_name}' not found")
+                error = ErrorFactory.not_found_error(
+                    code=ErrorCode.TOOL_NOT_FOUND,
+                    message=f"Tool '{tool_name}' not found",
+                    resource_type="tool",
+                    resource_id=tool_name
+                )
+                raise MCPServerError(error.message)
+            
+            # Validate request against schema
+            validation_error = validate_tool_request(tool_name, parameters)
+            if validation_error:
+                logger.error(f"Request validation failed for '{tool_name}': {validation_error.message}")
+                return {
+                    "status": "error",
+                    "error": validation_error.to_dict(),
+                    "tool_name": tool_name,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                }
             
             # Get tool metadata for validation
             metadata = self.tool_registry.get_metadata(tool_name)
             if not metadata:
-                raise MCPServerError(f"Tool '{tool_name}' metadata not found")
+                error = ErrorFactory.not_found_error(
+                    code=ErrorCode.TOOL_NOT_FOUND,
+                    message=f"Tool '{tool_name}' metadata not found",
+                    resource_type="tool_metadata",
+                    resource_id=tool_name
+                )
+                raise MCPServerError(error.message)
             
             # Check authentication if required
             if metadata.requires_auth and self.config.auth_required:
                 if not self._validate_auth(context):
-                    raise MCPServerError("Authentication required")
+                    error = ErrorFactory.validation_error(
+                        code=ErrorCode.MISSING_AUTH_TOKEN,
+                        message="Authentication required"
+                    )
+                    return {
+                        "status": "error",
+                        "error": error.to_dict(),
+                        "tool_name": tool_name,
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    }
             
-            # Execute tool
-            start_time = datetime.now()
-            result = await self.tool_registry.call_tool(tool_name, **parameters)
-            execution_time = (datetime.now() - start_time).total_seconds() * 1000
+            # Execute tool with proper timeout and cancellation handling
+            start_time = datetime.now(timezone.utc)
+            try:
+                result = await asyncio.wait_for(
+                    self.tool_registry.call_tool(tool_name, **parameters),
+                    timeout=metadata.timeout_ms / 1000
+                )
+                execution_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
+            except asyncio.TimeoutError:
+                execution_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
+                logger.error(f"Tool '{tool_name}' timed out after {execution_time:.0f}ms (limit: {metadata.timeout_ms}ms)")
+                error = ErrorFactory.timeout_error(
+                    code=ErrorCode.TOOL_EXECUTION_TIMEOUT,
+                    message=f"Tool '{tool_name}' timed out after {metadata.timeout_ms}ms",
+                    timeout_ms=metadata.timeout_ms,
+                    operation=f"tool_execution_{tool_name}"
+                )
+                return {
+                    "status": "error",
+                    "error": error.to_dict(),
+                    "tool_name": tool_name,
+                    "execution_time_ms": execution_time,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                }
+            except asyncio.CancelledError:
+                execution_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
+                logger.warning(f"Tool '{tool_name}' was cancelled after {execution_time:.0f}ms")
+                raise  # Re-raise cancellation to handle it properly
+            
+            # Prepare response
+            response_data = {
+                "success": True,
+                "result": result,
+                "execution_time_ms": execution_time,
+                "tool_name": tool_name,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+            
+            # Validate response against schema
+            response_validation_error = validate_tool_response(tool_name, response_data)
+            if response_validation_error:
+                logger.error(f"Response validation failed for '{tool_name}': {response_validation_error.message}")
+                # Continue with response but log the validation error
+                # In production, you might want to handle this differently
             
             # Return successful response
             return {
@@ -111,18 +185,35 @@ class MCPServer:
                 "result": result,
                 "execution_time_ms": execution_time,
                 "tool_name": tool_name,
-                "timestamp": datetime.now().isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "trace_id": context.get("trace_id") if context else None
             }
             
-        except Exception as e:
+        except MCPServerError as e:
             self._error_count += 1
-            logger.error(f"Tool call error for '{tool_name}': {e}")
+            logger.error(f"MCP Server error for '{tool_name}': {e}")
             
             return {
                 "status": "error",
                 "error": str(e),
                 "tool_name": tool_name,
-                "timestamp": datetime.now().isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+        except Exception as e:
+            self._error_count += 1
+            logger.error(f"Unexpected error for '{tool_name}': {e}")
+            
+            error = ErrorFactory.tool_execution_error(
+                code=ErrorCode.UNEXPECTED_ERROR,
+                message=f"Unexpected error during tool execution: {str(e)}",
+                tool_name=tool_name
+            )
+            
+            return {
+                "status": "error",
+                "error": error.to_dict(),
+                "tool_name": tool_name,
+                "timestamp": datetime.now(timezone.utc).isoformat()
             }
     
     async def list_tools(self, category: str = None) -> dict:
@@ -153,7 +244,7 @@ class MCPServer:
                 "tools": tools_info,
                 "total_count": len(tools_info),
                 "category": category,
-                "timestamp": datetime.now().isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat()
             }
             
         except Exception as e:
@@ -161,7 +252,7 @@ class MCPServer:
             return {
                 "status": "error",
                 "error": str(e),
-                "timestamp": datetime.now().isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat()
             }
     
     async def get_tool_info(self, tool_name: str) -> dict:
@@ -173,13 +264,13 @@ class MCPServer:
                 return {
                     "status": "error",
                     "error": f"Tool '{tool_name}' not found",
-                    "timestamp": datetime.now().isoformat()
+                    "timestamp": datetime.now(timezone.utc).isoformat()
                 }
             
             return {
                 "status": "success",
                 "tool": tool_info,
-                "timestamp": datetime.now().isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat()
             }
             
         except Exception as e:
@@ -187,7 +278,7 @@ class MCPServer:
             return {
                 "status": "error",
                 "error": str(e),
-                "timestamp": datetime.now().isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat()
             }
     
     async def search_tools(self, query: str) -> dict:
@@ -207,7 +298,7 @@ class MCPServer:
                 "query": query,
                 "matches": tools_info,
                 "match_count": len(tools_info),
-                "timestamp": datetime.now().isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat()
             }
             
         except Exception as e:
@@ -215,7 +306,7 @@ class MCPServer:
             return {
                 "status": "error",
                 "error": str(e),
-                "timestamp": datetime.now().isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat()
             }
     
     def get_server_status(self) -> dict:
@@ -233,14 +324,14 @@ class MCPServer:
             "active_connections": len(self._connections),
             "config": self.config.server_info,
             "tools": registry_stats,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
     
     def get_health_status(self) -> dict:
         """Get simple health status for health checks"""
         return {
             "status": "healthy" if self._running else "unhealthy",
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
     
     def _validate_auth(self, context: dict = None) -> bool:
@@ -265,12 +356,12 @@ class MCPServer:
         """Register a new connection"""
         self._connections[connection_id] = {
             "info": connection_info,
-            "connected_at": datetime.now(),
-            "last_activity": datetime.now()
+            "connected_at": datetime.now(timezone.utc),
+            "last_activity": datetime.now(timezone.utc)
         }
         logger.info(f"Registered connection: {connection_id}")
     
     async def update_connection_activity(self, connection_id: str):
         """Update connection last activity time"""
         if connection_id in self._connections:
-            self._connections[connection_id]["last_activity"] = datetime.now()
+            self._connections[connection_id]["last_activity"] = datetime.now(timezone.utc)

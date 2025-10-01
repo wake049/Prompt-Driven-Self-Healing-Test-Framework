@@ -20,6 +20,9 @@ async def get_version() -> Dict[str, Any]:
     """
     return {
         "version": "0.1.0",
+        "schema_version": "1.0.0",
+        "git_sha": os.getenv("GIT_SHA", "development"),
+        "build_time": os.getenv("BUILD_TIME", datetime.now().isoformat() + "Z"),
         "name": "MCP Server",
         "description": "Model Context Protocol Server for Test Automation Platform",
         "api_version": "v1"

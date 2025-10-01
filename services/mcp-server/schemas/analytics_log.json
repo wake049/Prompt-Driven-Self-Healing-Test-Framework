@@ -1,0 +1,248 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Analytics Log Tool",
+  "description": "Record execution metrics and performance data",
+  "type": "object",
+  "properties": {
+    "request": {
+      "type": "object",
+      "properties": {
+        "event_type": {
+          "type": "string",
+          "enum": [
+            "action_executed",
+            "healing_applied",
+            "review_completed",
+            "test_started",
+            "test_completed",
+            "test_failed",
+            "element_created",
+            "element_updated",
+            "policy_triggered",
+            "performance_metric",
+            "error_occurred",
+            "user_action"
+          ],
+          "description": "Type of event being logged"
+        },
+        "metrics": {
+          "type": "object",
+          "properties": {
+            "execution_time_ms": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Execution time in milliseconds"
+            },
+            "tokens_consumed": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "AI tokens consumed"
+            },
+            "confidence_scores": {
+              "type": "array",
+              "items": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "description": "Confidence scores for various decisions"
+            },
+            "success_rate": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Success rate metric"
+            },
+            "retry_count": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Number of retries performed"
+            },
+            "memory_usage_mb": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Memory usage in megabytes"
+            },
+            "cpu_usage_percent": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100,
+              "description": "CPU usage percentage"
+            },
+            "network_requests": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Number of network requests made"
+            },
+            "cache_hits": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Number of cache hits"
+            },
+            "cache_misses": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Number of cache misses"
+            }
+          },
+          "additionalProperties": true
+        },
+        "context": {
+          "type": "object",
+          "properties": {
+            "run_id": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Unique test run identifier"
+            },
+            "user_id": {
+              "type": "string",
+              "format": "uuid",
+              "description": "User identifier"
+            },
+            "session_id": {
+              "type": "string",
+              "description": "Session identifier"
+            },
+            "environment": {
+              "type": "string",
+              "enum": ["development", "staging", "production"],
+              "description": "Environment where event occurred"
+            },
+            "application": {
+              "type": "string",
+              "maxLength": 50,
+              "description": "Application identifier"
+            },
+            "component": {
+              "type": "string",
+              "maxLength": 50,
+              "description": "Component that generated the event"
+            },
+            "version": {
+              "type": "string",
+              "description": "Application version"
+            },
+            "browser": {
+              "type": "string",
+              "enum": ["chrome", "firefox", "safari", "edge"],
+              "description": "Browser type"
+            },
+            "page_url": {
+              "type": "string",
+              "format": "uri",
+              "description": "Page URL where event occurred"
+            },
+            "user_agent": {
+              "type": "string",
+              "description": "User agent string"
+            },
+            "ip_address": {
+              "type": "string",
+              "description": "Client IP address"
+            },
+            "geolocation": {
+              "type": "object",
+              "properties": {
+                "country": {"type": "string"},
+                "region": {"type": "string"},
+                "city": {"type": "string"}
+              }
+            }
+          },
+          "required": ["run_id", "environment"],
+          "additionalProperties": true
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 50
+          },
+          "maxItems": 20,
+          "description": "Tags for categorizing events"
+        },
+        "custom_data": {
+          "type": "object",
+          "description": "Additional custom data",
+          "additionalProperties": true
+        }
+      },
+      "required": ["event_type", "metrics", "context"],
+      "additionalProperties": false
+    },
+    "response": {
+      "type": "object",
+      "properties": {
+        "logged": {
+          "type": "boolean",
+          "description": "Whether the event was successfully logged"
+        },
+        "event_id": {
+          "type": "string",
+          "description": "Unique identifier for the logged event"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when event was logged"
+        },
+        "partition_key": {
+          "type": "string",
+          "description": "Partition key for data organization"
+        },
+        "retention_policy": {
+          "type": "object",
+          "properties": {
+            "retention_days": {"type": "integer", "minimum": 1},
+            "archival_policy": {"type": "string"},
+            "anonymization_after_days": {"type": "integer"}
+          }
+        },
+        "aggregation_status": {
+          "type": "object",
+          "properties": {
+            "real_time_updated": {"type": "boolean"},
+            "hourly_batch_queued": {"type": "boolean"},
+            "daily_batch_queued": {"type": "boolean"}
+          }
+        },
+        "compliance": {
+          "type": "object",
+          "properties": {
+            "gdpr_compliant": {"type": "boolean"},
+            "ccpa_compliant": {"type": "boolean"},
+            "pii_detected": {"type": "boolean"},
+            "anonymization_applied": {"type": "boolean"}
+          }
+        },
+        "error": {
+          "$ref": "#/definitions/error"
+        }
+      },
+      "required": ["logged", "event_id", "timestamp"],
+      "additionalProperties": false
+    }
+  },
+  "definitions": {
+    "error": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "description": "Error code identifier"
+        },
+        "message": {
+          "type": "string",
+          "description": "Human-readable error message"
+        },
+        "details": {
+          "type": "object",
+          "description": "Additional error context"
+        }
+      },
+      "required": ["code", "message"],
+      "additionalProperties": false
+    }
+  }
+}

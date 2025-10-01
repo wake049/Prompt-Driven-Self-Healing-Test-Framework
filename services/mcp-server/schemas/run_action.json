@@ -1,0 +1,252 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Run Action Tool",
+  "description": "Execute a single test action with self-healing capabilities",
+  "type": "object",
+  "properties": {
+    "request": {
+      "type": "object",
+      "properties": {
+        "action_type": {
+          "type": "string",
+          "enum": [
+            "click_css",
+            "click_xpath", 
+            "type_css",
+            "type_xpath",
+            "assert_element_visible",
+            "assert_element_not_visible",
+            "assert_text_contains",
+            "assert_title_contains",
+            "select_option",
+            "wait_for_css",
+            "wait_for_xpath",
+            "scroll_to_element",
+            "hover_element",
+            "double_click",
+            "right_click",
+            "press_key",
+            "clear_field",
+            "get_text",
+            "get_attribute",
+            "switch_to_frame",
+            "switch_to_window"
+          ],
+          "description": "Type of action to execute"
+        },
+        "element_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+          "description": "Logical name of the target element"
+        },
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string",
+              "maxLength": 10000,
+              "description": "Text to type or assert"
+            },
+            "selector_override": {
+              "type": "string",
+              "maxLength": 500,
+              "description": "Override selector instead of using element repository"
+            },
+            "timeout": {
+              "type": "integer",
+              "minimum": 1000,
+              "maximum": 300000,
+              "default": 30000,
+              "description": "Timeout in milliseconds"
+            },
+            "heal_mode": {
+              "type": "string",
+              "enum": ["auto", "manual", "disabled"],
+              "default": "auto",
+              "description": "Self-healing behavior mode"
+            },
+            "retry_count": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 5,
+              "default": 3,
+              "description": "Number of retry attempts"
+            },
+            "wait_strategy": {
+              "type": "string",
+              "enum": ["visible", "clickable", "present", "text_present"],
+              "default": "visible",
+              "description": "Element wait strategy"
+            },
+            "scroll_into_view": {
+              "type": "boolean",
+              "default": true,
+              "description": "Scroll element into view before action"
+            }
+          },
+          "additionalProperties": false
+        },
+        "context": {
+          "type": "object",
+          "properties": {
+            "run_id": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Unique test run identifier"
+            },
+            "step_index": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Step number in test sequence"
+            },
+            "page_url": {
+              "type": "string",
+              "format": "uri",
+              "description": "Current page URL"
+            },
+            "session_data": {
+              "type": "object",
+              "description": "Session-specific data"
+            },
+            "screenshot_before": {
+              "type": "boolean",
+              "default": false,
+              "description": "Take screenshot before action"
+            },
+            "screenshot_after": {
+              "type": "boolean", 
+              "default": false,
+              "description": "Take screenshot after action"
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "required": ["action_type", "element_name"],
+      "additionalProperties": false
+    },
+    "response": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["success", "failure", "healed"],
+          "description": "Execution status"
+        },
+        "execution_time_ms": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Time taken to execute action"
+        },
+        "selector_used": {
+          "type": "string",
+          "description": "Final CSS/XPath selector used"
+        },
+        "healing_applied": {
+          "type": "object",
+          "properties": {
+            "original_selector": {
+              "type": "string",
+              "description": "Original selector that failed"
+            },
+            "new_selector": {
+              "type": "string", 
+              "description": "Healed selector that worked"
+            },
+            "confidence": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Confidence in healed selector"
+            },
+            "healing_strategy": {
+              "type": "string",
+              "enum": ["attribute_match", "text_match", "structure_match", "ai_generated"],
+              "description": "Strategy used for healing"
+            },
+            "review_required": {
+              "type": "boolean",
+              "description": "Whether human review is needed"
+            }
+          },
+          "required": ["original_selector", "new_selector", "confidence"],
+          "additionalProperties": false
+        },
+        "screenshots": {
+          "type": "object",
+          "properties": {
+            "before": {
+              "type": "string",
+              "description": "Base64 encoded screenshot before action"
+            },
+            "after": {
+              "type": "string",
+              "description": "Base64 encoded screenshot after action"
+            },
+            "element_highlight": {
+              "type": "string",
+              "description": "Screenshot with target element highlighted"
+            }
+          },
+          "additionalProperties": false
+        },
+        "element_info": {
+          "type": "object",
+          "properties": {
+            "tag_name": {
+              "type": "string",
+              "description": "HTML tag name"
+            },
+            "attributes": {
+              "type": "object",
+              "description": "Element attributes"
+            },
+            "text_content": {
+              "type": "string",
+              "description": "Element text content"
+            },
+            "position": {
+              "type": "object",
+              "properties": {
+                "x": {"type": "number"},
+                "y": {"type": "number"},
+                "width": {"type": "number"},
+                "height": {"type": "number"}
+              },
+              "required": ["x", "y", "width", "height"]
+            }
+          },
+          "additionalProperties": false
+        },
+        "error": {
+          "$ref": "#/definitions/error"
+        }
+      },
+      "required": ["status", "execution_time_ms"],
+      "additionalProperties": false
+    }
+  },
+  "definitions": {
+    "error": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "description": "Error code identifier"
+        },
+        "message": {
+          "type": "string",
+          "description": "Human-readable error message"
+        },
+        "details": {
+          "type": "object",
+          "description": "Additional error context"
+        }
+      },
+      "required": ["code", "message"],
+      "additionalProperties": false
+    }
+  }
+}

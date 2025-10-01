@@ -1,0 +1,239 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Bulk Generate Locators Tool",
+  "description": "Generate multiple element locators using AI",
+  "type": "object",
+  "properties": {
+    "request": {
+      "type": "object",
+      "properties": {
+        "element_names": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$"
+          },
+          "minItems": 1,
+          "maxItems": 50,
+          "uniqueItems": true,
+          "description": "List of element names to generate locators for"
+        },
+        "page_context": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "format": "uri",
+              "description": "Target page URL"
+            },
+            "title": {
+              "type": "string",
+              "maxLength": 200,
+              "description": "Page title"
+            },
+            "html_content": {
+              "type": "string",
+              "maxLength": 1000000,
+              "description": "Page HTML content for analysis"
+            },
+            "screenshot": {
+              "type": "string",
+              "description": "Base64 encoded screenshot"
+            },
+            "viewport": {
+              "type": "object",
+              "properties": {
+                "width": {"type": "integer", "minimum": 320},
+                "height": {"type": "integer", "minimum": 240}
+              },
+              "required": ["width", "height"]
+            },
+            "application_type": {
+              "type": "string",
+              "enum": ["web", "mobile_web", "spa", "ecommerce", "portal", "dashboard"],
+              "description": "Type of application"
+            },
+            "framework": {
+              "type": "string",
+              "enum": ["react", "angular", "vue", "jquery", "vanilla", "unknown"],
+              "description": "Frontend framework used"
+            }
+          },
+          "required": ["url"],
+          "additionalProperties": true
+        },
+        "generation_options": {
+          "type": "object",
+          "properties": {
+            "selector_types": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": ["css", "xpath", "id", "class", "name", "data-testid"]
+              },
+              "default": ["css", "xpath"],
+              "description": "Preferred selector types"
+            },
+            "confidence_threshold": {
+              "type": "number",
+              "minimum": 0.1,
+              "maximum": 1.0,
+              "default": 0.8,
+              "description": "Minimum confidence score for auto-approval"
+            },
+            "include_alternatives": {
+              "type": "boolean",
+              "default": true,
+              "description": "Generate alternative selectors"
+            },
+            "semantic_analysis": {
+              "type": "boolean",
+              "default": true,
+              "description": "Use semantic element analysis"
+            },
+            "visual_analysis": {
+              "type": "boolean",
+              "default": false,
+              "description": "Use visual/screenshot analysis"
+            },
+            "max_alternatives": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10,
+              "default": 3,
+              "description": "Maximum alternative selectors per element"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": ["element_names", "page_context"],
+      "additionalProperties": false
+    },
+    "response": {
+      "type": "object",
+      "properties": {
+        "locators": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "element_name": {
+                "type": "string",
+                "description": "Element logical name"
+              },
+              "selector": {
+                "type": "string",
+                "description": "Primary generated selector"
+              },
+              "selector_type": {
+                "type": "string",
+                "enum": ["css", "xpath", "id", "class", "name", "data-testid"]
+              },
+              "confidence": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "description": "AI confidence score"
+              },
+              "ai_reasoning": {
+                "type": "string",
+                "description": "AI explanation for selector choice"
+              },
+              "alternatives": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "selector": {"type": "string"},
+                    "selector_type": {"type": "string"},
+                    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                    "reasoning": {"type": "string"}
+                  },
+                  "required": ["selector", "selector_type", "confidence"]
+                }
+              },
+              "element_attributes": {
+                "type": "object",
+                "description": "Detected element attributes"
+              },
+              "semantic_info": {
+                "type": "object",
+                "properties": {
+                  "element_type": {"type": "string"},
+                  "purpose": {"type": "string"},
+                  "form_association": {"type": "string"},
+                  "accessibility_labels": {"type": "array", "items": {"type": "string"}}
+                }
+              }
+            },
+            "required": ["element_name", "selector", "selector_type", "confidence"],
+            "additionalProperties": false
+          }
+        },
+        "batch_confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Overall confidence for the batch"
+        },
+        "review_required": {
+          "type": "boolean",
+          "description": "Whether human review is required"
+        },
+        "estimated_review_time_minutes": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Estimated time for human review"
+        },
+        "generation_metadata": {
+          "type": "object",
+          "properties": {
+            "model_version": {"type": "string"},
+            "processing_time_ms": {"type": "number"},
+            "html_size_bytes": {"type": "integer"},
+            "elements_analyzed": {"type": "integer"},
+            "success_count": {"type": "integer"},
+            "failure_count": {"type": "integer"}
+          }
+        },
+        "quality_metrics": {
+          "type": "object",
+          "properties": {
+            "uniqueness_score": {"type": "number", "minimum": 0, "maximum": 1},
+            "stability_score": {"type": "number", "minimum": 0, "maximum": 1},
+            "maintainability_score": {"type": "number", "minimum": 0, "maximum": 1}
+          }
+        },
+        "error": {
+          "$ref": "#/definitions/error"
+        }
+      },
+      "required": ["locators", "batch_confidence", "review_required"],
+      "additionalProperties": false
+    }
+  },
+  "definitions": {
+    "error": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "description": "Error code identifier"
+        },
+        "message": {
+          "type": "string",
+          "description": "Human-readable error message"
+        },
+        "details": {
+          "type": "object",
+          "description": "Additional error context"
+        }
+      },
+      "required": ["code", "message"],
+      "additionalProperties": false
+    }
+  }
+}

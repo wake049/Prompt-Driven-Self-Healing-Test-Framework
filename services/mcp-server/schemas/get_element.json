@@ -1,0 +1,186 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Get Element Tool", 
+  "description": "Retrieve element locator from repository",
+  "type": "object",
+  "properties": {
+    "request": {
+      "type": "object",
+      "properties": {
+        "element_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+          "description": "Logical name of the element to retrieve"
+        },
+        "context": {
+          "type": "object",
+          "properties": {
+            "page_url": {
+              "type": "string",
+              "format": "uri",
+              "description": "Current page URL for context"
+            },
+            "page_title": {
+              "type": "string",
+              "maxLength": 200,
+              "description": "Current page title"
+            },
+            "application": {
+              "type": "string",
+              "maxLength": 50,
+              "description": "Application identifier"
+            },
+            "environment": {
+              "type": "string",
+              "enum": ["development", "staging", "production"],
+              "description": "Environment context"
+            },
+            "browser": {
+              "type": "string",
+              "enum": ["chrome", "firefox", "safari", "edge"],
+              "description": "Browser type"
+            },
+            "viewport": {
+              "type": "object",
+              "properties": {
+                "width": {"type": "integer", "minimum": 320},
+                "height": {"type": "integer", "minimum": 240}
+              },
+              "description": "Viewport dimensions"
+            }
+          },
+          "additionalProperties": true
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "include_history": {
+              "type": "boolean",
+              "default": false,
+              "description": "Include element change history"
+            },
+            "include_alternatives": {
+              "type": "boolean", 
+              "default": false,
+              "description": "Include alternative selectors"
+            },
+            "validate_presence": {
+              "type": "boolean",
+              "default": false,
+              "description": "Validate element exists on current page"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": ["element_name"],
+      "additionalProperties": false
+    },
+    "response": {
+      "type": "object",
+      "properties": {
+        "element_name": {
+          "type": "string",
+          "description": "Element logical name"
+        },
+        "selector": {
+          "type": "string",
+          "description": "Primary CSS or XPath selector"
+        },
+        "selector_type": {
+          "type": "string",
+          "enum": ["css", "xpath", "id", "class", "name", "tag"],
+          "description": "Type of selector"
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Confidence score for selector reliability"
+        },
+        "last_updated": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When element was last updated"
+        },
+        "last_validated": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When element was last validated"
+        },
+        "alternatives": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "selector": {"type": "string"},
+              "selector_type": {"type": "string"},
+              "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+              "description": {"type": "string"}
+            },
+            "required": ["selector", "selector_type", "confidence"]
+          },
+          "description": "Alternative selectors for the element"
+        },
+        "metadata": {
+          "type": "object",
+          "properties": {
+            "created_by": {"type": "string"},
+            "created_at": {"type": "string", "format": "date-time"},
+            "approval_status": {
+              "type": "string",
+              "enum": ["pending", "approved", "rejected", "auto_approved"]
+            },
+            "usage_count": {"type": "integer", "minimum": 0},
+            "success_rate": {"type": "number", "minimum": 0, "maximum": 1},
+            "tags": {
+              "type": "array",
+              "items": {"type": "string"},
+              "description": "Element tags for categorization"
+            }
+          },
+          "additionalProperties": true
+        },
+        "validation_result": {
+          "type": "object",
+          "properties": {
+            "is_present": {"type": "boolean"},
+            "is_visible": {"type": "boolean"},
+            "is_clickable": {"type": "boolean"},
+            "element_count": {"type": "integer", "minimum": 0},
+            "validation_time": {"type": "string", "format": "date-time"}
+          },
+          "description": "Real-time validation results if requested"
+        },
+        "error": {
+          "$ref": "#/definitions/error"
+        }
+      },
+      "required": ["element_name", "selector", "selector_type", "confidence"],
+      "additionalProperties": false
+    }
+  },
+  "definitions": {
+    "error": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "description": "Error code identifier"
+        },
+        "message": {
+          "type": "string",
+          "description": "Human-readable error message"
+        },
+        "details": {
+          "type": "object",
+          "description": "Additional error context"
+        }
+      },
+      "required": ["code", "message"],
+      "additionalProperties": false
+    }
+  }
+}

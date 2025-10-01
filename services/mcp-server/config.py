@@ -26,6 +26,13 @@ class MCPConfig(BaseSettings):
     tool_call_timeout: int = Field(default=30000, description="Tool call timeout in milliseconds")
     connection_timeout: int = Field(default=5000, description="Connection timeout in milliseconds")
     request_timeout: int = Field(default=10000, description="Request timeout in milliseconds")
+    request_timeout_ms: int = Field(default=10000, description="Request timeout in milliseconds (alias)")
+    
+    def __post_init__(self):
+        """Post-initialization to sync timeout values"""
+        # Ensure request_timeout_ms and request_timeout are synchronized
+        if hasattr(self, 'request_timeout_ms') and self.request_timeout_ms != self.request_timeout:
+            self.request_timeout = self.request_timeout_ms
     
     # Performance settings
     max_concurrent_tools: int = Field(default=100, description="Maximum concurrent tool calls")

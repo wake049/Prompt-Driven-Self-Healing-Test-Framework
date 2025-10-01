@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Get Repository Stats Tool Schema",
+  "description": "Schema for getting repository statistics",
+  "type": "object", 
+  "properties": {
+    "include_cache_stats": {
+      "type": "boolean",
+      "description": "Include cache performance statistics",
+      "default": false
+    },
+    "include_approval_stats": {
+      "type": "boolean", 
+      "description": "Include approval workflow statistics",
+      "default": false
+    }
+  },
+  "additionalProperties": false
+}

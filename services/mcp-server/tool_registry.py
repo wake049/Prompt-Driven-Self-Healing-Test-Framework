@@ -9,7 +9,10 @@ from typing import Dict, List, Optional, Callable, Any
 from dataclasses import dataclass, field
 from enum import Enum
 import inspect
-from datetime import datetime
+from datetime import datetime, timezone
+
+from schema_validator import validate_tool_request, validate_tool_response
+from error_model import ErrorFactory, ErrorCode, MCPError
 
 logger = logging.getLogger(__name__)
 
@@ -178,32 +181,70 @@ class ToolRegistry:
         return matches
     
     async def call_tool(self, name: str, *args, **kwargs) -> Any:
-        """Call a registered tool"""
+        """Call a registered tool with schema validation"""
         if name not in self._tools:
-            raise ValueError(f"Tool '{name}' is not registered")
+            error = ErrorFactory.not_found_error(
+                code=ErrorCode.TOOL_NOT_FOUND,
+                message=f"Tool '{name}' is not registered",
+                resource_type="tool",
+                resource_id=name
+            )
+            raise ValueError(error.message)
         
         func = self._tools[name]
         metadata = self._metadata[name]
+        
+        # Validate input parameters against schema
+        if kwargs:  # Only validate if we have keyword arguments
+            validation_error = validate_tool_request(name, kwargs)
+            if validation_error:
+                logger.error(f"Input validation failed for tool '{name}': {validation_error.message}")
+                raise ValueError(f"Input validation failed: {validation_error.message}")
         
         try:
             # Handle async and sync functions
             if inspect.iscoroutinefunction(func):
                 # Async function with timeout
-                return await asyncio.wait_for(
+                result = await asyncio.wait_for(
                     func(*args, **kwargs),
                     timeout=metadata.timeout_ms / 1000
                 )
             else:
                 # Sync function - run in executor with timeout
-                return await asyncio.wait_for(
+                result = await asyncio.wait_for(
                     asyncio.get_event_loop().run_in_executor(None, func, *args, **kwargs),
                     timeout=metadata.timeout_ms / 1000
                 )
+            
+            # Validate output against schema
+            if result and isinstance(result, dict):
+                validation_error = validate_tool_response(name, result)
+                if validation_error:
+                    logger.warning(f"Output validation failed for tool '{name}': {validation_error.message}")
+                    # Don't fail the request for output validation errors, just log them
+                    # In production, you might want to handle this differently
+            
+            return result
+            
         except asyncio.TimeoutError:
-            raise TimeoutError(f"Tool '{name}' timed out after {metadata.timeout_ms}ms")
+            error = ErrorFactory.timeout_error(
+                code=ErrorCode.TOOL_EXECUTION_TIMEOUT,
+                message=f"Tool '{name}' timed out after {metadata.timeout_ms}ms",
+                timeout_ms=metadata.timeout_ms,
+                operation=f"tool_execution_{name}"
+            )
+            raise TimeoutError(error.message)
+        except ValueError:
+            # Re-raise validation errors as-is
+            raise
         except Exception as e:
             logger.error(f"Error calling tool '{name}': {e}")
-            raise
+            error = ErrorFactory.tool_execution_error(
+                code=ErrorCode.UNEXPECTED_ERROR,
+                message=f"Unexpected error during tool execution: {str(e)}",
+                tool_name=name
+            )
+            raise Exception(error.message)
     
     def get_registry_stats(self) -> dict:
         """Get registry statistics"""
@@ -269,6 +310,67 @@ class ToolRegistry:
             )
         )
         
+        # Element Repository management tools
+        self.register_tool(
+            "create_element",
+            self._create_element_tool,
+            ToolMetadata(
+                name="create_element",
+                description="Create new element with initial locator version",
+                category=ToolCategory.ELEMENT_REPOSITORY,
+                timeout_ms=5000,
+                tags=["element", "creation", "repository"]
+            )
+        )
+        
+        self.register_tool(
+            "add_element_version",
+            self._add_element_version_tool,
+            ToolMetadata(
+                name="add_element_version",
+                description="Add new version to existing element",
+                category=ToolCategory.ELEMENT_REPOSITORY,
+                timeout_ms=5000,
+                tags=["element", "versioning", "repository"]
+            )
+        )
+        
+        self.register_tool(
+            "approve_element_version",
+            self._approve_element_version_tool,
+            ToolMetadata(
+                name="approve_element_version",
+                description="Approve pending element version",
+                category=ToolCategory.ELEMENT_REPOSITORY,
+                timeout_ms=5000,
+                tags=["element", "approval", "workflow"]
+            )
+        )
+        
+        self.register_tool(
+            "search_elements",
+            self._search_elements_tool,
+            ToolMetadata(
+                name="search_elements",
+                description="Search elements by name or selector",
+                category=ToolCategory.ELEMENT_REPOSITORY,
+                timeout_ms=5000,
+                tags=["element", "search", "repository"]
+            )
+        )
+        
+        self.register_tool(
+            "get_repository_stats",
+            self._get_repository_stats_tool,
+            ToolMetadata(
+                name="get_repository_stats",
+                description="Get element repository statistics and health",
+                category=ToolCategory.ELEMENT_REPOSITORY,
+                timeout_ms=2000,
+                tags=["repository", "stats", "monitoring"]
+            )
+        )
+        
         # Analytics tools
         self.register_tool(
             "analytics_log",
@@ -289,47 +391,418 @@ class ToolRegistry:
         pass
     
     # Tool implementations (stubs for now)
-    async def _run_action_tool(self, action_type: str, element_name: str, parameters: dict) -> dict:
+    async def _run_action_tool(self, action_type: str, element_name: str, parameters: dict = None, context: dict = None) -> dict:
         """Run action tool implementation"""
+        # Simulate execution time
+        await asyncio.sleep(0.5)
+        
         return {
             "status": "success",
             "execution_time_ms": 1250,
             "selector_used": f"#{element_name}",
-            "message": f"Executed {action_type} on {element_name}"
+            "healing_applied": {
+                "original_selector": f"#{element_name}",
+                "new_selector": f"#{element_name}",
+                "confidence": 1.0,
+                "healing_strategy": "attribute_match",
+                "review_required": False
+            },
+            "screenshots": {},
+            "element_info": {
+                "tag_name": "button",
+                "attributes": {"id": element_name, "class": "btn btn-primary"},
+                "text_content": "Login",
+                "position": {"x": 100, "y": 200, "width": 80, "height": 32}
+            }
         }
     
-    async def _get_element_tool(self, element_name: str, context: dict = None) -> dict:
-        """Get element tool implementation"""
-        return {
+    async def _get_element_tool(self, element_name: str, context: dict = None, options: dict = None) -> dict:
+        """Get element tool implementation using Element Repository"""
+        from element_repository import get_repository
+        
+        # Get repository instance
+        repo = await get_repository()
+        
+        # Check options
+        include_alternatives = options.get("include_alternatives", False) if options else False
+        validate_presence = options.get("validate_presence", False) if options else False
+        include_stats = options.get("include_stats", False) if options else False
+        
+        # Get element from repository
+        element_record = await repo.get_element(element_name)
+        
+        if not element_record:
+            # Element not found - return mock for compatibility (or could raise error)
+            return {
+                "element_name": element_name,
+                "found": False,
+                "error": f"Element '{element_name}' not found in repository",
+                "selector": None,
+                "confidence": 0.0,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+        
+        # Get active version
+        active_version = element_record.get_active_version()
+        if not active_version:
+            return {
+                "element_name": element_name,
+                "found": False,
+                "error": f"Element '{element_name}' has no active version",
+                "selector": None,
+                "confidence": 0.0,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+        
+        # Build response
+        result = {
             "element_name": element_name,
-            "selector": f"#{element_name}",
+            "found": True,
+            "selector": active_version.css_selector,
             "selector_type": "css",
-            "confidence": 0.95,
-            "last_updated": datetime.now().isoformat()
+            "confidence": active_version.confidence_score,
+            "version": active_version.version,
+            "status": active_version.status.value,
+            "last_updated": element_record.updated_at or element_record.created_at,
+            "last_used": active_version.last_used,
+            "created_at": element_record.created_at,
+            "created_by": active_version.created_by,
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
+        
+        # Add xpath if available
+        if active_version.xpath_selector:
+            result["xpath_selector"] = active_version.xpath_selector
+        
+        # Add alternatives if requested
+        if include_alternatives and active_version.alternatives:
+            result["alternatives"] = [
+                {
+                    "selector": alt,
+                    "selector_type": "css",
+                    "confidence": active_version.confidence_score * 0.9,  # Slightly lower confidence
+                    "description": f"Alternative selector for {element_name}"
+                }
+                for alt in active_version.alternatives
+            ]
+        
+        # Add usage statistics if requested
+        if include_stats:
+            result["stats"] = {
+                "usage_count": active_version.usage_count,
+                "success_rate": active_version.success_rate,
+                "total_versions": len(element_record.versions),
+                "approval_status": active_version.approval_status.value
+            }
+        
+        # Add AI reasoning if available
+        if active_version.ai_reasoning:
+            result["ai_reasoning"] = active_version.ai_reasoning
+        
+        # Add validation results if present validation was requested
+        if validate_presence and active_version.validation_results:
+            result["validation"] = active_version.validation_results
+        
+        # Add page context if available
+        if element_record.page_context:
+            result["page_context"] = element_record.page_context
+        
+        # Add tags if available
+        if element_record.tags:
+            result["tags"] = element_record.tags
+        
+        return result
     
-    async def _bulk_generate_locators_tool(self, element_names: List[str], page_context: dict) -> dict:
+    async def _bulk_generate_locators_tool(self, element_names: List[str], page_context: dict, generation_options: dict = None) -> dict:
         """Bulk generate locators tool implementation"""
+        # Simulate AI processing time
+        await asyncio.sleep(2.0)
+        
+        # Generate mock locators for the provided element names
         locators = []
-        for name in element_names:
+        
+        for i, name in enumerate(element_names):
             locators.append({
                 "element_name": name,
                 "selector": f"#{name}",
-                "confidence": 0.87,
-                "ai_reasoning": f"Primary element with ID matching {name}"
+                "selector_type": "css",
+                "confidence": 0.87 + (i * 0.02),  # Vary confidence slightly
+                "ai_reasoning": f"Identified based on ID attribute matching {name}",
+                "alternatives": [
+                    {
+                        "selector": f"button[data-testid='{name}']",
+                        "selector_type": "css",
+                        "confidence": 0.82,
+                        "reasoning": "Alternative using data-testid attribute"
+                    }
+                ],
+                "element_attributes": {
+                    "id": name,
+                    "class": "btn btn-primary"
+                },
+                "semantic_info": {
+                    "element_type": "button" if "button" in name else "input",
+                    "purpose": "Primary action element",
+                    "form_association": "login_form" if "login" in name else "general_form",
+                    "accessibility_labels": [name.replace('_', ' ').title()]
+                }
             })
         
         return {
             "locators": locators,
-            "batch_confidence": 0.87,
+            "batch_confidence": 0.89,
             "review_required": False,
-            "estimated_review_time_minutes": 5
+            "estimated_review_time_minutes": 5,
+            "generation_metadata": {
+                "model_version": "v1.0.0",
+                "processing_time_ms": 2000.0,
+                "html_size_bytes": 150000,
+                "elements_analyzed": 45,
+                "success_count": len(locators),
+                "failure_count": 0
+            },
+            "quality_metrics": {
+                "uniqueness_score": 0.95,
+                "stability_score": 0.88,
+                "maintainability_score": 0.92
+            }
         }
     
-    async def _analytics_log_tool(self, event_type: str, metrics: dict, context: dict) -> dict:
+    async def _analytics_log_tool(self, event_type: str, metrics: dict, context: dict, tags: list = None, custom_data: dict = None) -> dict:
         """Analytics log tool implementation"""
+        # Simulate logging time
+        await asyncio.sleep(0.05)
+        
+        event_id = f"evt_{int(datetime.now().timestamp() * 1000)}"
+        
         return {
             "logged": True,
-            "event_id": f"evt_{datetime.now().timestamp()}",
-            "timestamp": datetime.now().isoformat()
+            "event_id": event_id,
+            "timestamp": datetime.now().isoformat(),
+            "partition_key": f"{context.get('environment', 'dev')}_{context.get('application', 'test')}",
+            "retention_policy": {
+                "retention_days": 90,
+                "archival_policy": "compress_and_archive",
+                "anonymization_after_days": 365
+            },
+            "aggregation_status": {
+                "real_time_updated": True,
+                "hourly_batch_queued": True,
+                "daily_batch_queued": True
+            },
+            "compliance": {
+                "gdpr_compliant": True,
+                "ccpa_compliant": True,
+                "pii_detected": False,
+                "anonymization_applied": False
+            }
         }
+    
+    # Element Repository Management Tools
+    
+    async def _create_element_tool(self, element_name: str, css_selector: str, 
+                                 xpath_selector: str = None, alternatives: List[str] = None,
+                                 created_by: str = "system", ai_reasoning: str = None) -> dict:
+        """Create new element with initial locator version"""
+        from element_repository import get_repository
+        
+        try:
+            repo = await get_repository()
+            
+            # Create new element
+            record = await repo.create_element(
+                element_name=element_name,
+                css_selector=css_selector,
+                xpath_selector=xpath_selector,
+                alternatives=alternatives or [],
+                created_by=created_by,
+                ai_reasoning=ai_reasoning
+            )
+            
+            active_version = record.get_active_version() or record.get_latest_version()
+            
+            return {
+                "success": True,
+                "element_name": element_name,
+                "version": active_version.version if active_version else 1,
+                "status": active_version.status.value if active_version else "draft",
+                "approval_status": active_version.approval_status.value if active_version else "pending",
+                "created_at": record.created_at,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+            
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e),
+                "element_name": element_name,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+    
+    async def _add_element_version_tool(self, element_name: str, css_selector: str,
+                                      xpath_selector: str = None, alternatives: List[str] = None,
+                                      created_by: str = "system", ai_reasoning: str = None,
+                                      confidence_score: float = 0.0) -> dict:
+        """Add new version to existing element"""
+        from element_repository import get_repository
+        
+        try:
+            repo = await get_repository()
+            
+            # Add new version
+            version = await repo.add_version(
+                element_name=element_name,
+                css_selector=css_selector,
+                xpath_selector=xpath_selector,
+                alternatives=alternatives or [],
+                created_by=created_by,
+                ai_reasoning=ai_reasoning,
+                confidence_score=confidence_score
+            )
+            
+            return {
+                "success": True,
+                "element_name": element_name,
+                "version": version.version,
+                "status": version.status.value,
+                "approval_status": version.approval_status.value,
+                "confidence_score": version.confidence_score,
+                "created_at": version.created_at,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+            
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e),
+                "element_name": element_name,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+    
+    async def _approve_element_version_tool(self, element_name: str, version: int, 
+                                          approver: str = "system") -> dict:
+        """Approve pending element version"""
+        from element_repository import get_repository
+        
+        try:
+            repo = await get_repository()
+            
+            # Approve version
+            success = await repo.approve_version(
+                element_name=element_name,
+                version=version,
+                approver=approver
+            )
+            
+            if success:
+                return {
+                    "success": True,
+                    "element_name": element_name,
+                    "version": version,
+                    "approved_by": approver,
+                    "approved_at": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                }
+            else:
+                return {
+                    "success": False,
+                    "error": "Approval failed - version not found or not pending",
+                    "element_name": element_name,
+                    "version": version,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                }
+                
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e),
+                "element_name": element_name,
+                "version": version,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+    
+    async def _search_elements_tool(self, query: str, limit: int = 50) -> dict:
+        """Search elements by name or selector"""
+        from element_repository import get_repository
+        
+        try:
+            repo = await get_repository()
+            
+            # Search elements
+            results = await repo.search_elements(query=query, limit=limit)
+            
+            # Format results
+            elements = []
+            for record in results:
+                active_version = record.get_active_version()
+                elements.append({
+                    "element_name": record.element_name,
+                    "selector": active_version.css_selector if active_version else None,
+                    "version": active_version.version if active_version else 0,
+                    "status": active_version.status.value if active_version else "no_active",
+                    "confidence": active_version.confidence_score if active_version else 0.0,
+                    "usage_count": active_version.usage_count if active_version else 0,
+                    "success_rate": active_version.success_rate if active_version else 0.0,
+                    "last_used": active_version.last_used if active_version else None,
+                    "tags": record.tags,
+                    "created_at": record.created_at
+                })
+            
+            return {
+                "success": True,
+                "query": query,
+                "total_results": len(elements),
+                "limit": limit,
+                "elements": elements,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+            
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e),
+                "query": query,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+    
+    async def _get_repository_stats_tool(self) -> dict:
+        """Get element repository statistics and health"""
+        from element_repository import get_repository
+        
+        try:
+            repo = await get_repository()
+            
+            # Get comprehensive stats
+            stats = await repo.get_stats()
+            pending_approvals = await repo.get_pending_approvals()
+            
+            # Add additional computed metrics
+            stats["pending_approvals_count"] = len(pending_approvals)
+            stats["pending_approvals"] = [
+                {
+                    "element_name": name,
+                    "version": version.version,
+                    "created_at": version.created_at,
+                    "created_by": version.created_by,
+                    "confidence_score": version.confidence_score
+                }
+                for name, version in pending_approvals[:10]  # Limit to first 10
+            ]
+            
+            return {
+                "success": True,
+                "stats": stats,
+                "health": {
+                    "status": "healthy" if stats["total_elements"] > 0 else "empty",
+                    "cache_hit_ratio": stats["cache_stats"]["hit_ratio"],
+                    "pending_approval_ratio": stats["pending_approvals_count"] / max(stats["total_versions"], 1)
+                },
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+            
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e),
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }

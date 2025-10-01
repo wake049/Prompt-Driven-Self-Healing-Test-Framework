@@ -1,0 +1,34 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Search Elements Tool Schema",
+  "description": "Schema for searching elements in repository", 
+  "type": "object",
+  "properties": {
+    "query": {
+      "type": "string",
+      "description": "Search query (name pattern or partial match)",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "element_type": {
+      "type": "string",
+      "description": "Filter by element type",
+      "enum": ["button", "input", "link", "text", "image", "form", "dropdown", "checkbox", "radio", "other"],
+      "default": null
+    },
+    "status": {
+      "type": "string", 
+      "description": "Filter by approval status",
+      "enum": ["pending", "approved", "rejected"],
+      "default": null
+    },
+    "limit": {
+      "type": "integer",
+      "description": "Maximum number of results",
+      "minimum": 1,
+      "maximum": 100,
+      "default": 10
+    }
+  },
+  "additionalProperties": false
+}

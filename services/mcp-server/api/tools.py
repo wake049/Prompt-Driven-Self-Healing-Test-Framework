@@ -3,10 +3,16 @@ Tools API Endpoints
 Provides access to MCP tool registry and tool execution
 """
 
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Request, HTTPException, Depends
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel
 import logging
+
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+from error_model import MCPError, get_http_status_code, ErrorCode
+from auth_middleware import get_current_auth, get_request_context
 
 logger = logging.getLogger(__name__)
 
@@ -119,21 +125,44 @@ async def search_tools(request: Request, search_request: ToolSearchRequest) -> D
 
 
 @router.post("/tools/call")
-async def call_tool(request: Request, tool_request: ToolCallRequest) -> Dict[str, Any]:
+async def call_tool(
+    request: Request, 
+    tool_request: ToolCallRequest,
+    auth: Optional[dict] = Depends(get_current_auth)
+) -> Dict[str, Any]:
     """
     Execute a tool with given parameters
     """
     try:
         mcp_server = request.app.state.mcp_server
+        
+        # Add request context and auth to tool context
+        context = tool_request.context or {}
+        context.update(get_request_context(request))
+        if auth:
+            context["auth"] = auth
+        
         result = await mcp_server.handle_tool_call(
             tool_request.tool_name,
             tool_request.parameters,
-            tool_request.context
+            context
         )
         
         if result.get("status") == "error":
-            # Return error with appropriate HTTP status
-            raise HTTPException(status_code=400, detail=result.get("error"))
+            error_data = result.get("error")
+            
+            # If error_data is an MCPError dict, use its HTTP status code
+            if isinstance(error_data, dict) and "code" in error_data:
+                try:
+                    error_code = ErrorCode(error_data["code"])
+                    status_code = get_http_status_code(error_code)
+                    raise HTTPException(status_code=status_code, detail=error_data)
+                except ValueError:
+                    # Unknown error code, default to 500
+                    raise HTTPException(status_code=500, detail=error_data)
+            else:
+                # Legacy error format
+                raise HTTPException(status_code=400, detail=error_data)
         
         return result
     except HTTPException:

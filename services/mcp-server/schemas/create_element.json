@@ -1,0 +1,48 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Create Element Tool Schema",
+  "description": "Schema for creating new element with initial locator version",
+  "type": "object",
+  "properties": {
+    "element_name": {
+      "type": "string",
+      "description": "Unique name for the element",
+      "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+      "minLength": 1,
+      "maxLength": 100
+    },
+    "css_selector": {
+      "type": "string",
+      "description": "CSS selector for the element",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "xpath_selector": {
+      "type": ["string", "null"],
+      "description": "Optional XPath selector for the element",
+      "maxLength": 1000
+    },
+    "alternatives": {
+      "type": "array",
+      "description": "Alternative selectors for the element",
+      "items": {
+        "type": "string",
+        "maxLength": 500
+      },
+      "maxItems": 10
+    },
+    "created_by": {
+      "type": "string",
+      "description": "Creator of the element",
+      "default": "system",
+      "maxLength": 100
+    },
+    "ai_reasoning": {
+      "type": ["string", "null"],
+      "description": "AI reasoning for the selector choice",
+      "maxLength": 2000
+    }
+  },
+  "required": ["element_name", "css_selector"],
+  "additionalProperties": false
+}

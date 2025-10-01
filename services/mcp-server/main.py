@@ -17,6 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from config import MCPConfig
 from server import MCPServer
 from tool_registry import ToolRegistry
+from auth_middleware import AuthMiddleware
 
 
 # Configure logging
@@ -43,10 +44,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     mcp_server = MCPServer(config, tool_registry)
     await mcp_server.start()
     
+    # Initialize auth middleware
+    auth_middleware = AuthMiddleware(config)
+    
     # Store in app state for access in endpoints
     app.state.config = config
     app.state.mcp_server = mcp_server
     app.state.tool_registry = tool_registry
+    app.state.auth_middleware = auth_middleware
     
     logger.info(f"MCP Server started on port {config.port}")
     yield
@@ -75,6 +80,20 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    
+    # Add authentication middleware
+    from auth_middleware import AuthMiddleware
+    
+    @app.middleware("http")
+    async def auth_middleware_handler(request, call_next):
+        """Apply authentication middleware to all requests"""
+        # Get auth middleware from app state (will be set during startup)
+        if hasattr(app.state, 'auth_middleware'):
+            auth_middleware = app.state.auth_middleware
+            return await auth_middleware(request, call_next)
+        else:
+            # During startup, auth middleware not yet available
+            return await call_next(request)
     
     # Include API routes
     from api import health, version, tools
