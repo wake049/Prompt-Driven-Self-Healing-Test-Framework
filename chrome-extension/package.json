@@ -1,0 +1,17 @@
+{
+  "name": "mcp-test-runner-extension",
+  "version": "1.0.0",
+  "description": "Chrome Extension with MCP-style tools for test automation",
+  "type": "module",
+  "scripts": {
+    "dev": "vite build --watch --mode development",
+    "build": "vite build",
+    "type-check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.270",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.2.2",
+    "vite": "^5.0.0"
+  }
+}

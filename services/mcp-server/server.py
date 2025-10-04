@@ -173,7 +173,7 @@ class MCPServer:
             }
             
             # Validate response against schema
-            response_validation_error = validate_tool_response(tool_name, response_data)
+            response_validation_error = validate_tool_response(tool_name, result)
             if response_validation_error:
                 logger.error(f"Response validation failed for '{tool_name}': {response_validation_error.message}")
                 # Continue with response but log the validation error

@@ -69,6 +69,7 @@ class ElementRecord:
     element_name: str
     versions: List[LocatorVersion]
     active_version: int
+    element_type: Optional[str] = None
     description: Optional[str] = None
     tags: List[str] = None
     page_context: Optional[Dict] = None
@@ -270,7 +271,9 @@ class ElementRepository:
                            xpath_selector: Optional[str] = None,
                            alternatives: List[str] = None,
                            created_by: str = "system",
-                           ai_reasoning: Optional[str] = None) -> ElementRecord:
+                           ai_reasoning: Optional[str] = None,
+                           element_type: Optional[str] = None,
+                           description: Optional[str] = None) -> ElementRecord:
         """Create new element with initial version"""
         
         async with self._lock:
@@ -298,6 +301,8 @@ class ElementRepository:
             # Create element record
             record = ElementRecord(
                 element_name=element_name,
+                element_type=element_type,
+                description=description,
                 versions=[version],
                 active_version=1 if version.status == LocatorStatus.ACTIVE else 0
             )
@@ -490,12 +495,19 @@ class ElementRepository:
                 # Reconstruct versions
                 versions = []
                 for version_data in element_data['versions']:
+                    # Convert string enums back to enum objects
+                    if 'status' in version_data and isinstance(version_data['status'], str):
+                        version_data['status'] = LocatorStatus(version_data['status'])
+                    if 'approval_status' in version_data and isinstance(version_data['approval_status'], str):
+                        version_data['approval_status'] = ApprovalStatus(version_data['approval_status'])
+                    
                     version = LocatorVersion(**version_data)
                     versions.append(version)
                 
                 # Reconstruct element record
                 record = ElementRecord(
                     element_name=element_name,
+                    element_type=element_data.get('element_type'),
                     versions=versions,
                     active_version=element_data['active_version'],
                     description=element_data.get('description'),

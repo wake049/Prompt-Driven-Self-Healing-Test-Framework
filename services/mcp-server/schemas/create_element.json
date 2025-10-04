@@ -4,45 +4,74 @@
   "description": "Schema for creating new element with initial locator version",
   "type": "object",
   "properties": {
-    "element_name": {
-      "type": "string",
-      "description": "Unique name for the element",
-      "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
-      "minLength": 1,
-      "maxLength": 100
-    },
-    "css_selector": {
-      "type": "string",
-      "description": "CSS selector for the element",
-      "minLength": 1,
-      "maxLength": 500
-    },
-    "xpath_selector": {
-      "type": ["string", "null"],
-      "description": "Optional XPath selector for the element",
-      "maxLength": 1000
-    },
-    "alternatives": {
-      "type": "array",
-      "description": "Alternative selectors for the element",
-      "items": {
-        "type": "string",
-        "maxLength": 500
+    "request": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Unique name for the element",
+          "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "element_type": {
+          "type": "string",
+          "description": "Type of the element",
+          "enum": ["button", "input", "link", "text", "image", "form", "dropdown", "checkbox", "radio", "other"]
+        },
+        "selector": {
+          "type": "string",
+          "description": "Primary selector for the element",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "description": {
+          "type": "string",
+          "description": "Optional description of the element",
+          "maxLength": 1000
+        },
+        "confidence": {
+          "type": "number",
+          "description": "Confidence score for the selector",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.9
+        },
+        "alternatives": {
+          "type": "array",
+          "description": "Alternative selectors for the element",
+          "items": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "maxItems": 10
+        }
       },
-      "maxItems": 10
+      "required": ["name", "element_type", "selector"],
+      "additionalProperties": false
     },
-    "created_by": {
-      "type": "string",
-      "description": "Creator of the element",
-      "default": "system",
-      "maxLength": 100
-    },
-    "ai_reasoning": {
-      "type": ["string", "null"],
-      "description": "AI reasoning for the selector choice",
-      "maxLength": 2000
+    "response": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["success", "error"]
+        },
+        "element": {
+          "type": "object",
+          "properties": {
+            "name": {"type": "string"},
+            "element_type": {"type": "string"},
+            "description": {"type": "string"},
+            "created_at": {"type": "string"},
+            "usage_count": {"type": "integer"},
+            "versions": {"type": "array"}
+          }
+        },
+        "message": {"type": "string"}
+      },
+      "required": ["status"]
     }
   },
-  "required": ["element_name", "css_selector"],
-  "additionalProperties": false
+  "required": ["request", "response"]
 }

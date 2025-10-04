@@ -180,25 +180,25 @@ class ToolRegistry:
         
         return matches
     
-    async def call_tool(self, name: str, *args, **kwargs) -> Any:
+    async def call_tool(self, tool_name: str, *args, **kwargs) -> Any:
         """Call a registered tool with schema validation"""
-        if name not in self._tools:
+        if tool_name not in self._tools:
             error = ErrorFactory.not_found_error(
                 code=ErrorCode.TOOL_NOT_FOUND,
-                message=f"Tool '{name}' is not registered",
+                message=f"Tool '{tool_name}' is not registered",
                 resource_type="tool",
-                resource_id=name
+                resource_id=tool_name
             )
             raise ValueError(error.message)
-        
-        func = self._tools[name]
-        metadata = self._metadata[name]
-        
+
+        func = self._tools[tool_name]
+        metadata = self._metadata[tool_name]
+
         # Validate input parameters against schema
         if kwargs:  # Only validate if we have keyword arguments
-            validation_error = validate_tool_request(name, kwargs)
+            validation_error = validate_tool_request(tool_name, kwargs)
             if validation_error:
-                logger.error(f"Input validation failed for tool '{name}': {validation_error.message}")
+                logger.error(f"Input validation failed for tool '{tool_name}': {validation_error.message}")
                 raise ValueError(f"Input validation failed: {validation_error.message}")
         
         try:
@@ -218,9 +218,9 @@ class ToolRegistry:
             
             # Validate output against schema
             if result and isinstance(result, dict):
-                validation_error = validate_tool_response(name, result)
+                validation_error = validate_tool_response(tool_name, result)
                 if validation_error:
-                    logger.warning(f"Output validation failed for tool '{name}': {validation_error.message}")
+                    logger.warning(f"Output validation failed for tool '{tool_name}': {validation_error.message}")
                     # Don't fail the request for output validation errors, just log them
                     # In production, you might want to handle this differently
             
@@ -229,20 +229,20 @@ class ToolRegistry:
         except asyncio.TimeoutError:
             error = ErrorFactory.timeout_error(
                 code=ErrorCode.TOOL_EXECUTION_TIMEOUT,
-                message=f"Tool '{name}' timed out after {metadata.timeout_ms}ms",
+                message=f"Tool '{tool_name}' timed out after {metadata.timeout_ms}ms",
                 timeout_ms=metadata.timeout_ms,
-                operation=f"tool_execution_{name}"
+                operation=f"tool_execution_{tool_name}"
             )
             raise TimeoutError(error.message)
         except ValueError:
             # Re-raise validation errors as-is
             raise
         except Exception as e:
-            logger.error(f"Error calling tool '{name}': {e}")
+            logger.error(f"Error calling tool '{tool_name}': {e}")
             error = ErrorFactory.tool_execution_error(
                 code=ErrorCode.UNEXPECTED_ERROR,
                 message=f"Unexpected error during tool execution: {str(e)}",
-                tool_name=name
+                tool_name=tool_name
             )
             raise Exception(error.message)
     
@@ -600,9 +600,9 @@ class ToolRegistry:
     
     # Element Repository Management Tools
     
-    async def _create_element_tool(self, element_name: str, css_selector: str, 
-                                 xpath_selector: str = None, alternatives: List[str] = None,
-                                 created_by: str = "system", ai_reasoning: str = None) -> dict:
+    async def _create_element_tool(self, name: str, element_type: str, selector: str,
+                                 description: str = "", confidence: float = 0.9, 
+                                 alternatives: List[str] = None) -> dict:
         """Create new element with initial locator version"""
         from element_repository import get_repository
         
@@ -611,38 +611,45 @@ class ToolRegistry:
             
             # Create new element
             record = await repo.create_element(
-                element_name=element_name,
-                css_selector=css_selector,
-                xpath_selector=xpath_selector,
-                alternatives=alternatives or [],
-                created_by=created_by,
-                ai_reasoning=ai_reasoning
+                element_name=name,
+                css_selector=selector,
+                element_type=element_type,
+                description=description,
+                alternatives=alternatives or []
             )
             
             active_version = record.get_active_version() or record.get_latest_version()
             
             return {
-                "success": True,
-                "element_name": element_name,
-                "version": active_version.version if active_version else 1,
-                "status": active_version.status.value if active_version else "draft",
-                "approval_status": active_version.approval_status.value if active_version else "pending",
-                "created_at": record.created_at,
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "status": "success",
+                "element": {
+                    "name": name,
+                    "element_type": element_type,
+                    "description": description,
+                    "created_at": record.created_at,
+                    "usage_count": 0,
+                    "versions": [
+                        {
+                            "version": active_version.version if active_version else 1,
+                            "selector": selector,
+                            "confidence": confidence,
+                            "created_at": record.created_at,
+                            "status": active_version.status.value if active_version else "pending",
+                            "alternatives": alternatives or []
+                        }
+                    ]
+                },
+                "message": "Element created successfully"
             }
             
         except Exception as e:
             return {
-                "success": False,
-                "error": str(e),
-                "element_name": element_name,
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "status": "error",
+                "message": f"Failed to create element '{name}': {str(e)}"
             }
     
-    async def _add_element_version_tool(self, element_name: str, css_selector: str,
-                                      xpath_selector: str = None, alternatives: List[str] = None,
-                                      created_by: str = "system", ai_reasoning: str = None,
-                                      confidence_score: float = 0.0) -> dict:
+    async def _add_element_version_tool(self, element_name: str, selector: str,
+                                      confidence: float = 0.9, alternatives: List[str] = None) -> dict:
         """Add new version to existing element"""
         from element_repository import get_repository
         
@@ -650,24 +657,17 @@ class ToolRegistry:
             repo = await get_repository()
             
             # Add new version
-            version = await repo.add_version(
+            version = await repo.add_element_version(
                 element_name=element_name,
-                css_selector=css_selector,
-                xpath_selector=xpath_selector,
+                css_selector=selector,  # Map frontend 'selector' to backend 'css_selector'
                 alternatives=alternatives or [],
-                created_by=created_by,
-                ai_reasoning=ai_reasoning,
-                confidence_score=confidence_score
+                confidence_score=confidence
             )
             
             return {
                 "success": True,
-                "element_name": element_name,
                 "version": version.version,
-                "status": version.status.value,
-                "approval_status": version.approval_status.value,
-                "confidence_score": version.confidence_score,
-                "created_at": version.created_at,
+                "element_name": element_name,
                 "timestamp": datetime.now(timezone.utc).isoformat()
             }
             
@@ -721,48 +721,73 @@ class ToolRegistry:
                 "timestamp": datetime.now(timezone.utc).isoformat()
             }
     
-    async def _search_elements_tool(self, query: str, limit: int = 50) -> dict:
-        """Search elements by name or selector"""
+    async def _search_elements_tool(self, query: str = "", element_type: str = None, status: str = None, limit: int = 50) -> dict:
+        """Search elements by name, type, or status"""
         from element_repository import get_repository
         
         try:
             repo = await get_repository()
             
-            # Search elements
-            results = await repo.search_elements(query=query, limit=limit)
+            # Search elements with basic query and limit
+            results = await repo.search_elements(
+                query=query if query else ".",  # Use "." to match all if no query
+                limit=limit
+            )
+            
+            # Apply client-side filtering for element_type and status
+            filtered_results = []
+            for record in results:
+                # Filter by element_type if specified
+                if element_type and record.element_type != element_type:
+                    continue
+                    
+                # Filter by status if specified
+                if status:
+                    active_version = record.get_active_version()
+                    if not active_version:
+                        continue
+                    # Handle both enum and string status values
+                    status_value = active_version.status.value if hasattr(active_version.status, 'value') else str(active_version.status)
+                    if status_value != status:
+                        continue
+                        
+                filtered_results.append(record)
             
             # Format results
             elements = []
-            for record in results:
+            for record in filtered_results:
                 active_version = record.get_active_version()
                 elements.append({
-                    "element_name": record.element_name,
-                    "selector": active_version.css_selector if active_version else None,
-                    "version": active_version.version if active_version else 0,
-                    "status": active_version.status.value if active_version else "no_active",
-                    "confidence": active_version.confidence_score if active_version else 0.0,
+                    "name": record.element_name,
+                    "element_type": record.element_type or "unknown",
+                    "description": record.description or "",
+                    "created_at": record.created_at,
                     "usage_count": active_version.usage_count if active_version else 0,
-                    "success_rate": active_version.success_rate if active_version else 0.0,
-                    "last_used": active_version.last_used if active_version else None,
-                    "tags": record.tags,
-                    "created_at": record.created_at
+                    "versions": [
+                        {
+                            "version": v.version,
+                            "selector": v.css_selector,
+                            "confidence": v.confidence_score,
+                            "created_at": v.created_at,
+                            "status": v.status.value if hasattr(v.status, 'value') else str(v.status),
+                            "approver": v.approver if hasattr(v, 'approver') else None,
+                            "approved_at": v.approved_at if hasattr(v, 'approved_at') else None,
+                            "alternatives": v.alternatives if hasattr(v, 'alternatives') else []
+                        } for v in record.versions
+                    ]
                 })
             
             return {
-                "success": True,
-                "query": query,
-                "total_results": len(elements),
-                "limit": limit,
+                "status": "success",
                 "elements": elements,
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "total_count": len(elements),
+                "message": f"Found {len(elements)} element(s)"
             }
             
         except Exception as e:
             return {
-                "success": False,
-                "error": str(e),
-                "query": query,
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "status": "error",
+                "message": f"Search failed: {str(e)}"
             }
     
     async def _get_repository_stats_tool(self) -> dict:
@@ -790,19 +815,20 @@ class ToolRegistry:
             ]
             
             return {
-                "success": True,
-                "stats": stats,
-                "health": {
-                    "status": "healthy" if stats["total_elements"] > 0 else "empty",
-                    "cache_hit_ratio": stats["cache_stats"]["hit_ratio"],
-                    "pending_approval_ratio": stats["pending_approvals_count"] / max(stats["total_versions"], 1)
+                "status": "success", 
+                "stats": {
+                    "total_elements": stats["total_elements"],
+                    "total_versions": stats["total_versions"],
+                    "pending_approvals": stats["pending_approvals_count"],
+                    "cache_hit_rate": stats["cache_stats"]["hit_ratio"],
+                    "avg_lookup_time_ms": stats["cache_stats"].get("avg_lookup_time_ms", 0),
+                    "most_used_elements": stats.get("most_used_elements", [])
                 },
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "message": "Repository statistics retrieved successfully"
             }
             
         except Exception as e:
             return {
-                "success": False,
-                "error": str(e),
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "status": "error",
+                "message": f"Failed to get repository stats: {str(e)}"
             }

@@ -4,52 +4,54 @@
   "description": "Schema for adding new version to existing element",
   "type": "object",
   "properties": {
-    "element_name": {
-      "type": "string",
-      "description": "Name of existing element",
-      "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
-      "minLength": 1,
-      "maxLength": 100
-    },
-    "css_selector": {
-      "type": "string", 
-      "description": "CSS selector for the new version",
-      "minLength": 1,
-      "maxLength": 500
-    },
-    "xpath_selector": {
-      "type": ["string", "null"],
-      "description": "Optional XPath selector for the new version",
-      "maxLength": 1000
-    },
-    "alternatives": {
-      "type": "array",
-      "description": "Alternative selectors for the new version",
-      "items": {
-        "type": "string",
-        "maxLength": 500
+    "request": {
+      "type": "object",
+      "properties": {
+        "element_name": {
+          "type": "string",
+          "description": "Name of existing element",
+          "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "selector": {
+          "type": "string", 
+          "description": "New selector for the element version",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "confidence": {
+          "type": "number",
+          "description": "Confidence score for the new selector",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "default": 0.9
+        },
+        "alternatives": {
+          "type": "array",
+          "description": "Alternative selectors for the new version",
+          "items": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "maxItems": 10
+        }
       },
-      "maxItems": 10
+      "required": ["element_name", "selector"],
+      "additionalProperties": false
     },
-    "created_by": {
-      "type": "string",
-      "description": "Creator of the version",
-      "default": "system",
-      "maxLength": 100
-    },
-    "ai_reasoning": {
-      "type": ["string", "null"],
-      "description": "AI reasoning for the selector changes",
-      "maxLength": 2000
-    },
-    "confidence_score": {
-      "type": "number",
-      "description": "Confidence score for the new selector",
-      "minimum": 0.0,
-      "maximum": 1.0,
-      "default": 0.0
+    "response": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["success", "error"]
+        },
+        "version": {"type": "integer"},
+        "message": {"type": "string"}
+      },
+      "required": ["status"]
     }
   },
-  "required": ["element_name", "css_selector"],
-  "additionalProperties": false
+  "required": ["request", "response"]
 }

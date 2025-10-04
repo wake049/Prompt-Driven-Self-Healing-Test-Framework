@@ -149,6 +149,150 @@ export interface FormFieldProps {
   error?: string;
 }
 
+// Enhanced Element Repository Types
+export interface Page {
+  page_id: string;
+  page_key: string;
+  title: string;
+  url_pattern: string;
+  description?: string;
+  created_at: string;
+  created_by: string;
+}
+
+export interface CreatePageRequest {
+  page_key: string;
+  title: string;
+  url_pattern: string;
+  description?: string;
+}
+
+export interface EnhancedElement {
+  element_id: string;
+  page_id: string;
+  role: string;
+  description?: string;
+  current_version: number;
+  status: 'pending' | 'approved' | 'rejected' | 'deprecated';
+  created_at: string;
+  created_by: string;
+  versions: EnhancedVersion[];
+}
+
+export interface EnhancedVersion {
+  version: number;
+  primary_selector: string;
+  alt_selectors: string[];
+  confidence_score: number;
+  created_at: string;
+  created_by: string;
+  ai_reasoning?: string;
+  status: 'pending' | 'approved' | 'rejected' | 'current';
+}
+
+export interface CreateEnhancedElementRequest {
+  page_id: string;
+  element_id: string;
+  role: string;
+  primary_selector: string;
+  alt_selectors?: string[];
+  confidence_score?: number;
+  description?: string;
+  ai_reasoning?: string;
+}
+
+export interface SuggestIDRequest {
+  page_id: string;
+  role: string;
+  node_data: {
+    text: string;
+    tag: string;
+    attributes: Record<string, string>;
+  };
+}
+
+export interface SuggestedID {
+  element_id: string;
+  confidence: number;
+  reasoning: string;
+}
+
+export interface TestSelectorRequest {
+  selector: string;
+  url: string;
+  selector_type?: 'css' | 'xpath';
+  timeout_ms?: number;
+}
+
+export interface TestSelectorResult {
+  found: boolean;
+  sample_html?: string;
+  error?: string;
+  execution_time_ms: number;
+}
+
+// Legacy Element Repository Types (kept for backward compatibility)
+export interface ElementRecord {
+  name: string;
+  element_type: string;
+  description?: string;
+  created_at: string;
+  usage_count: number;
+  versions: LocatorVersion[];
+}
+
+export interface LocatorVersion {
+  version: number;
+  selector: string;
+  confidence: number;
+  created_at: string;
+  status: 'pending' | 'approved' | 'rejected';
+  approver?: string;
+  approved_at?: string;
+  alternatives: string[];
+}
+
+export interface CreateElementRequest {
+  name: string;
+  element_type: string;
+  selector: string;
+  description?: string;
+  confidence?: number;
+  alternatives?: string[];
+}
+
+export interface AddVersionRequest {
+  element_name: string;
+  selector: string;
+  confidence?: number;
+  alternatives?: string[];
+}
+
+export interface ApproveVersionRequest {
+  element_name: string;
+  version: number;
+  approver?: string;
+}
+
+export interface SearchElementsRequest {
+  query?: string;
+  element_type?: string;
+  status?: 'pending' | 'approved' | 'rejected';
+  limit?: number;
+}
+
+export interface RepositoryStats {
+  total_elements: number;
+  total_versions: number;
+  pending_approvals: number;
+  cache_hit_rate: number;
+  avg_lookup_time_ms: number;
+  most_used_elements: Array<{
+    name: string;
+    usage_count: number;
+  }>;
+}
+
 // Configuration Types
 export interface ApiConfig {
   baseURL: string;

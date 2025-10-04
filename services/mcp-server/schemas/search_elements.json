@@ -1,34 +1,64 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Search Elements Tool Schema",
-  "description": "Schema for searching elements in repository", 
+  "description": "Schema for searching elements in repository",
   "type": "object",
   "properties": {
-    "query": {
-      "type": "string",
-      "description": "Search query (name pattern or partial match)",
-      "minLength": 1,
-      "maxLength": 200
+    "request": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Search query (name pattern or partial match)",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "element_type": {
+          "type": "string",
+          "description": "Filter by element type",
+          "enum": ["button", "input", "link", "text", "image", "form", "dropdown", "checkbox", "radio", "other"]
+        },
+        "status": {
+          "type": "string",
+          "description": "Filter by approval status",
+          "enum": ["pending", "approved", "rejected"]
+        },
+        "limit": {
+          "type": "integer",
+          "description": "Maximum number of results",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 10
+        }
+      },
+      "additionalProperties": false
     },
-    "element_type": {
-      "type": "string",
-      "description": "Filter by element type",
-      "enum": ["button", "input", "link", "text", "image", "form", "dropdown", "checkbox", "radio", "other"],
-      "default": null
-    },
-    "status": {
-      "type": "string", 
-      "description": "Filter by approval status",
-      "enum": ["pending", "approved", "rejected"],
-      "default": null
-    },
-    "limit": {
-      "type": "integer",
-      "description": "Maximum number of results",
-      "minimum": 1,
-      "maximum": 100,
-      "default": 10
+    "response": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["success", "error"]
+        },
+        "elements": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {"type": "string"},
+              "element_type": {"type": "string"},
+              "description": {"type": "string"},
+              "created_at": {"type": "string"},
+              "usage_count": {"type": "integer"},
+              "versions": {"type": "array"}
+            }
+          }
+        },
+        "total_count": {"type": "integer"},
+        "message": {"type": "string"}
+      },
+      "required": ["status"]
     }
   },
-  "additionalProperties": false
+  "required": ["request", "response"]
 }

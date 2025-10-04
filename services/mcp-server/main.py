@@ -101,6 +101,24 @@ def create_app() -> FastAPI:
     app.include_router(version.router, prefix="/api/v1")
     app.include_router(tools.router, prefix="/api/v1")
     
+    # Include enhanced Element Repository routes
+    logger.info("Including enhanced Element Repository API...")
+    try:
+        from enhanced_api import simple_router
+        app.include_router(simple_router)
+        logger.info("Enhanced Element Repository API included successfully")
+        logger.info(f"Enhanced routes: {[route.path for route in simple_router.routes]}")
+    except Exception as e:
+        logger.error(f"Failed to include enhanced API: {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        logger.info("Enhanced features will not be available")
+    
+    # Debug endpoint to list all routes
+    @app.get("/debug/routes")
+    async def list_routes():
+        return {"routes": [{"path": route.path, "methods": list(route.methods)} for route in app.routes]}
+    
     return app
 
 

@@ -1,22 +1,55 @@
 import React, { useState, useEffect } from 'react';
+import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom';
 import styled from 'styled-components';
 import { apiService } from './services/api';
 import { JsonViewer } from '@textea/json-viewer';
 import { TestPlanResponse, SystemStats } from './types';
+import MCPElementsViewer from './components/MCPElementsViewer';
 import './App.css';
 
 const AppContainer = styled.div`
   min-height: 100vh;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  padding: 20px;
 `;
 
-const Card = styled.div`
-  background: white;
-  border-radius: 12px;
-  padding: 24px;
-  margin: 20px 0;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+const Navigation = styled.nav`
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(10px);
+  padding: 1rem 2rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+`;
+
+const NavBrand = styled.h1`
+  color: white;
+  margin: 0;
+  font-size: 1.5rem;
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+`;
+
+const NavLinks = styled.div`
+  display: flex;
+  gap: 1rem;
+`;
+
+const NavLink = styled(Link)<{ $active?: boolean }>`
+  color: white;
+  text-decoration: none;
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  background: ${props => props.$active ? 'rgba(255, 255, 255, 0.2)' : 'transparent'};
+  
+  &:hover {
+    background: rgba(255, 255, 255, 0.2);
+    transform: translateY(-1px);
+  }
+`;
+
+const PageContainer = styled.div`
+  padding: 20px;
 `;
 
 const Header = styled.h1`
@@ -25,6 +58,14 @@ const Header = styled.h1`
   margin-bottom: 30px;
   font-size: 2.5rem;
   text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+`;
+
+const Card = styled.div`
+  background: white;
+  border-radius: 12px;
+  padding: 24px;
+  margin: 20px 0;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
 `;
 
 const InputContainer = styled.div`
@@ -112,35 +153,51 @@ const StatusDot = styled.div<{ status: 'online' | 'offline' | 'loading' }>`
 `;
 
 interface AppState {
-  prompt: string;
-  testPlan: TestPlanResponse | null;
-  systemStats: SystemStats | null;
-  isLoading: boolean;
-  error: string | null;
   serverStatus: 'online' | 'offline' | 'loading';
 }
 
-const App: React.FC = () => {
-  const [state, setState] = useState<AppState>({
+// Navigation Component
+const NavBar: React.FC<{ serverStatus: 'online' | 'offline' | 'loading' }> = ({ serverStatus }) => {
+  const location = useLocation();
+  
+  return (
+    <Navigation>
+      <NavBrand>AI Test Automation Platform</NavBrand>
+      <NavLinks>
+        <NavLink to="/" $active={location.pathname === '/'}>
+          Test Planner
+        </NavLink>
+        <NavLink to="/view-elements" $active={location.pathname === '/view-elements'}>
+          📍 View Elements
+        </NavLink>
+        <StatusIndicator status={serverStatus}>
+          <StatusDot status={serverStatus} />
+          {serverStatus === 'online' && 'Connected'}
+          {serverStatus === 'offline' && 'Disconnected'}
+          {serverStatus === 'loading' && 'Checking...'}
+        </StatusIndicator>
+      </NavLinks>
+    </Navigation>
+  );
+};
+
+// Test Planner Page Component
+const TestPlannerPage: React.FC = () => {
+  const [state, setState] = useState<{
+    prompt: string;
+    testPlan: TestPlanResponse | null;
+    systemStats: SystemStats | null;
+    isLoading: boolean;
+    error: string | null;
+  }>({
     prompt: '',
     testPlan: null,
     systemStats: null,
     isLoading: false,
     error: null,
-    serverStatus: 'loading'
   });
 
   useEffect(() => {
-    const checkServerHealth = async () => {
-      try {
-        setState(prev => ({ ...prev, serverStatus: 'loading' }));
-        await apiService.getHealth();
-        setState(prev => ({ ...prev, serverStatus: 'online' }));
-      } catch (error) {
-        setState(prev => ({ ...prev, serverStatus: 'offline' }));
-      }
-    };
-
     const loadSystemStats = async () => {
       try {
         const stats = await apiService.getSystemStats();
@@ -150,7 +207,6 @@ const App: React.FC = () => {
       }
     };
 
-    checkServerHealth();
     loadSystemStats();
   }, []);
 
@@ -171,43 +227,16 @@ const App: React.FC = () => {
     }
   };
 
-  const refreshHealth = async () => {
-    try {
-      setState(prev => ({ ...prev, serverStatus: 'loading' }));
-      await apiService.getHealth();
-      setState(prev => ({ ...prev, serverStatus: 'online' }));
-    } catch (error) {
-      setState(prev => ({ ...prev, serverStatus: 'offline' }));
-    }
-  };
-
   return (
-    <AppContainer>
+    <PageContainer>
       <Header>AI Test Automation Planner</Header>
       
-      <Card>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-          <h2>Server Status</h2>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <StatusIndicator status={state.serverStatus}>
-              <StatusDot status={state.serverStatus} />
-              {state.serverStatus === 'online' && 'Connected'}
-              {state.serverStatus === 'offline' && 'Disconnected'}
-              {state.serverStatus === 'loading' && 'Checking...'}
-            </StatusIndicator>
-            <Button onClick={refreshHealth} style={{ margin: 0, padding: '6px 12px', fontSize: '14px' }}>
-              Refresh
-            </Button>
-          </div>
-        </div>
-        
-        {state.systemStats && (
-          <div>
-            <h3>System Statistics</h3>
-            <JsonViewer value={state.systemStats} theme="light" />
-          </div>
-        )}
-      </Card>
+      {state.systemStats && (
+        <Card>
+          <h2>System Statistics</h2>
+          <JsonViewer value={state.systemStats} theme="light" />
+        </Card>
+      )}
 
       <Card>
         <h2>Generate Test Plan</h2>
@@ -252,7 +281,44 @@ const App: React.FC = () => {
           </div>
         </Card>
       )}
-    </AppContainer>
+    </PageContainer>
+  );
+};
+
+// Main App Component
+const App: React.FC = () => {
+  const [appState, setAppState] = useState<AppState>({
+    serverStatus: 'loading'
+  });
+
+  useEffect(() => {
+    const checkServerHealth = async () => {
+      try {
+        setAppState(prev => ({ ...prev, serverStatus: 'loading' }));
+        await apiService.getHealth();
+        setAppState(prev => ({ ...prev, serverStatus: 'online' }));
+      } catch (error) {
+        setAppState(prev => ({ ...prev, serverStatus: 'offline' }));
+      }
+    };
+
+    checkServerHealth();
+    
+    // Check health every 30 seconds
+    const interval = setInterval(checkServerHealth, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <Router>
+      <AppContainer>
+        <NavBar serverStatus={appState.serverStatus} />
+        <Routes>
+          <Route path="/" element={<TestPlannerPage />} />
+          <Route path="/view-elements" element={<MCPElementsViewer />} />
+        </Routes>
+      </AppContainer>
+    </Router>
   );
 };
 

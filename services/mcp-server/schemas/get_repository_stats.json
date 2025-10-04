@@ -4,16 +4,44 @@
   "description": "Schema for getting repository statistics",
   "type": "object", 
   "properties": {
-    "include_cache_stats": {
-      "type": "boolean",
-      "description": "Include cache performance statistics",
-      "default": false
+    "request": {
+      "type": "object",
+      "properties": {
+        "include_cache_stats": {
+          "type": "boolean",
+          "description": "Include cache performance statistics",
+          "default": false
+        },
+        "include_approval_stats": {
+          "type": "boolean", 
+          "description": "Include approval workflow statistics",
+          "default": false
+        }
+      },
+      "additionalProperties": false
     },
-    "include_approval_stats": {
-      "type": "boolean", 
-      "description": "Include approval workflow statistics",
-      "default": false
+    "response": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["success", "error"]
+        },
+        "stats": {
+          "type": "object",
+          "properties": {
+            "total_elements": {"type": "integer"},
+            "total_versions": {"type": "integer"},
+            "pending_approvals": {"type": "integer"},
+            "cache_hit_rate": {"type": "number"},
+            "avg_lookup_time_ms": {"type": "number"},
+            "most_used_elements": {"type": "array"}
+          }
+        },
+        "message": {"type": "string"}
+      },
+      "required": ["status"]
     }
   },
-  "additionalProperties": false
+  "required": ["request", "response"]
 }

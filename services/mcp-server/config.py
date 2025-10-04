@@ -55,16 +55,18 @@ class MCPConfig(BaseSettings):
     # Development settings
     debug: bool = Field(default=False, description="Enable debug mode")
     auto_reload: bool = Field(default=False, description="Enable auto-reload for development")
+    environment: str = Field(default="development", description="Environment (development/production)")
     
     class Config:
         env_prefix = "MCP_"
         env_file = ".env"
         case_sensitive = False
+        extra = "ignore"  # Allow extra fields without validation errors
     
     @property
     def is_production(self) -> bool:
         """Check if running in production environment"""
-        return os.getenv("ENVIRONMENT", "development").lower() == "production"
+        return self.environment.lower() == "production"
     
     @property
     def server_info(self) -> dict:
@@ -74,7 +76,7 @@ class MCPConfig(BaseSettings):
             "port": self.port,
             "debug": self.debug,
             "auth_required": self.auth_required,
-            "environment": "production" if self.is_production else "development"
+            "environment": self.environment
         }
     
     def validate_config(self) -> list[str]:

@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MCP XPath Tester</title>
+    <style>
+        body {
+            width: 450px;
+            min-height: 400px;
+            margin: 0;
+            padding: 16px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-size: 14px;
+            background: #f8f9fa;
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 20px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid #e9ecef;
+        }
+        
+        .header h1 {
+            margin: 0;
+            font-size: 18px;
+            color: #343a40;
+        }
+        
+        .subtitle {
+            margin: 4px 0 0 0;
+            font-size: 12px;
+            color: #6c757d;
+        }
+        
+        .section-title {
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #495057;
+            font-size: 14px;
+        }
+        
+        .form-group {
+            margin-bottom: 12px;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 4px;
+            font-weight: 500;
+            color: #495057;
+        }
+        
+        .form-control {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            font-size: 13px;
+            box-sizing: border-box;
+            background: white;
+        }
+        
+        .form-control:focus {
+            border-color: #80bdff;
+            outline: 0;
+            box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+        }
+        
+        textarea.form-control {
+            min-height: 80px;
+            resize: vertical;
+            font-family: 'Courier New', monospace;
+        }
+        
+        .btn {
+            padding: 10px 16px;
+            border: none;
+            border-radius: 4px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            width: 100%;
+        }
+        
+        .btn-primary {
+            background-color: #007bff;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background-color: #0056b3;
+        }
+        
+        .btn-primary:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        
+        .btn-secondary {
+            background-color: #6c757d;
+            color: white;
+            margin-top: 8px;
+        }
+        
+        .btn-secondary:hover {
+            background-color: #545b62;
+        }
+        
+        .main-section {
+            background: white;
+            border-radius: 6px;
+            border: 1px solid #dee2e6;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+        
+        .results-section {
+            margin-top: 16px;
+            display: none;
+        }
+        
+        .results-table {
+            background: white;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        
+        .example-queries {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+            padding: 12px;
+            margin-top: 12px;
+        }
+        
+        .example-title {
+            font-weight: 600;
+            font-size: 12px;
+            color: #495057;
+            margin-bottom: 8px;
+        }
+        
+        .example-item {
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+            color: #6c757d;
+            margin-bottom: 4px;
+            cursor: pointer;
+            padding: 4px 6px;
+            border-radius: 3px;
+        }
+        
+        .example-item:hover {
+            background: #e9ecef;
+            color: #495057;
+        }
+        
+        .quick-actions {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .info-panel {
+            background: #e7f3ff;
+            border: 1px solid #bee5eb;
+            border-radius: 4px;
+            padding: 12px;
+            margin-bottom: 16px;
+        }
+        
+        .info-title {
+            font-weight: 600;
+            color: #004085;
+            margin-bottom: 4px;
+            font-size: 12px;
+        }
+        
+        .info-text {
+            font-size: 11px;
+            color: #004085;
+            margin: 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🔍 XPath 2/3 Tester</h1>
+        <p class="subtitle">Test XPath queries with regex support</p>
+    </div>
+    
+    <div class="info-panel">
+        <div class="info-title">💡 Element Management</div>
+        <p class="info-text">To view and edit recorded elements, use the React frontend at <strong>localhost:3000</strong></p>
+    </div>
+    
+    <div class="main-section">
+        <div class="section-title">🎯 XPath Query</div>
+        <div class="form-group">
+            <label for="xpath2-input">XPath Expression:</label>
+            <textarea id="xpath2-input" class="form-control" placeholder="Enter XPath with regex support..."></textarea>
+        </div>
+        <button id="run-xpath2-btn" class="btn btn-primary">
+            ▶️ Run Query
+        </button>
+        
+        <div class="example-queries">
+            <div class="example-title">📝 Example Queries:</div>
+            <div class="example-item" onclick="setExample('//button[matches(normalize-space(.),&quot;add.*cart&quot;,&quot;i&quot;)]')">
+                Find "Add to Cart" buttons
+            </div>
+            <div class="example-item" onclick="setExample('//*[matches(normalize-space(.),&quot;\\\\b[A-Z0-9]{6}\\\\b&quot;)]')">
+                Find confirmation codes
+            </div>
+            <div class="example-item" onclick="setExample('//input[matches(@placeholder,&quot;email&quot;,&quot;i&quot;)]')">
+                Find email input fields
+            </div>
+            <div class="example-item" onclick="setExample('//*[matches(normalize-space(.),&quot;continue&quot;,&quot;i&quot;) and not(matches(normalize-space(.),&quot;\\\\d&quot;))]')">
+                Find "Continue" text (no numbers)
+            </div>
+        </div>
+    </div>
+    
+    <div id="xpath2-results" class="results-section">
+        <div class="section-title">📊 Results</div>
+        <div id="xpath2-table" class="results-table">
+            <!-- Results will be populated here -->
+        </div>
+    </div>
+    
+    <div class="quick-actions">
+        <button id="view-elements-btn" class="btn btn-secondary" style="flex: 1;">
+            📋 View Elements (Frontend)
+        </button>
+        <button id="clear-elements-btn" class="btn btn-secondary" style="flex: 1;">
+            🗑️ Clear All Elements
+        </button>
+    </div>
+
+    <script>
+        function setExample(xpath) {
+            document.getElementById('xpath2-input').value = xpath;
+        }
+    </script>
+    <script src="popup.js"></script>
+</body>
+</html>
+        
+        .tool-item:hover {
+            background-color: #f8f9fa;
+        }
+        
+        .tool-item:last-child {
+            border-bottom: none;
+        }
+        
+        .tool-name {
+            font-weight: 500;
+            color: #212529;
+        }
+        
+        .tool-description {
+            font-size: 12px;
+            color: #6c757d;
+            margin-top: 2px;
+        }
+        
+        .execution-section {
+            background: white;
+            border-radius: 6px;
+            border: 1px solid #dee2e6;
+            padding: 12px;
+        }
+        
+        .form-group {
+            margin-bottom: 12px;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 4px;
+            font-weight: 500;
+            color: #495057;
+        }
+        
+        .form-control {
+            width: 100%;
+            padding: 6px 8px;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            font-size: 13px;
+            box-sizing: border-box;
+        }
+        
+        .form-control:focus {
+            border-color: #80bdff;
+            outline: 0;
+            box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+        }
+        
+        textarea.form-control {
+            min-height: 80px;
+            resize: vertical;
+            font-family: 'Courier New', monospace;
+        }
+        
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        
+        .btn-primary {
+            background-color: #007bff;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background-color: #0056b3;
+        }
+        
+        .btn-primary:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        
+        .results {
+            margin-top: 16px;
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 12px;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+        
+        .results pre {
+            margin: 0;
+            font-size: 12px;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        
+        .status {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 500;
+            display: inline-block;
+            margin-bottom: 8px;
+        }
+        
+        .status.success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .status.error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .recorder-controls {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+        
+        .recorder-controls .btn {
+            width: 100%;
+        }
+        
+        .btn-secondary {
+            background-color: #6c757d;
+            color: white;
+        }
+        
+        .btn-secondary:hover {
+            background-color: #545b62;
+        }
+        
+        .recording {
+            background-color: #dc3545 !important;
+        }
+        
+        .recording:hover {
+            background-color: #c82333 !important;
+        }
+        
+        .quick-actions {
+            background: white;
+            border-radius: 6px;
+            border: 1px solid #dee2e6;
+            padding: 12px;
+            margin-bottom: 16px;
+        }
+        
+        .instructions-panel {
+            background: #e7f3ff;
+            border: 1px solid #bee5eb;
+            border-radius: 6px;
+            padding: 12px;
+            margin-bottom: 16px;
+        }
+        
+        .instructions-title {
+            font-weight: 600;
+            color: #dc3545;
+            margin-bottom: 8px;
+            font-size: 13px;
+        }
+        
+        .instructions-list {
+            margin: 8px 0;
+            padding-left: 16px;
+            font-size: 12px;
+            color: #495057;
+        }
+        
+        .instructions-list li {
+            margin-bottom: 4px;
+        }
+        
+        .instructions-note {
+            font-size: 11px;
+            color: #6c757d;
+            font-style: italic;
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid #dee2e6;
+        }
+        
+        .page-context {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            padding: 12px;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: end;
+            gap: 10px;
+        }
+        
+        .page-context .form-group {
+            margin-bottom: 0;
+            flex: 1;
+        }
+        
+        .page-context {
+            margin-bottom: 16px;
+            padding: 12px;
+            background: #f8f9fa;
+            border-radius: 4px;
+            border: 1px solid #e9ecef;
+            display: block !important;
+            visibility: visible !important;
+        }
+        
+        .page-context label {
+            font-size: 12px;
+            font-weight: 600;
+            color: #495057;
+            margin-bottom: 4px;
+            display: block;
+        }
+        
+        .page-context input {
+            font-size: 13px;
+            padding: 8px;
+            width: 100%;
+            box-sizing: border-box;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+        }
+        
+        .form-group {
+            margin-bottom: 0;
+        }
+        
+        .form-control {
+            font-size: 13px;
+            padding: 8px;
+            width: 100%;
+            box-sizing: border-box;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            background: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🛠️ MCP Test Runner</h1>
+    </div>
+    
+    <div class="page-context">
+        <div class="form-group">
+            <label for="page-context">Current Page:</label>
+            <input type="text" id="page-context" class="form-control" placeholder="e.g., login, dashboard, checkout">
+        </div>
+    </div>
+    
+    <div class="recorder-controls">
+        <button id="record-btn" class="btn btn-secondary">📍 Start Recording</button>
+        <button id="stop-record-btn" class="btn btn-secondary" disabled>⏹️ Stop Recording</button>
+        
+        <div class="form-group" style="margin-top: 12px;">
+            <label for="intent-input">What element do you want to find? (Optional)</label>
+            <input type="text" id="intent-input" class="form-control" placeholder="e.g., login button, email field (or leave blank to discover all)">
+        </div>
+        
+        <button id="suggest-btn" class="btn btn-primary">� Discover Elements</button>
+        <button id="suggest-legacy-btn" class="btn btn-secondary">🤖 AI Suggest (Legacy)</button>
+    </div>
+    
+    <div id="recording-instructions" class="instructions-panel" style="display: none;">
+        <div class="instructions-title">🔴 Recording Mode Active</div>
+        <ul class="instructions-list">
+            <li>🟦 Blue highlight = hovering over element</li>
+            <li>🟢 Green highlight = element recorded</li>
+            <li>📍 Red indicator visible on page</li>
+            <li>💡 Click any element to capture it</li>
+        </ul>
+        <div class="instructions-note">Keep this popup open to see captured elements!</div>
+    </div>
+    
+    <div id="suggestion-status" class="instructions-panel" style="display: none;">
+        <div class="instructions-title">🤖 AI Analysis in Progress</div>
+        <div id="suggestion-message">Analyzing page structure and suggesting test elements...</div>
+    </div>
+    
+    <div class="quick-actions">
+        <div class="section-title">Quick Actions</div>
+        <button id="view-elements-btn" class="btn btn-primary" style="width: 100%; margin-bottom: 8px;">
+            📋 View Recorded Elements
+        </button>
+        <button id="clear-elements-btn" class="btn btn-secondary" style="width: 100%;">
+            🗑️ Clear All Elements
+        </button>
+    </div>
+
+    <div class="execution-section" style="margin-top: 16px;">
+        <div class="section-title">🔍 XPath 2/3 Query (Regex Support)</div>
+        <div class="form-group">
+            <label for="xpath2-input">XPath Query:</label>
+            <textarea id="xpath2-input" class="form-control" placeholder="e.g., //button[matches(normalize-space(.),'add.*cart','i')]" style="min-height: 60px; font-family: 'Courier New', monospace;"></textarea>
+        </div>
+        <button id="run-xpath2-btn" class="btn btn-primary" style="width: 100%;">
+            ▶️ Run XPath 2
+        </button>
+        <div id="xpath2-results" style="display: none; margin-top: 12px;">
+            <div class="section-title">Results:</div>
+            <div id="xpath2-table" style="background: white; border: 1px solid #dee2e6; border-radius: 4px; max-height: 300px; overflow-y: auto;">
+                <!-- Results table will be populated here -->
+            </div>
+        </div>
+    </div>
+
+    <script src="popup.js"></script>
+</body>
+</html>
