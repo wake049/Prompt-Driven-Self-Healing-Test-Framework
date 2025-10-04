@@ -72,7 +72,6 @@ def test_parameter_substitution():
     
     actions = catalog.get_actions_for_intent("OPEN", context)
     assert len(actions) > 0
-    # Should use context URL instead of default
     assert actions[0].params["url"] == "https://custom-site.com"
 
 def test_action_catalog_coverage():
@@ -80,7 +79,6 @@ def test_action_catalog_coverage():
     catalog = ActionCatalog()
     mappings = catalog.list_available_actions()
     
-    # Should support all required intent types from SCRUM-3
     required_intents = ["LOGIN", "OPEN", "HOMEPAGE", "SEARCH", "SEATS", "CHECKOUT"]
     
     for intent in required_intents:
