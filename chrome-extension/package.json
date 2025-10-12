@@ -5,7 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite build --watch --mode development",
-    "build": "vite build",
+    "build": "tsc --noEmit && npm run build:background && npm run build:content && npm run build:popup",
+    "build:background": "vite build --config vite.config.ts",
+    "build:content": "vite build --config vite.content.config.ts",
+    "build:popup": "vite build --config vite.popup.config.ts",
     "type-check": "tsc --noEmit"
   },
   "devDependencies": {

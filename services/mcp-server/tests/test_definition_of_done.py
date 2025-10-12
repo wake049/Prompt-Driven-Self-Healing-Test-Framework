@@ -12,11 +12,11 @@ from unittest.mock import AsyncMock, patch
 import uuid
 
 from main import create_app
-from config import MCPConfig
+from core.config import MCPConfig
 from server import MCPServer
-from tool_registry import ToolRegistry
-from auth_middleware import AuthMiddleware
-from error_model import ErrorCode
+from api.tool_registry import ToolRegistry
+from core.auth_middleware import AuthMiddleware
+from core.error_model import ErrorCode
 
 
 @pytest.fixture
@@ -179,7 +179,7 @@ class TestDefinitionOfDone:
     @pytest.mark.asyncio 
     async def test_schema_validation_on_tool_calls(self):
         """Test schema validation runs on all tool calls"""
-        from schema_validator import validate_tool_request, validate_tool_response
+        from core.schema_validator import validate_tool_request, validate_tool_response
         
         # Test valid request validation
         error = validate_tool_request("run_action", {
@@ -295,7 +295,7 @@ class TestUnitTests:
     @pytest.mark.asyncio
     async def test_registry_register_unregister(self):
         """Test registry register/unregister functionality"""
-        from tool_registry import ToolRegistry, ToolMetadata, ToolCategory
+        from api.tool_registry import ToolRegistry, ToolMetadata, ToolCategory
         
         registry = ToolRegistry()
         
@@ -318,7 +318,7 @@ class TestUnitTests:
     
     def test_auth_middleware_token_extraction(self):
         """Test auth middleware token extraction"""
-        from auth_middleware import AuthMiddleware
+        from core.auth_middleware import AuthMiddleware
         from unittest.mock import Mock
         
         config = MCPConfig(auth_required=True, auth_token="test_token")
@@ -367,7 +367,7 @@ class TestContractTests:
     ])
     def test_schema_validation_happy_and_failure_paths(self, tool_name, valid_params, invalid_params):
         """Test schema validation for happy path and failure cases"""
-        from schema_validator import validate_tool_request
+        from core.schema_validator import validate_tool_request
         
         # Happy path - should pass
         error = validate_tool_request(tool_name, valid_params)

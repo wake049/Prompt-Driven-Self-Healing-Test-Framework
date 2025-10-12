@@ -1,21 +1,27 @@
 import { defineConfig } from 'vite';
+import { resolve } from 'path';
 
+// Build each entry separately to avoid module issues
 export default defineConfig({
   publicDir: 'public',
+  define: {
+    global: 'globalThis',
+  },
+  resolve: {
+    alias: {
+      '@': resolve(__dirname, 'src'),
+    },
+  },
   build: {
     outDir: 'dist',
     emptyOutDir: true,
+    sourcemap: false,
     rollupOptions: {
-      input: {
-        background: 'src/background.ts',
-        content: 'src/content.ts',
-        popup: 'src/popup.ts'
-      },
+      input: resolve(__dirname, 'src/background.ts'),
       output: {
-        entryFileNames: '[name].js',
-        chunkFileNames: '[name].js',
-        assetFileNames: '[name].[ext]',
-        format: 'es'
+        entryFileNames: 'background.js',
+        format: 'iife',
+        name: 'BackgroundScript'
       }
     },
     target: 'es2020',

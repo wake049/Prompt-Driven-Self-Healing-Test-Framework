@@ -24,9 +24,9 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
-// CORS configuration
+// CORS configuration - Allow all origins for testing
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
+  origin: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true
@@ -62,11 +62,29 @@ app.use('/api/ai-suggestions', aiSuggestionsRouter);
 app.post('/api/chrome/record-element', async (req, res) => {
   try {
     const { elementData, sessionInfo } = req.body;
+    const { query } = require('./database');
+    
+    // Debug logging with stack trace
+    console.log('🔍 DEBUG: Received element data:', {
+      id: elementData.id || elementData.element_id,
+      logical_key: elementData.logical_key,
+      page: elementData.page,
+      css_selector: elementData.cssSelector || elementData.css_selector,
+      xpath: elementData.xpath,
+      timestamp: new Date().toISOString()
+    });
+    
+    // Log request headers to identify source
+    console.log('📡 Request headers:', {
+      'user-agent': req.headers['user-agent'],
+      'origin': req.headers['origin'],
+      'referer': req.headers['referer']
+    });
     
     // Create session if needed
     let sessionId = sessionInfo?.session_id;
     if (!sessionId && sessionInfo) {
-      const sessionResult = await require('./database').query(`
+      const sessionResult = await query(`
         INSERT INTO test_sessions (name, page, description)
         VALUES ($1, $2, $3)
         RETURNING id
@@ -76,35 +94,157 @@ app.post('/api/chrome/record-element', async (req, res) => {
         'Created from Chrome Extension'
       ]);
       sessionId = sessionResult.rows[0].id;
+    } else if (sessionId) {
+      // Check if session exists, create if not
+      const sessionCheck = await query(`
+        SELECT id FROM test_sessions WHERE id = $1
+      `, [sessionId]);
+      
+      if (sessionCheck.rows.length === 0) {
+        console.log(`⚠️ Session ${sessionId} not found, creating new session`);
+        const sessionResult = await query(`
+          INSERT INTO test_sessions (id, name, page, description)
+          VALUES ($1, $2, $3, $4)
+          RETURNING id
+        `, [
+          sessionId,
+          `Session for ${elementData.page}`,
+          elementData.page,
+          'Created from Chrome Extension (recovered)'
+        ]);
+        sessionId = sessionResult.rows[0].id;
+      }
     }
     
-    // Record the element
-    const result = await require('./database').query(`
+    // Extract logical_key and identity_data if provided
+    const logicalKey = elementData.logical_key;
+    const identityData = elementData.identity_data || elementData.identity || {};
+    
+    // Check if an element with the same logical_key already exists
+    let action = 'created';
+    let reviewItem = null;
+    
+    if (logicalKey) {
+      const existingResult = await query(`
+        SELECT * FROM recorded_elements 
+        WHERE logical_key = $1 AND page = $2 AND is_active = true
+        ORDER BY timestamp_recorded DESC
+        LIMIT 1
+      `, [logicalKey, elementData.page]);
+      
+      if (existingResult.rows.length > 0) {
+        const existing = existingResult.rows[0];
+        
+        // Compare selectors to see if they're different
+        const existingSelectors = existing.selectors || [];
+        const newSelectors = elementData.selectors || [];
+        const newCssSelector = elementData.cssSelector || elementData.css_selector;
+        const newXpath = elementData.xpath;
+        
+        // Check if main selectors are different
+        const selectorsChanged = (
+          existing.css_selector !== newCssSelector ||
+          existing.xpath !== newXpath
+        );
+        
+        if (selectorsChanged) {
+          // Create a review item for the locator change
+          const reviewResult = await query(`
+            INSERT INTO review_queue (
+              element_identifier, page, issue_type, description,
+              current_element_id, current_selectors, suggested_selectors,
+              identity_data, logical_key, status
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            RETURNING *
+          `, [
+            elementData.id || elementData.element_id,
+            elementData.page,
+            'locator_change',
+            `Element locators changed. Previous: CSS="${existing.css_selector}", XPath="${existing.xpath?.replace(/"/g, '\\"')}". New: CSS="${newCssSelector}", XPath="${newXpath?.replace(/"/g, '\\"')}"`,
+            existing.id,
+            JSON.stringify([existing.css_selector, existing.xpath]),
+            JSON.stringify([newCssSelector, newXpath]),
+            JSON.stringify(identityData),
+            logicalKey,
+            'pending'
+          ]);
+          
+          action = 'review_enqueued';
+          reviewItem = reviewResult.rows[0];
+          
+          console.log(`📝 Review item created for element ${logicalKey} - selectors changed`);
+          
+          // When review is created, don't create a new element - wait for review resolution
+          return res.json({
+            success: true,
+            action,
+            element: existing, // Return the existing element
+            reviewItem
+          });
+        } else {
+          // Same selectors, just update timestamp
+          await query(`
+            UPDATE recorded_elements 
+            SET last_updated = CURRENT_TIMESTAMP 
+            WHERE id = $1
+          `, [existing.id]);
+          
+          action = 'updated_existing';
+          console.log(`🔄 Updated existing element ${logicalKey} - no selector changes`);
+          
+          // Return the updated existing element
+          return res.json({
+            success: true,
+            action,
+            element: existing,
+            reviewItem: null
+          });
+        }
+      }
+    }
+    
+    // Record the new element regardless (for history/audit trail)
+    const result = await query(`
       INSERT INTO recorded_elements (
         session_id, element_id, tag, text_content, attributes, 
-        xpath, css_selector, position_x, position_y, selectors, page
+        xpath, css_selector, position_x, position_y, selectors, page,
+        logical_key, identity_data, recorder
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
       RETURNING *
     `, [
       sessionId,
-      elementData.id,
+      elementData.id || elementData.element_id,
       elementData.tag,
-      elementData.text,
+      elementData.text_content || elementData.text,
       JSON.stringify(elementData.attributes || {}),
       elementData.xpath,
-      elementData.cssSelector,
-      elementData.position?.x || 0,
-      elementData.position?.y || 0,
+      elementData.cssSelector || elementData.css_selector,
+      elementData.position_x || elementData.position?.x || 0,
+      elementData.position_y || elementData.position?.y || 0,
       JSON.stringify(elementData.selectors || []),
-      elementData.page
+      elementData.page,
+      logicalKey,
+      JSON.stringify(identityData),
+      elementData.recorder || 'extension'
     ]);
     
-    res.status(201).json({ 
+    console.log('✅ Element recorded successfully:', result.rows[0].id);
+    console.log('📝 Action:', action);
+    console.log('🔍 Review item:', reviewItem ? 'Created' : 'None');
+    
+    const responseData = { 
       success: true, 
       data: result.rows[0],
+      action: action,
+      review_item: reviewItem,
       session_id: sessionId
-    });
+    };
+    
+    console.log('📤 Sending response...');
+    res.status(201).json(responseData);
+    console.log('✅ Response sent successfully');
   } catch (error) {
     console.error('Error recording element from Chrome Extension:', error);
     res.status(500).json({ success: false, error: error.message });
@@ -184,6 +324,318 @@ app.get('/api/chrome/all-data', async (req, res) => {
     res.json({ success: true, data: { sessions } });
   } catch (error) {
     console.error('Error fetching all data for Chrome Extension:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Get review queue items
+app.get('/api/review-queue', async (req, res) => {
+  try {
+    const { query } = require('./database');
+    const { status = 'pending', page } = req.query;
+    
+    let whereClause = 'WHERE rq.status = $1';
+    let params = [status];
+    
+    if (page) {
+      whereClause += ' AND rq.page = $2';
+      params.push(page);
+    }
+    
+    const result = await query(`
+      SELECT 
+        rq.*,
+        re_current.element_id as current_element_identifier,
+        re_current.css_selector as current_css_selector,
+        re_current.xpath as current_xpath,
+        re_current.tag as current_tag,
+        re_current.text_content as current_text
+      FROM review_queue rq
+      LEFT JOIN recorded_elements re_current ON rq.current_element_id = re_current.id
+      ${whereClause}
+      ORDER BY rq.created_at DESC
+    `, params);
+    
+    res.json({ 
+      success: true, 
+      data: result.rows,
+      count: result.rows.length 
+    });
+  } catch (error) {
+    console.error('Error fetching review queue:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Bridge endpoint to serve review queue data in the format expected by the ReviewQueuePage
+app.get('/api/v1/review/pending', async (req, res) => {
+  try {
+    const { query } = require('./database');
+    const result = await query(`
+      SELECT 
+        rq.id,
+        rq.logical_key as element_id,
+        rq.page,
+        rq.suggested_selectors,
+        rq.current_selectors,
+        0.8 as confidence_score,
+        rq.description as ai_reasoning,
+        'click' as intended_action,
+        rq.status,
+        rq.created_at,
+        rq.updated_at
+      FROM review_queue rq
+      WHERE rq.status = 'pending'
+      ORDER BY rq.created_at DESC
+    `);
+    
+    // Convert to the format expected by the frontend
+    const reviewItems = result.rows.map(row => {
+      let suggestedLocator = '';
+      let oldLocator = '';
+      
+      // Safely parse JSON fields
+      try {
+        const suggested = JSON.parse(row.suggested_selectors || '[]');
+        suggestedLocator = suggested[0] || '';
+      } catch (e) {
+        console.warn('Failed to parse suggested_selectors:', row.suggested_selectors);
+        suggestedLocator = row.suggested_selectors || '';
+      }
+      
+      try {
+        const current = JSON.parse(row.current_selectors || '[]');
+        oldLocator = current[0] || '';
+      } catch (e) {
+        console.warn('Failed to parse current_selectors:', row.current_selectors);
+        oldLocator = row.current_selectors || '';
+      }
+      
+      return {
+        id: row.id.toString(),
+        page: row.page,
+        element_id: row.element_id,
+        suggested_locator: suggestedLocator,
+        old_locator: oldLocator,
+        confidence_score: parseFloat(row.confidence_score),
+        ai_reasoning: row.ai_reasoning,
+        intended_action: row.intended_action,
+        status: row.status,
+        created_at: row.created_at,
+        updated_at: row.updated_at
+      };
+    });
+    
+    res.json(reviewItems);
+  } catch (error) {
+    console.error('Error fetching review items for ReviewQueuePage:', error);
+    res.status(500).json([]);
+  }
+});
+
+// Update review status endpoint for ReviewQueuePage compatibility
+app.patch('/api/v1/review/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, reviewer_notes } = req.body;
+    const { query } = require('./database');
+    
+    const result = await query(`
+      UPDATE review_queue 
+      SET 
+        status = $1,
+        resolution_notes = $2,
+        updated_at = NOW()
+      WHERE id = $3
+      RETURNING *
+    `, [status, reviewer_notes || null, id]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Review item not found' });
+    }
+    
+    // Return in expected format
+    const row = result.rows[0];
+    const reviewItem = {
+      id: row.id.toString(),
+      page: row.page,
+      element_id: row.logical_key,
+      suggested_locator: row.suggested_selectors?.[0] || '',
+      old_locator: row.current_selectors?.[0] || '',
+      confidence_score: 0.8,
+      ai_reasoning: row.description,
+      intended_action: 'click',
+      status: row.status,
+      created_at: row.created_at,
+      updated_at: row.updated_at
+    };
+    
+    res.json(reviewItem);
+  } catch (error) {
+    console.error('Error updating review status:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Verify endpoint (placeholder for ReviewQueuePage compatibility)
+app.post('/api/v1/review/:id/verify', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // For now, just return a mock verification result
+    res.json({
+      review_id: id,
+      heuristic_pass: true,
+      functional_pass: true,
+      details: {
+        message: 'Verification not implemented yet - returning mock data'
+      }
+    });
+  } catch (error) {
+    console.error('Error verifying review item:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Suggest alternatives endpoint (placeholder for ReviewQueuePage compatibility)
+app.post('/api/v1/review/suggest', async (req, res) => {
+  try {
+    // For now, just return mock suggestions
+    res.json({
+      alternatives: [
+        {
+          selector: 'Alternative selector 1',
+          confidence: 0.9,
+          ai_reasoning: 'This is a mock alternative suggestion'
+        },
+        {
+          selector: 'Alternative selector 2', 
+          confidence: 0.7,
+          ai_reasoning: 'This is another mock alternative'
+        }
+      ]
+    });
+  } catch (error) {
+    console.error('Error generating suggestions:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Resolve review queue item
+app.post('/api/review-queue/:id/resolve', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { action, notes } = req.body; // action: 'approve', 'reject', 'merge'
+    const { query } = require('./database');
+    
+    console.log(`🔍 Resolving review ${id} with action: ${action}`);
+    
+    // Get the review item first
+    const reviewResult = await query(`
+      SELECT * FROM review_queue WHERE id = $1
+    `, [id]);
+    
+    if (reviewResult.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Review item not found' });
+    }
+    
+    const reviewItem = reviewResult.rows[0];
+    console.log(`📋 Review item:`, reviewItem);
+    
+    // If approving, update the element with new selectors
+    if (action === 'approve') {
+      let suggestedSelectors = [];
+      
+      console.log('🔍 Debug suggested_selectors:', {
+        value: reviewItem.suggested_selectors,
+        type: typeof reviewItem.suggested_selectors,
+        isArray: Array.isArray(reviewItem.suggested_selectors),
+        stringified: JSON.stringify(reviewItem.suggested_selectors)
+      });
+      
+      // Handle the suggested selectors - they might already be an array or a JSON string
+      if (Array.isArray(reviewItem.suggested_selectors)) {
+        suggestedSelectors = reviewItem.suggested_selectors;
+      } else {
+        // Safely parse the suggested selectors JSON
+        try {
+          suggestedSelectors = JSON.parse(reviewItem.suggested_selectors || '[]');
+        } catch (e) {
+          console.warn('Failed to parse suggested_selectors, using fallback:', reviewItem.suggested_selectors);
+          // If JSON parsing fails, treat it as a single selector string
+          suggestedSelectors = [reviewItem.suggested_selectors || ''];
+        }
+      }
+      
+      console.log(`✅ Approving review: updating element ${reviewItem.current_element_id} with selectors:`, suggestedSelectors);
+      console.log('🔍 suggestedSelectors analysis:', suggestedSelectors.map((sel, i) => ({ 
+        index: i, 
+        value: sel, 
+        type: typeof sel, 
+        isString: typeof sel === 'string',
+        hasStartsWith: sel && typeof sel.startsWith === 'function'
+      })));
+      
+      // Separate CSS and XPath selectors
+      let cssSelector = '';
+      let xpathSelector = '';
+      
+      suggestedSelectors.forEach((selector, index) => {
+        console.log(`🔍 Processing selector ${index}:`, { selector, type: typeof selector });
+        if (typeof selector === 'string') {
+          if (selector.startsWith('//') || selector.startsWith('//*')) {
+            xpathSelector = selector;
+            console.log(`📍 Set XPath: ${selector}`);
+          } else {
+            cssSelector = selector;
+            console.log(`📍 Set CSS: ${selector}`);
+          }
+        } else {
+          console.warn(`⚠️ Selector at index ${index} is not a string:`, selector, typeof selector);
+        }
+      });
+      
+      // Fallback: if we don't have both types, use the first selector as CSS
+      if (!cssSelector && suggestedSelectors.length > 0) {
+        cssSelector = suggestedSelectors[0];
+      }
+      if (!xpathSelector && suggestedSelectors.length > 1) {
+        xpathSelector = suggestedSelectors[1];
+      }
+      
+      console.log(`📝 Updating with CSS: "${cssSelector}", XPath: "${xpathSelector}"`);
+      
+      await query(`
+        UPDATE recorded_elements 
+        SET 
+          css_selector = $1,
+          xpath = $2,
+          last_updated = CURRENT_TIMESTAMP
+        WHERE id = $3
+      `, [cssSelector, xpathSelector, reviewItem.current_element_id]);
+      
+      console.log(`✅ Updated element ${reviewItem.current_element_id} with new selectors`);
+    }
+    
+    // Mark the review as resolved
+    const result = await query(`
+      UPDATE review_queue 
+      SET 
+        status = $1,
+        resolved_by = $2,
+        resolved_at = CURRENT_TIMESTAMP,
+        resolution_notes = $3
+      WHERE id = $4
+      RETURNING *
+    `, [action, 'system', notes || '', id]);
+
+    res.json({ 
+      success: true, 
+      data: result.rows[0],
+      message: `Review item ${action}d successfully`
+    });
+  } catch (error) {
+    console.error('Error resolving review item:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });

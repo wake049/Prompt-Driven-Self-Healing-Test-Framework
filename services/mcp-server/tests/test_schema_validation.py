@@ -13,8 +13,8 @@ import sys
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
-from schema_validator import SchemaValidator, ToolSchemaValidator
-from error_model import ErrorCode, ErrorCategory
+from core.schema_validator import SchemaValidator, ToolSchemaValidator
+from core.error_model import ErrorCode, ErrorCategory
 
 
 class TestSchemaValidation:

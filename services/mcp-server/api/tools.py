@@ -11,8 +11,8 @@ import logging
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from error_model import MCPError, get_http_status_code, ErrorCode
-from auth_middleware import get_current_auth, get_request_context
+from core.error_model import get_http_status_code, ErrorCode
+from core.auth_middleware import get_current_auth, get_request_context
 
 logger = logging.getLogger(__name__)
 

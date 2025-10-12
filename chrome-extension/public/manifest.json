@@ -1,42 +1,18 @@
 {
   "manifest_version": 3,
-  "name": "MCP Test Runner",
-  "version": "1.0.0",
-  "description": "Frontend-only test runner for web apps with MCP-style tools",
-  
-  "permissions": [
-    "activeTab",
-    "storage",
-    "scripting"
-  ],
-
-  "background": {
-    "service_worker": "background.js",
-    "type": "module"
+  "name": "Prompt-Driven Test Recorder",
+  "version": "0.4.0",
+  "action": { "default_popup": "popup.html" },
+  "permissions": ["activeTab", "scripting", "storage"],
+  "host_permissions": ["http://localhost:3001/*", "https://*/*", "http://*/*"],
+  "background": { 
+    "service_worker": "background.js"
   },
-
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
       "js": ["content.js"],
-      "run_at": "document_idle",
-      "type": "module"
+      "run_at": "document_idle"
     }
-  ],
-
-  "action": {
-    "default_popup": "popup.html",
-    "default_title": "MCP Test Runner"
-  },
-
-  "web_accessible_resources": [
-    {
-      "resources": ["*"],
-      "matches": ["<all_urls>"]
-    }
-  ],
-
-  "host_permissions": [
-    "<all_urls>"
   ]
 }

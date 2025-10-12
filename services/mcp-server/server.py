@@ -9,10 +9,10 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime, timezone
 import json
 
-from config import MCPConfig
-from tool_registry import ToolRegistry
-from schema_validator import validate_tool_request, validate_tool_response
-from error_model import MCPError, ErrorFactory, ErrorCode, get_http_status_code
+from core.config import MCPConfig
+from api.tool_registry import ToolRegistry
+from core.schema_validator import validate_tool_request, validate_tool_response
+from core.error_model import MCPError, ErrorFactory, ErrorCode, get_http_status_code
 
 logger = logging.getLogger(__name__)
 
@@ -219,7 +219,7 @@ class MCPServer:
     async def list_tools(self, category: str = None) -> dict:
         """List available tools"""
         try:
-            from tool_registry import ToolCategory
+            from api.tool_registry import ToolCategory
             
             # Convert string category to enum if provided
             tool_category = None

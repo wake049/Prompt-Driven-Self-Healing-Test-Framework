@@ -17,10 +17,10 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 # Import MCP server components
 from server import MCPServer
-from config import MCPConfig
-from tool_registry import ToolRegistry
-from error_model import ErrorCode, ErrorCategory
-from schema_validator import ToolSchemaValidator
+from core.config import MCPConfig
+from api.tool_registry import ToolRegistry
+from core.error_model import ErrorCode, ErrorCategory
+from core.schema_validator import ToolSchemaValidator
 
 
 class TestMCPServerIntegration:

@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Extension Debug Test</title>
+</head>
+<body>
+    <h1>Extension Debug Test Page</h1>
+    <p>This is a test page to verify the Chrome extension functionality.</p>
+    <button id="test-button">Test Button</button>
+    <input type="text" id="test-input" placeholder="Test input">
+    <a href="#" id="test-link">Test Link</a>
+    
+    <script>
+        // Add some basic logging
+        console.log('Test page loaded');
+        
+        // Add click handlers for testing
+        document.getElementById('test-button').addEventListener('click', () => {
+            console.log('Test button clicked');
+        });
+        
+        document.getElementById('test-input').addEventListener('input', (e) => {
+            console.log('Test input value:', e.target.value);
+        });
+        
+        document.getElementById('test-link').addEventListener('click', (e) => {
+            e.preventDefault();
+            console.log('Test link clicked');
+        });
+    </script>
+</body>
+</html>

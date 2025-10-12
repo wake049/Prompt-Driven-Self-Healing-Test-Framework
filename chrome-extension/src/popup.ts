@@ -1,22 +1,46 @@
 class MCPClient {
   private isRecording = false;
-  
+
   constructor() {
     this.initializeUI();
   }
 
+  // ---------- helpers added ----------
+  private async getActiveTab(): Promise<chrome.tabs.Tab> {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab || !tab.id || !tab.url) throw new Error("No active tab");
+    if (!/^https?:/i.test(tab.url)) {
+      throw new Error("This page type doesn’t allow content scripts. Open a normal http(s) page.");
+    }
+    return tab;
+  }
+
+  private async ensureContentScript(tabId: number): Promise<void> {
+    // try a quick ping first
+    try {
+      await chrome.tabs.sendMessage(tabId, { type: "PING_CONTENT" });
+      return; // content script already there
+    } catch {
+      // inject and ping again
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        files: ["content.js"],
+        world: "ISOLATED"
+      });
+      // small delay then ping
+      await new Promise(r => setTimeout(r, 50));
+      await chrome.tabs.sendMessage(tabId, { type: "PING_CONTENT" });
+    }
+  }
+  // -----------------------------------
+
   private async initializeUI() {
     this.setupEventListeners();
-    
-    // Auto-populate page context
     await this.updatePageContext();
-    
-    // Check for any stored recording data
     await this.checkForRecordingData();
   }
 
   private setupEventListeners() {
-    // Recording controls
     const recordBtn = document.getElementById('record-btn') as HTMLButtonElement;
     const stopRecordBtn = document.getElementById('stop-record-btn') as HTMLButtonElement;
     const suggestBtn = document.getElementById('suggest-btn') as HTMLButtonElement;
@@ -27,201 +51,136 @@ class MCPClient {
     suggestBtn?.addEventListener('click', () => this.suggestOptimizedElements());
     suggestLegacyBtn?.addEventListener('click', () => this.suggestElements());
 
-    // Quick action buttons
     const viewElementsBtn = document.getElementById('view-elements-btn') as HTMLButtonElement;
+    const viewReviewBtn = document.getElementById('view-review-btn') as HTMLButtonElement;
     const clearElementsBtn = document.getElementById('clear-elements-btn') as HTMLButtonElement;
-    
     viewElementsBtn?.addEventListener('click', () => this.openElementsViewer());
+    viewReviewBtn?.addEventListener('click', () => this.openReviewViewer());
     clearElementsBtn?.addEventListener('click', () => this.clearAllElements());
 
-    // Page declaration
     const declarePageBtn = document.getElementById('declare-page-btn') as HTMLButtonElement;
     declarePageBtn?.addEventListener('click', () => this.declarePage());
 
-    // Listen for recording data
     chrome.runtime.onMessage.addListener((request, _sender, _sendResponse) => {
       if (request.type === 'RECORDING_DATA') {
-        console.log('Popup received recording data:', request.payload);
         this.handleRecordedElement(request.payload);
       }
     });
 
-    // Also set up periodic checking for recording data from storage
     this.setupRecordingDataPolling();
   }
 
   private async updatePageContext() {
     try {
-      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (tabs[0]) {
-        const pageContextInput = document.getElementById('page-context') as HTMLInputElement;
-        if (pageContextInput) {
-          const url = new URL(tabs[0].url || '');
-          const pageTitle = tabs[0].title || 'Untitled Page';
-          const pathname = url.pathname;
-          
-          // Create a clean page name - prefer URL path over generic titles
-          let pageName = pageTitle;
-          
-          // If title is too generic or company name, use URL path instead
-          const genericTitles = ['swag labs', 'sauce labs', 'demo', 'test', 'home', 'welcome'];
-          const isGenericTitle = genericTitles.some(generic => 
-            pageTitle.toLowerCase().includes(generic.toLowerCase())
-          );
-          
-          
-          if (isGenericTitle || pageTitle.length > 50) {
-            // Extract meaningful name from URL path
-            const pathParts = pathname.split('/').filter(part => part && part !== 'index.html');
-            
-            if (pathParts.length > 0) {
-              // Use the last meaningful part of the path
-              const lastPart = pathParts[pathParts.length - 1];
-              // Remove file extensions and clean up
-              const cleanPart = lastPart.replace(/\.(html|htm|php|asp|jsp)$/i, '');
-              pageName = cleanPart.charAt(0).toUpperCase() + cleanPart.slice(1).replace(/[-_]/g, ' ');
-            } else {
-              // Check if we're on root/home page - use "Home" instead of domain
-              if (pathname === '/' || pathname === '' || pathname === '/index.html') {
-                pageName = 'Home';
-              } else {
-                // Use domain name if no meaningful path
-                const domain = url.hostname.replace('www.', '');
-                pageName = domain.split('.')[0].charAt(0).toUpperCase() + domain.split('.')[0].slice(1);
-              }
-            }
-          }
-          
-          // Final fallback - ensure we never have an empty page name
-          if (!pageName || pageName.trim() === '') {
-            pageName = 'Unknown Page';
-          }
-          
-          // Ensure page name is reasonable length
-          if (pageName.length > 50) {
-            pageName = pageName.substring(0, 50).trim() + '...';
-          }
-          pageContextInput.value = pageName;
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (!tab) return;
+      const input = document.getElementById('page-context') as HTMLInputElement;
+      if (!input) return;
+
+      const url = tab.url ? new URL(tab.url) : null;
+      const pageTitle = tab.title || 'Untitled Page';
+      const pathname = url?.pathname || '';
+
+      let pageName = pageTitle;
+      const generic = ['swag labs','sauce labs','demo','test','home','welcome'];
+      if (generic.some(g => pageTitle.toLowerCase().includes(g)) || pageTitle.length > 50) {
+        const parts = pathname.split('/').filter(p => p && p !== 'index.html');
+        if (parts.length) {
+          const last = parts.at(-1)!.replace(/\.(html|htm|php|asp|jsp)$/i, '');
+          pageName = last.charAt(0).toUpperCase() + last.slice(1).replace(/[-_]/g, ' ');
+        } else if (pathname === '/' || pathname === '' || pathname === '/index.html') {
+          pageName = 'Home';
+        } else if (url) {
+          const domain = url.hostname.replace('www.','');
+          pageName = domain.split('.')[0].replace(/-/g,' ');
+          pageName = pageName.charAt(0).toUpperCase() + pageName.slice(1);
         }
       }
-    } catch (error) {
-      console.warn('Failed to update page context:', error);
+      if (!pageName.trim()) pageName = 'Unknown Page';
+      if (pageName.length > 50) pageName = pageName.slice(0, 50).trim() + '...';
+      input.value = pageName;
+    } catch (e) {
+      console.warn('Failed to update page context:', e);
     }
   }
 
   private async checkForRecordingData() {
     try {
-      const storedData = localStorage.getItem('mcp-recorded-elements');
-      if (storedData) {
-        const elements = JSON.parse(storedData);
-      }
-    } catch (error) {
-      console.warn('Failed to check for recording data:', error);
+      const stored = localStorage.getItem('mcp-recorded-elements');
+      if (stored) JSON.parse(stored);
+    } catch (e) {
+      console.warn('Failed to check for recording data:', e);
     }
   }
 
   private setupRecordingDataPolling() {
-    // Poll every second for new recording data when recording is active
-    setInterval(() => {
-      if (this.isRecording) {
-        this.checkForNewRecordingData();
-      }
-    }, 1000);
+    setInterval(() => { if (this.isRecording) this.checkForNewRecordingData(); }, 1000);
   }
 
   private async checkForNewRecordingData() {
     try {
-      const storedData = localStorage.getItem('mcp-recorded-elements');
-      if (storedData) {
-        const elements = JSON.parse(storedData);
-        // Process any new elements here if needed
-      }
-    } catch (error) {
-      console.warn('Failed to check for new recording data:', error);
+      const stored = localStorage.getItem('mcp-recorded-elements');
+      if (stored) JSON.parse(stored);
+    } catch (e) {
+      console.warn('Failed to check for new recording data:', e);
     }
   }
 
   private async startRecording() {
     try {
-      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (!tabs[0]) {
-        this.showError('No active tab found');
-        return;
-      }
-
-      await chrome.tabs.sendMessage(tabs[0].id!, { type: 'START_RECORDING' });
-      
+      const tab = await this.getActiveTab();
+      await this.ensureContentScript(tab.id!);
+      await chrome.tabs.sendMessage(tab.id!, { type: 'START_RECORDING' });
       this.isRecording = true;
       this.updateRecordingUI();
     } catch (error) {
       console.error('Failed to start recording:', error);
-      this.showError('Failed to start recording');
+      this.showError(error instanceof Error ? error.message : 'Failed to start recording');
     }
   }
 
   private async stopRecording() {
     try {
-      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (tabs[0]) {
-        await chrome.tabs.sendMessage(tabs[0].id!, { type: 'STOP_RECORDING' });
-      }
-      
+      const tab = await this.getActiveTab();
+      await this.ensureContentScript(tab.id!);                 // optional, keeps symmetry
+      await chrome.tabs.sendMessage(tab.id!, { type: 'STOP_RECORDING' });
       this.isRecording = false;
       this.updateRecordingUI();
     } catch (error) {
       console.error('Failed to stop recording:', error);
-      this.showError('Failed to stop recording');
+      this.showError(error instanceof Error ? error.message : 'Failed to stop recording');
     }
   }
 
   private updateRecordingUI() {
     const recordBtn = document.getElementById('record-btn') as HTMLButtonElement;
     const stopRecordBtn = document.getElementById('stop-record-btn') as HTMLButtonElement;
-    const instructionsPanel = document.getElementById('recording-instructions');
+    const panel = document.getElementById('recording-instructions');
 
-    if (recordBtn && stopRecordBtn) {
-      if (this.isRecording) {
-        recordBtn.disabled = true;
-        recordBtn.classList.add('recording');
-        stopRecordBtn.disabled = false;
-        if (instructionsPanel) instructionsPanel.style.display = 'block';
-      } else {
-        recordBtn.disabled = false;
-        recordBtn.classList.remove('recording');
-        stopRecordBtn.disabled = true;
-        if (instructionsPanel) instructionsPanel.style.display = 'none';
-      }
+    if (!recordBtn || !stopRecordBtn) return;
+    if (this.isRecording) {
+      recordBtn.disabled = true;
+      recordBtn.classList.add('recording');
+      stopRecordBtn.disabled = false;
+      if (panel) panel.style.display = 'block';
+    } else {
+      recordBtn.disabled = false;
+      recordBtn.classList.remove('recording');
+      stopRecordBtn.disabled = true;
+      if (panel) panel.style.display = 'none';
     }
   }
 
   private async declarePage() {
     try {
-      const pageContextInput = document.getElementById('page-context') as HTMLInputElement;
-      const pageName = pageContextInput?.value || 'Unknown Page';
-      
-      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (!tabs[0]) {
-        this.showError('No active tab found');
-        return;
-      }
-
+      const input = document.getElementById('page-context') as HTMLInputElement;
+      const page = input?.value || 'Unknown Page';
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       const response = await chrome.runtime.sendMessage({
         method: 'tools/call',
-        params: {
-          name: 'page.declare',
-          arguments: {
-            page: pageName,
-            url: tabs[0].url,
-            timestamp: Date.now()
-          }
-        }
+        params: { name: 'page.declare', arguments: { page, url: tab?.url, timestamp: Date.now() } }
       });
-
-      if (response.success) {
-        console.log('Page declared successfully:', pageName);
-      } else {
-        this.showError('Failed to declare page');
-      }
+      if (!response?.success) throw new Error('Failed to declare page');
     } catch (error) {
       console.error('Failed to declare page:', error);
       this.showError('Failed to declare page');
@@ -233,169 +192,92 @@ class MCPClient {
   }
 
   private showRecordingFeedback(element: any) {
-    const recordBtn = document.getElementById('record-btn') as HTMLButtonElement;
-    if (recordBtn && this.isRecording) {
-      const originalText = recordBtn.textContent;
-      recordBtn.textContent = '✓ Captured!';
-      recordBtn.style.background = '#28a745';
-      
-      setTimeout(() => {
-        recordBtn.textContent = originalText;
-        recordBtn.style.background = '';
-      }, 1500);
-    }
+    const btn = document.getElementById('record-btn') as HTMLButtonElement;
+    if (!btn || !this.isRecording) return;
+    const orig = btn.textContent;
+    btn.textContent = '✓ Captured!';
+    btn.style.background = '#28a745';
+    setTimeout(() => { btn.textContent = orig || 'Record'; btn.style.background = ''; }, 1500);
   }
 
   private async suggestOptimizedElements(): Promise<void> {
+    const btn = document.getElementById('suggest-btn') as HTMLButtonElement;
+    const intentInput = document.getElementById('intent-input') as HTMLInputElement;
+    const status = document.getElementById('suggestion-status');
+    const msg = document.getElementById('suggestion-message');
     try {
-      const suggestBtn = document.getElementById('suggest-btn') as HTMLButtonElement;
-      const intentInput = document.getElementById('intent-input') as HTMLInputElement;
-      const statusPanel = document.getElementById('suggestion-status');
-      const messageElement = document.getElementById('suggestion-message');
-      
       const intent = intentInput?.value?.trim() || '';
-      
-      // Show status panel and disable button
-      if (statusPanel) statusPanel.style.display = 'block';
-      if (suggestBtn) {
-        suggestBtn.disabled = true;
-        suggestBtn.textContent = intent ? '🎯 Analyzing...' : '🔍 Discovering...';
-      }
-      if (messageElement) {
-        messageElement.textContent = intent 
-          ? `Searching for elements related to: "${intent}"...`
-          : 'Discovering all interactive elements on the page...';
-      }
+      if (status) status.style.display = 'block';
+      if (btn) { btn.disabled = true; btn.textContent = intent ? '🎯 Analyzing...' : '🔍 Discovering...'; }
+      if (msg) msg.textContent = intent ? `Searching for elements related to: "${intent}"...`
+                                        : 'Discovering all interactive elements on the page...';
 
-      // Get the current active tab
-      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (!tabs[0]) {
-        throw new Error('No active tab found');
-      }
+      const tab = await this.getActiveTab();
+      await this.ensureContentScript(tab.id!);                 // ✅ ensure content.js
 
-      // Send message to content script to suggest elements
-      const response = await chrome.tabs.sendMessage(tabs[0].id!, {
+      const response = await chrome.tabs.sendMessage(tab.id!, {
         type: intent ? 'SUGGEST_OPTIMIZED_SELECTOR' : 'SUGGEST_ELEMENTS',
         payload: intent ? { intent } : {}
       });
 
-      if (response?.success) {
-        if (messageElement) {
-          messageElement.textContent = intent 
-            ? `Found elements for "${intent}"! Check the elements page for results.`
-            : 'Element discovery completed! Check the elements page for results.';
-        }
-        
-        setTimeout(() => {
-          if (statusPanel) statusPanel.style.display = 'none';
-        }, 3000);
-      } else {
-        throw new Error(response?.error || 'Failed to get suggestions');
-      }
-      
+      if (!response?.success) throw new Error(response?.error || 'Failed to get suggestions');
+      if (msg) msg.textContent = intent
+        ? `Found elements for "${intent}"! Check the elements page for results.`
+        : 'Element discovery completed! Check the elements page for results.';
+      setTimeout(() => { if (status) status.style.display = 'none'; }, 3000);
     } catch (error) {
       console.error('Element suggestion failed:', error);
-      const messageElement = document.getElementById('suggestion-message');
-      if (messageElement) {
-        messageElement.textContent = `AI suggestion failed: ${error instanceof Error ? error.message : String(error)}`;
-      }
-      
-      setTimeout(() => {
-        const statusPanel = document.getElementById('suggestion-status');
-        if (statusPanel) statusPanel.style.display = 'none';
-      }, 5000);
+      const text = error instanceof Error ? error.message : String(error);
+      if (msg) msg.textContent = `AI suggestion failed: ${text}`;
+      setTimeout(() => { if (status) status.style.display = 'none'; }, 5000);
     } finally {
-      const suggestBtn = document.getElementById('suggest-btn') as HTMLButtonElement;
-      if (suggestBtn) {
-        suggestBtn.disabled = false;
-        suggestBtn.textContent = '🔍 Discover Elements';
-      }
+      if (btn) { btn.disabled = false; btn.textContent = '🔍 Discover Elements'; }
     }
   }
 
   private async suggestElements(): Promise<void> {
+    const btn = document.getElementById('suggest-legacy-btn') as HTMLButtonElement;
+    const status = document.getElementById('suggestion-status');
+    const msg = document.getElementById('suggestion-message');
     try {
-      const suggestBtn = document.getElementById('suggest-legacy-btn') as HTMLButtonElement;
-      const statusPanel = document.getElementById('suggestion-status');
-      const messageElement = document.getElementById('suggestion-message');
-      
-      // Show status panel and disable button
-      if (statusPanel) statusPanel.style.display = 'block';
-      if (suggestBtn) {
-        suggestBtn.disabled = true;
-        suggestBtn.textContent = '🤖 Analyzing...';
-      }
-      if (messageElement) {
-        messageElement.textContent = 'Analyzing page structure and suggesting test elements...';
-      }
+      if (status) status.style.display = 'block';
+      if (btn) { btn.disabled = true; btn.textContent = '🤖 Analyzing...'; }
+      if (msg) msg.textContent = 'Analyzing page structure and suggesting test elements...';
 
-      // Get the current active tab
-      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (!tabs[0]) {
-        throw new Error('No active tab found');
-      }
+      const tab = await this.getActiveTab();
+      await this.ensureContentScript(tab.id!);                 // ✅ ensure content.js
 
-      // Send message to content script to suggest elements
-      const response = await chrome.tabs.sendMessage(tabs[0].id!, {
-        type: 'SUGGEST_ELEMENTS',
-        payload: {}
-      });
+      const response = await chrome.tabs.sendMessage(tab.id!, { type: 'SUGGEST_ELEMENTS', payload: {} });
+      if (!response?.success) throw new Error(response?.error || 'Failed to get suggestions');
 
-      if (response?.success) {
-        if (messageElement) {
-          messageElement.textContent = 'AI suggestions completed! Check the elements page for results.';
-        }
-        
-        setTimeout(() => {
-          if (statusPanel) statusPanel.style.display = 'none';
-        }, 3000);
-      } else {
-        throw new Error(response?.error || 'Failed to get suggestions');
-      }
-      
+      if (msg) msg.textContent = 'AI suggestions completed! Check the elements page for results.';
+      setTimeout(() => { if (status) status.style.display = 'none'; }, 3000);
     } catch (error) {
       console.error('Element suggestion failed:', error);
-      const messageElement = document.getElementById('suggestion-message');
-      if (messageElement) {
-        messageElement.textContent = `AI suggestion failed: ${error instanceof Error ? error.message : String(error)}`;
-      }
-      
-      setTimeout(() => {
-        const statusPanel = document.getElementById('suggestion-status');
-        if (statusPanel) statusPanel.style.display = 'none';
-      }, 5000);
+      if (msg) msg.textContent = `AI suggestion failed: ${error instanceof Error ? error.message : String(error)}`;
+      setTimeout(() => { if (status) status.style.display = 'none'; }, 5000);
     } finally {
-      const suggestBtn = document.getElementById('suggest-legacy-btn') as HTMLButtonElement;
-      if (suggestBtn) {
-        suggestBtn.disabled = false;
-        suggestBtn.textContent = '🤖 AI Suggest (Legacy)';
-      }
+      if (btn) { btn.disabled = false; btn.textContent = '🤖 AI Suggest (Legacy)'; }
     }
   }
 
   private openElementsViewer(): void {
-    // Open the React frontend in a new tab
     chrome.tabs.create({ url: 'http://localhost:3000' });
+  }
+
+  private openReviewViewer(): void {
+    chrome.tabs.create({ url: 'http://localhost:3000/review' });
   }
 
   private async clearAllElements(): Promise<void> {
     try {
       const confirmed = confirm('Are you sure you want to clear all recorded elements? This action cannot be undone.');
       if (!confirmed) return;
-
-      // Call the backend to clear all elements
       const response = await fetch('http://localhost:3001/api/elements', {
-        method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-        }
+        method: 'DELETE', headers: { 'Content-Type': 'application/json' }
       });
-
-      if (response.ok) {
-        alert('All elements cleared successfully!');
-      } else {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
+      if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      alert('All elements cleared successfully!');
     } catch (error) {
       console.error('Failed to clear elements:', error);
       alert(`Failed to clear elements: ${error instanceof Error ? error.message : String(error)}`);
@@ -404,11 +286,9 @@ class MCPClient {
 
   private showError(message: string) {
     console.error(message);
-    // Could add visual error display here
   }
 }
 
-// Initialize the MCP client when the popup is loaded
 document.addEventListener('DOMContentLoaded', () => {
   new MCPClient();
 });

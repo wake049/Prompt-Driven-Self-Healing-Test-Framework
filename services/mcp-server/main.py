@@ -1,9 +1,3 @@
-#!/usr/bin/env python3
-"""
-MCP Server Bootstrap
-Main entry point for the Model Context Protocol server
-"""
-
 import asyncio
 import logging
 import signal
@@ -14,10 +8,12 @@ from typing import AsyncGenerator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from config import MCPConfig
+from api.review import router as review_router
+
+from core.config import MCPConfig
 from server import MCPServer
-from tool_registry import ToolRegistry
-from auth_middleware import AuthMiddleware
+from api.tool_registry import ToolRegistry
+from core.auth_middleware import AuthMiddleware
 
 
 # Configure logging
@@ -75,24 +71,22 @@ def create_app() -> FastAPI:
     # Add CORS middleware
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],  # Configure properly for production
+        allow_origins=["*"],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
     
     # Add authentication middleware
-    from auth_middleware import AuthMiddleware
+    from core.auth_middleware import AuthMiddleware
     
     @app.middleware("http")
     async def auth_middleware_handler(request, call_next):
         """Apply authentication middleware to all requests"""
-        # Get auth middleware from app state (will be set during startup)
         if hasattr(app.state, 'auth_middleware'):
             auth_middleware = app.state.auth_middleware
             return await auth_middleware(request, call_next)
         else:
-            # During startup, auth middleware not yet available
             return await call_next(request)
     
     # Include API routes
@@ -100,11 +94,12 @@ def create_app() -> FastAPI:
     app.include_router(health.router, prefix="/api/v1")
     app.include_router(version.router, prefix="/api/v1")
     app.include_router(tools.router, prefix="/api/v1")
+    app.include_router(review_router, prefix="/api/v1/review", tags=["review"])
     
     # Include enhanced Element Repository routes
     logger.info("Including enhanced Element Repository API...")
     try:
-        from enhanced_api import simple_router
+        from api.enhanced_api import simple_router
         app.include_router(simple_router)
         logger.info("Enhanced Element Repository API included successfully")
         logger.info(f"Enhanced routes: {[route.path for route in simple_router.routes]}")

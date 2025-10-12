@@ -1,17 +1,13 @@
 import type { 
-  MCPTool, 
-  MCPToolCallRequest, 
-  MCPToolListRequest, 
-  MCPResponse, 
+  MCPTool,
   ToolResult,
   UIAction,
   ElementRepository,
   VerificationPreset,
   ContextStore
-} from './types.js';
-import { El, SelectorResult } from './types/element.js';
-import { suggestSelector } from './background/suggester.js';
-import apiClient from './api-client.js';
+} from './types';
+import { suggestSelector } from './background/suggester';
+import apiClient from './api/api-client';
 
 class MCPToolRegistry {
   private tools: Map<string, MCPTool> = new Map();
@@ -620,6 +616,9 @@ async function checkSQLBackendHealth(): Promise<boolean> {
 }
 
 // Enhanced function to record element with better error handling
+// DISABLED: This function is no longer used to avoid duplicate API calls
+// Element recording is now handled directly in content.ts
+/*
 async function recordElementToSQL(elementData: any): Promise<{success: boolean, error?: string}> {
   try {
     // Check backend health first
@@ -641,6 +640,7 @@ async function recordElementToSQL(elementData: any): Promise<{success: boolean, 
     return { success: false, error: error.message };
   }
 }
+*/
 
 // Function to sync all local data to SQL backend
 async function syncAllDataToSQL(): Promise<{success: boolean, message?: string, error?: string}> {
@@ -765,12 +765,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.type === 'SUGGEST_SELECTOR') {  
     (async () => {
       try {
-        const { intent, url, elements } = request.payload;
+        const { intent, url, identities, payloads } = request.payload;
         
-        if (!intent || !url || !elements || !Array.isArray(elements)) {
-          throw new Error('Invalid request: missing intent, url, or elements');
+        if (!intent || !url || !identities || !Array.isArray(identities) || !payloads || !Array.isArray(payloads)) {
+          throw new Error('Invalid request: missing intent, url, identities, or payloads');
         }
-        const result = await suggestSelector(intent, url, elements);        
+        const result = await suggestSelector(intent, url, identities, payloads);        
         sendResponse({
           success: true,
           ...result
@@ -867,43 +867,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         console.error('Failed to add element to local repository:', error);
       });
 
-      // Enhanced SQL backend recording
-      const sqlElementData = {
-        id: elementId,
-        tag: request.payload.tag,
-        text: request.payload.text,
-        attributes: request.payload.attributes,
-        xpath: request.payload.xpath,
-        cssSelector: request.payload.cssSelector,
-        position: request.payload.position,
-        selectors: [
-          request.payload.cssSelector,
-          request.payload.xpath,
-          ...(request.payload.selectors || [])
-        ].filter(Boolean),
-        page: elementPage
-      };
-
-      // Record to SQL backend with enhanced error handling
-      recordElementToSQL(sqlElementData).then(result => {
-        if (result.success) {
-          console.log('Element successfully saved to SQL backend');
-        } else {
-          console.warn('⚠️ Failed to save to SQL backend, stored locally:', result.error);
-          // Store as fallback data for later sync
-          chrome.storage.local.get(['sql_fallback_elements'], (result) => {
-            const fallbackElements = result.sql_fallback_elements || [];
-            fallbackElements.push({
-              elementData: sqlElementData,
-              timestamp: Date.now(),
-              error: result.error
-            });
-            chrome.storage.local.set({ sql_fallback_elements: fallbackElements.slice(-50) }); // Keep last 50
-          });
-        }
-      }).catch(error => {
-        console.error('❌ Critical error recording to SQL backend:', error);
-      });
+      // Note: SQL backend recording now handled directly by content script
+      // This avoids duplicate API calls while maintaining local storage functionality
+      console.log('Element recorded - SQL backend integration handled by content script');
     }
     
     // Try to send to popup immediately (may fail if popup is closed)
@@ -941,6 +907,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         const result = await syncAllDataToSQL();
         
         // Also sync any fallback elements that failed previously
+        // DISABLED: Fallback sync disabled since recordElementToSQL is disabled
+        // This was causing duplicate API calls
+        /*
         const fallbackResult = await chrome.storage.local.get(['sql_fallback_elements']);
         const fallbackElements = fallbackResult.sql_fallback_elements || [];
         
@@ -965,6 +934,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             message: `${result.message || ''} + ${syncedFallback} fallback elements synced`
           };
         }
+        */
         
         return result;
       } catch (error: any) {
