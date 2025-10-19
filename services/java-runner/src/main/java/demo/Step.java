@@ -1,0 +1,78 @@
+package demo;
+
+import com.fasterxml.jackson.annotation.JsonProperty;
+
+public class Step {
+    @JsonProperty("page")
+    private String page;
+    
+    @JsonProperty("action")
+    private String action;
+    
+    @JsonProperty("locator")
+    private String locator;
+    
+    @JsonProperty("elementId")
+    private String elementId;
+    
+    @JsonProperty("data")
+    private String data;
+
+    // Default constructor for Jackson
+    public Step() {}
+
+    public Step(String page, String action, String locator, String elementId, String data) {
+        this.page = page;
+        this.action = action;
+        this.locator = locator;
+        this.elementId = elementId;
+        this.data = data;
+    }
+
+    // Getters and setters
+    public String getPage() {
+        return page;
+    }
+
+    public void setPage(String page) {
+        this.page = page;
+    }
+
+    public String getAction() {
+        return action;
+    }
+
+    public void setAction(String action) {
+        this.action = action;
+    }
+
+    public String getLocator() {
+        return locator;
+    }
+
+    public void setLocator(String locator) {
+        this.locator = locator;
+    }
+
+    public String getElementId() {
+        return elementId;
+    }
+
+    public void setElementId(String elementId) {
+        this.elementId = elementId;
+    }
+
+    public String getData() {
+        return data;
+    }
+
+    public void setData(String data) {
+        this.data = data;
+    }
+
+    @Override
+    public String toString() {
+        return String.format("Step{page='%s', action='%s', locator='%s', elementId='%s', data='%s'}", 
+                           page, action, locator, elementId, data);
+    }
+}

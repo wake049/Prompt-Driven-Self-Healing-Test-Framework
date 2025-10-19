@@ -640,6 +640,82 @@ app.post('/api/review-queue/:id/resolve', async (req, res) => {
   }
 });
 
+// Submit healing data from Java framework
+app.post('/api/v1/healing/submit', async (req, res) => {
+  try {
+    const { healing_attempts, session_id, test_run_id } = req.body;
+    const { query } = require('./database');
+    
+    console.log(`🩹 Received healing submission with ${healing_attempts?.length || 0} attempts`);
+    
+    if (!healing_attempts || !Array.isArray(healing_attempts)) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Invalid healing_attempts data' 
+      });
+    }
+
+    let createdReviews = 0;
+    
+    // Process each healing attempt and create review items
+    for (const attempt of healing_attempts) {
+      if (attempt.result === 'SUCCESS' && attempt.healedLocator) {
+        // Create a review item for the successful healing
+        const reviewResult = await query(`
+          INSERT INTO review_queue (
+            element_identifier,
+            page,
+            issue_type,
+            description,
+            current_selectors,
+            suggested_selectors,
+            identity_data,
+            logical_key,
+            status
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+          RETURNING id
+        `, [
+          attempt.elementId || 'unknown',
+          attempt.page || 'unknown',
+          'healing_suggestion',
+          `Self-healing suggested new locator for element "${attempt.elementId}". Original locator failed, but healing found a working alternative.`,
+          JSON.stringify([attempt.originalLocator]),
+          JSON.stringify([attempt.healedLocator]),
+          JSON.stringify({
+            timestamp: attempt.timestamp,
+            attemptedAlternatives: attempt.attemptedAlternatives || [],
+            healingSource: 'java-framework'
+          }),
+          attempt.elementId || 'unknown',
+          'pending'
+        ]);
+        
+        createdReviews++;
+        console.log(`📝 Created review item for healed element: ${attempt.elementId}`);
+      }
+    }
+    
+    const successfulHealings = healing_attempts.filter(attempt => attempt.result === 'SUCCESS').length;
+    
+    console.log(`✅ Processed healing submission: ${createdReviews} review items created`);
+    
+    res.json({
+      success: true,
+      message: `Processed ${healing_attempts.length} healing attempts`,
+      successful_healings: successfulHealings,
+      created_reviews: createdReviews
+    });
+    
+  } catch (error) {
+    console.error('Error processing healing submission:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to process healing submission',
+      details: error.message 
+    });
+  }
+});
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err);

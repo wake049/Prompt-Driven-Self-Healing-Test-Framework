@@ -53,4 +53,25 @@ export const ReviewAPI = {
       `${P}/suggest${max ? `?max_alternatives=${max}` : ""}`,
       { method: "POST", body: JSON.stringify(req) }
     ),
+
+  // Healing API endpoints
+  getHealingStats: () =>
+    reviewHttp<{
+      total_attempts: number;
+      successful_healings: number;
+      failed_healings: number;
+      unique_elements: number;
+      healing_success_rate: number;
+      most_common_healings: Array<{ pattern: string; count: number }>;
+    }>("/api/v1/healing/stats"),
+
+  batchApproveHealing: (elementIds: string[]) =>
+    reviewHttp<{
+      success: boolean;
+      message: string;
+      updated_count: number;
+    }>("/api/v1/healing/batch-approve", {
+      method: "POST",
+      body: JSON.stringify(elementIds)
+    }),
 };

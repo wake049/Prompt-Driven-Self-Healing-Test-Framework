@@ -1,0 +1,11 @@
+{
+  "healing_attempts": [
+    {
+      "elementId": "test",
+      "page": "test-page",
+      "originalLocator": "css=#old",
+      "healedLocator": "css=#new",
+      "result": "SUCCESS"
+    }
+  ]
+}

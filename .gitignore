@@ -36,6 +36,13 @@ build/
 *.ipr
 *.iws
 
+# Java Test Framework specific files
+services/java-runner/healing_log.json
+services/java-runner/run_summary.json
+services/java-runner/element_repository.json
+services/java-runner/screenshots/
+services/java-runner/logs/
+
 # Node.js / Frontend
 node_modules/
 npm-debug.log*
@@ -47,6 +54,7 @@ dist/
 build/
 *.tgz
 *.tar.gz
+package-lock.json
 
 # TypeScript
 *.tsbuildinfo
@@ -84,6 +92,8 @@ services/sql-backend/uploads/
 .env.test.local
 .env.production.local
 services/sql-backend/.env
+services/ai-service/.env
+services/mcp-server/.env
 
 # Docker
 .dockerignore
@@ -127,6 +137,7 @@ chrome-extension/cache/
 # Element Repository Storage
 element_storage.json
 services/mcp-server/element_storage.json
+services/mcp-server/healing_data/
 
 # Temporary files
 *.tmp
@@ -146,6 +157,12 @@ Thumbs.db
 # MCP Server temporary files
 services/mcp-server/__pycache__/
 services/mcp-server/.pytest_cache/
+services/mcp-server/storage/
+services/mcp-server/sessions/
+
+# AI Service temporary files
+services/ai-service/logs/
+services/ai-service/temp/
 
 # Runtime files
 pid
@@ -206,4 +223,38 @@ jspm_packages/
 
 # TernJS port file
 .tern-port
+
+# WebDriver downloads
+chromedriver*
+geckodriver*
+webdriver/
+
+# Selenium grid
+selenium-server-*.jar
+
+# Test artifacts
+screenshots/
+test-reports/
+allure-results/
+
+# Security files
+*.pem
+*.key
+*.crt
+*.p12
+api-keys.json
+secrets.json
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# Maven wrapper
+.mvn/wrapper/maven-wrapper.jar
+!.mvn/wrapper/maven-wrapper.properties
+
+# Gradle wrapper
+gradle/wrapper/gradle-wrapper.jar
+!gradle/wrapper/gradle-wrapper.properties
 

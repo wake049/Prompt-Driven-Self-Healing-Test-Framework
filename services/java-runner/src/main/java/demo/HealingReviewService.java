@@ -1,0 +1,106 @@
+package demo;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.JsonNode;
+import org.apache.http.client.methods.CloseableHttpResponse;
+import org.apache.http.client.methods.HttpGet;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.entity.StringEntity;
+import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.impl.client.HttpClients;
+import org.apache.http.util.EntityUtils;
+
+import java.io.IOException;
+import java.util.List;
+import java.util.Map;
+import java.util.HashMap;
+import java.util.ArrayList;
+
+public class HealingReviewService {
+    private static final String REVIEW_API_URL = "http://localhost:3001/api/v1/healing/submit";
+    private final ObjectMapper objectMapper;
+
+    public HealingReviewService() {
+        this.objectMapper = new ObjectMapper();
+    }
+
+    public void submitHealingData(List<Map<String, Object>> healingAttempts, String sessionId, String testRunId) {
+        try {
+            System.out.println("Submitting " + healingAttempts.size() + " healing attempts for review...");
+            
+            // Create submission payload
+            Map<String, Object> submission = new HashMap<>();
+            submission.put("session_id", sessionId);
+            submission.put("test_run_id", testRunId);
+            submission.put("healing_attempts", healingAttempts);
+            
+            // Convert to JSON
+            String jsonPayload = objectMapper.writeValueAsString(submission);
+            
+            // Submit to review API
+            try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
+                HttpPost httpPost = new HttpPost(REVIEW_API_URL);
+                httpPost.setHeader("Content-Type", "application/json");
+                httpPost.setHeader("Authorization", "Bearer your-secret-token-here"); // TODO: Use proper auth
+                httpPost.setEntity(new StringEntity(jsonPayload, "UTF-8"));
+                
+                try (CloseableHttpResponse response = httpClient.execute(httpPost)) {
+                    int statusCode = response.getStatusLine().getStatusCode();
+                    String responseBody = EntityUtils.toString(response.getEntity());
+                    
+                    if (statusCode == 200) {
+                        JsonNode responseJson = objectMapper.readTree(responseBody);
+                        int successfulHealings = responseJson.get("successful_healings").asInt();
+                        int createdReviews = responseJson.get("created_reviews").asInt();
+                        String message = responseJson.get("message").asText();
+                        System.out.println("✓ Successfully submitted healing data: " + message);
+                        System.out.println("  Successful healings: " + successfulHealings);
+                        System.out.println("  Review items created: " + createdReviews);
+                    } else {
+                        System.err.println("⚠ Failed to submit healing data. Status: " + statusCode);
+                        System.err.println("Response: " + responseBody);
+                    }
+                }
+            }
+            
+        } catch (Exception e) {
+            System.err.println("⚠ Error submitting healing data for review: " + e.getMessage());
+            // Don't fail the test run if review submission fails
+        }
+    }
+
+    public boolean isReviewApiAvailable() {
+        try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
+            HttpGet httpGet = new HttpGet("http://localhost:3001/health");
+            httpGet.setHeader("Accept", "application/json");
+            
+            try (CloseableHttpResponse response = httpClient.execute(httpGet)) {
+                return response.getStatusLine().getStatusCode() < 500;
+            }
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    public static Map<String, Object> createHealingAttempt(
+            String elementId,
+            String page,
+            String originalLocator,
+            List<String> attemptedAlternatives,
+            String healedLocator,
+            String result,
+            String error) {
+        
+        Map<String, Object> attempt = new HashMap<>();
+        attempt.put("timestamp", java.time.LocalDateTime.now().toString());
+        attempt.put("elementId", elementId);
+        attempt.put("page", page != null ? page : "unknown");
+        attempt.put("originalLocator", originalLocator);
+        attempt.put("attemptedAlternatives", attemptedAlternatives != null ? attemptedAlternatives : new ArrayList<>());
+        attempt.put("healedLocator", healedLocator);
+        attempt.put("result", result);
+        attempt.put("error", error);
+        
+        return attempt;
+    }
+}

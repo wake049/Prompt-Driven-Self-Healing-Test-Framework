@@ -96,6 +96,10 @@ def create_app() -> FastAPI:
     app.include_router(tools.router, prefix="/api/v1")
     app.include_router(review_router, prefix="/api/v1/review", tags=["review"])
     
+    # Include healing API routes
+    from api.healing_simple import router as healing_router
+    app.include_router(healing_router)
+    
     # Include enhanced Element Repository routes
     logger.info("Including enhanced Element Repository API...")
     try:

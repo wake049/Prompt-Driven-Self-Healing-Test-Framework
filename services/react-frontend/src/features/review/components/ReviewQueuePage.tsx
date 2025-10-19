@@ -477,6 +477,35 @@ export default function ReviewQueuePage() {
     }
   }
 
+  async function handleBatchApproveHealing() {
+    try {
+      const healingItems = items.filter(
+        item => item.suggested_by === "java_self_healing_engine" && item.status === "pending"
+      );
+      
+      if (healingItems.length === 0) {
+        alert("No pending self-healing items to approve");
+        return;
+      }
+      
+      const confirmMessage = `Are you sure you want to approve all ${healingItems.length} self-healing items?`;
+      if (!confirm(confirmMessage)) {
+        return;
+      }
+      
+      // Approve each healing item
+      for (const item of healingItems) {
+        await handleStatus(item.id, "approved");
+      }
+      
+      alert(`Successfully approved ${healingItems.length} self-healing items!`);
+      fetchData(); // Refresh the list
+      
+    } catch (e: any) {
+      setError(e?.message ?? "Failed to batch approve healing items");
+    }
+  }
+
   const pendingCount = items.filter(item => item.status === 'pending').length;
   const approvedCount = items.filter(item => item.status === 'approved').length;
   const rejectedCount = items.filter(item => item.status === 'rejected').length;
@@ -523,9 +552,19 @@ export default function ReviewQueuePage() {
             </StatBadge>
           </Stats>
         </div>
-        <RefreshButton onClick={fetchData} disabled={loading}>
-          🔄 {loading ? 'Loading...' : 'Refresh'}
-        </RefreshButton>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          {items.filter(item => item.suggested_by === "java_self_healing_engine" && item.status === "pending").length > 0 && (
+            <RefreshButton 
+              onClick={() => handleBatchApproveHealing()}
+              style={{ backgroundColor: '#28a745' }}
+            >
+              ✅ Approve All Self-Healing
+            </RefreshButton>
+          )}
+          <RefreshButton onClick={fetchData} disabled={loading}>
+            🔄 {loading ? 'Loading...' : 'Refresh'}
+          </RefreshButton>
+        </div>
       </Header>
 
       {items.length === 0 && (
@@ -542,7 +581,22 @@ export default function ReviewQueuePage() {
               <ReviewHeader>
                 <ReviewInfo>
                   <PageBadge>{item.page}</PageBadge>
-                  <ElementId>{item.element_id}</ElementId>
+                  <ElementId>
+                    {item.element_id}
+                    {item.suggested_by === "java_self_healing_engine" && (
+                      <span style={{ 
+                        marginLeft: '8px', 
+                        fontSize: '0.7rem', 
+                        background: '#28a745', 
+                        color: 'white', 
+                        padding: '2px 6px', 
+                        borderRadius: '3px',
+                        fontWeight: 'normal'
+                      }}>
+                        SELF-HEALED
+                      </span>
+                    )}
+                  </ElementId>
                   
                   <LocatorSection>
                     <div>
@@ -571,6 +625,19 @@ export default function ReviewQueuePage() {
                     <span className="timestamp">
                       Created {new Date(item.created_at).toLocaleString()}
                     </span>
+                    {item.suggested_by === "java_self_healing_engine" && item.action_payload && (
+                      <>
+                        <br />
+                        <span style={{ fontSize: '0.75rem', color: '#28a745' }}>
+                          🔧 Auto-healed during test execution
+                        </span>
+                        {item.action_payload.healing_timestamp && (
+                          <span style={{ marginLeft: '12px', fontSize: '0.75rem' }}>
+                            Healed: {new Date(item.action_payload.healing_timestamp as string).toLocaleString()}
+                          </span>
+                        )}
+                      </>
+                    )}
                   </MetaInfo>
                 </ReviewInfo>
 
@@ -614,6 +681,30 @@ export default function ReviewQueuePage() {
                 </ReviewActions>
               </ReviewHeader>
 
+              {/* Healing attempts display */}
+              {item.suggested_by === "java_self_healing_engine" && item.action_payload && 
+               Array.isArray((item.action_payload as any).attempted_alternatives) && (
+                <AlternativesSection>
+                  <AlternativesTitle>Attempted Healing Alternatives</AlternativesTitle>
+                  <AlternativesList>
+                    {((item.action_payload as any).attempted_alternatives as string[]).map((alt: string, idx: number) => (
+                      <AlternativeItem key={idx}>
+                        <AlternativeInfo>
+                          <div className="selector">
+                            <CodeBlock>{alt}</CodeBlock>
+                          </div>
+                          <div className="meta">
+                            <span className="result">
+                              {alt === item.suggested_locator ? "✅ SUCCESS" : "❌ FAILED"}
+                            </span>
+                          </div>
+                        </AlternativeInfo>
+                      </AlternativeItem>
+                    ))}
+                  </AlternativesList>
+                </AlternativesSection>
+              )}
+              
               {/* Alternative suggestions */}
               {alts[item.id]?.length ? (
                 <AlternativesSection>

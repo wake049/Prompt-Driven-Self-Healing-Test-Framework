@@ -1,0 +1,72 @@
+[
+  {
+    "page": "saucedemo",
+    "action": "open",
+    "locator": "https://www.saucedemo.com",
+    "elementId": "page",
+    "data": "https://www.saucedemo.com"
+  },
+  {
+    "page": "saucedemo",
+    "action": "enter_text",
+    "locator": "css=#user-name",
+    "elementId": "username_field",
+    "data": "standard_user"
+  },
+  {
+    "page": "saucedemo",
+    "action": "enter_text",
+    "locator": "css=#password",
+    "elementId": "password_field",
+    "data": "secret_sauce"
+  },
+  {
+    "page": "saucedemo",
+    "action": "click",
+    "locator": "css=#login-button",
+    "elementId": "login_button",
+    "data": ""
+  },
+  {
+    "page": "saucedemo",
+    "action": "verify_element",
+    "locator": "css=.inventory_container",
+    "elementId": "inventory_container",
+    "data": ""
+  },
+  {
+    "page": "saucedemo",
+    "action": "verify_text",
+    "locator": "css=.title",
+    "elementId": "page_title",
+    "data": "Products"
+  },
+  {
+    "page": "saucedemo",
+    "action": "click",
+    "locator": "css=#add-to-cart-sauce-labs-backpack",
+    "elementId": "add_backpack_button",
+    "data": ""
+  },
+  {
+    "page": "saucedemo",
+    "action": "click",
+    "locator": "css=.shopping_cart_link",
+    "elementId": "cart_link",
+    "data": ""
+  },
+  {
+    "page": "saucedemo",
+    "action": "verify_element",
+    "locator": "css=.cart_item",
+    "elementId": "cart_item",
+    "data": ""
+  },
+  {
+    "page": "saucedemo",
+    "action": "verify_text",
+    "locator": "css=.inventory_item_name",
+    "elementId": "item_name",
+    "data": "Sauce Labs Backpack"
+  }
+]

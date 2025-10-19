@@ -7,25 +7,25 @@ router.get('/', async (req, res) => {
   try {
     const { session_id, page, tag, limit = 100, offset = 0 } = req.query;
     
-    let whereClause = 'WHERE is_active = true';
+    let whereClause = 'WHERE re.is_active = true';
     const params = [];
     let paramCount = 0;
     
     if (session_id) {
       paramCount++;
-      whereClause += ` AND session_id = $${paramCount}`;
+      whereClause += ` AND re.session_id = $${paramCount}`;
       params.push(session_id);
     }
     
     if (page) {
       paramCount++;
-      whereClause += ` AND page ILIKE $${paramCount}`;
+      whereClause += ` AND re.page ILIKE $${paramCount}`;
       params.push(`%${page}%`);
     }
     
     if (tag) {
       paramCount++;
-      whereClause += ` AND tag = $${paramCount}`;
+      whereClause += ` AND re.tag = $${paramCount}`;
       params.push(tag);
     }
     
