@@ -394,21 +394,27 @@ app.get('/api/v1/review/pending', async (req, res) => {
       let suggestedLocator = '';
       let oldLocator = '';
       
-      // Safely parse JSON fields
-      try {
-        const suggested = JSON.parse(row.suggested_selectors || '[]');
-        suggestedLocator = suggested[0] || '';
-      } catch (e) {
-        console.warn('Failed to parse suggested_selectors:', row.suggested_selectors);
-        suggestedLocator = row.suggested_selectors || '';
+      // Safely handle selector arrays (already parsed by PostgreSQL JSONB)
+      if (Array.isArray(row.suggested_selectors)) {
+        suggestedLocator = row.suggested_selectors[0] || '';
+      } else if (typeof row.suggested_selectors === 'string') {
+        try {
+          const suggested = JSON.parse(row.suggested_selectors);
+          suggestedLocator = suggested[0] || '';
+        } catch (e) {
+          suggestedLocator = row.suggested_selectors || '';
+        }
       }
       
-      try {
-        const current = JSON.parse(row.current_selectors || '[]');
-        oldLocator = current[0] || '';
-      } catch (e) {
-        console.warn('Failed to parse current_selectors:', row.current_selectors);
-        oldLocator = row.current_selectors || '';
+      if (Array.isArray(row.current_selectors)) {
+        oldLocator = row.current_selectors[0] || '';
+      } else if (typeof row.current_selectors === 'string') {
+        try {
+          const current = JSON.parse(row.current_selectors);
+          oldLocator = current[0] || '';
+        } catch (e) {
+          oldLocator = row.current_selectors || '';
+        }
       }
       
       return {
@@ -605,16 +611,124 @@ app.post('/api/review-queue/:id/resolve', async (req, res) => {
       
       console.log(`📝 Updating with CSS: "${cssSelector}", XPath: "${xpathSelector}"`);
       
-      await query(`
-        UPDATE recorded_elements 
-        SET 
-          css_selector = $1,
-          xpath = $2,
-          last_updated = CURRENT_TIMESTAMP
-        WHERE id = $3
-      `, [cssSelector, xpathSelector, reviewItem.current_element_id]);
-      
-      console.log(`✅ Updated element ${reviewItem.current_element_id} with new selectors`);
+      if (reviewItem.current_element_id) {
+        // Update existing element - only update fields that have new values
+        if (cssSelector && xpathSelector) {
+          // Update both CSS and XPath
+          await query(`
+            UPDATE recorded_elements 
+            SET 
+              css_selector = $1,
+              xpath = $2,
+              last_updated = CURRENT_TIMESTAMP
+            WHERE id = $3
+          `, [cssSelector, xpathSelector, reviewItem.current_element_id]);
+          console.log(`✅ Updated element ${reviewItem.current_element_id} with CSS and XPath selectors`);
+        } else if (cssSelector) {
+          // Only update CSS selector, preserve existing XPath
+          await query(`
+            UPDATE recorded_elements 
+            SET 
+              css_selector = $1,
+              last_updated = CURRENT_TIMESTAMP
+            WHERE id = $2
+          `, [cssSelector, reviewItem.current_element_id]);
+          console.log(`✅ Updated element ${reviewItem.current_element_id} with CSS selector (preserved existing XPath)`);
+        } else if (xpathSelector) {
+          // Only update XPath selector, preserve existing CSS
+          await query(`
+            UPDATE recorded_elements 
+            SET 
+              xpath = $1,
+              last_updated = CURRENT_TIMESTAMP
+            WHERE id = $2
+          `, [xpathSelector, reviewItem.current_element_id]);
+          console.log(`✅ Updated element ${reviewItem.current_element_id} with XPath selector (preserved existing CSS)`);
+        } else {
+          console.log(`⚠️ No valid selectors to update for element ${reviewItem.current_element_id}`);
+        }
+      } else {
+        // Try to find the actual element to update using element_identifier
+        console.log(`🔍 Looking for existing element to update: ${reviewItem.element_identifier} on page ${reviewItem.page}`);
+        
+        let elementToUpdate = await query(`
+          SELECT id FROM recorded_elements 
+          WHERE element_id = $1 AND page = $2 AND is_active = true 
+          ORDER BY last_updated DESC 
+          LIMIT 1
+        `, [reviewItem.element_identifier, reviewItem.page]);
+        
+        // Try case-insensitive if exact match fails
+        if (elementToUpdate.rows.length === 0) {
+          elementToUpdate = await query(`
+            SELECT id FROM recorded_elements 
+            WHERE LOWER(element_id) = LOWER($1) AND LOWER(page) LIKE LOWER($2) AND is_active = true 
+            ORDER BY last_updated DESC 
+            LIMIT 1
+          `, [reviewItem.element_identifier, `%${reviewItem.page}%`]);
+        }
+        
+        if (elementToUpdate.rows.length > 0) {
+          const elementId = elementToUpdate.rows[0].id;
+          console.log(`✅ Found existing element to update: ${elementId}`);
+          
+          // Update only fields that have new values
+          if (cssSelector && xpathSelector) {
+            await query(`
+              UPDATE recorded_elements 
+              SET 
+                css_selector = $1,
+                xpath = $2,
+                last_updated = CURRENT_TIMESTAMP
+              WHERE id = $3
+            `, [cssSelector, xpathSelector, elementId]);
+            console.log(`✅ Updated existing element ${elementId} with CSS and XPath selectors`);
+          } else if (cssSelector) {
+            await query(`
+              UPDATE recorded_elements 
+              SET 
+                css_selector = $1,
+                last_updated = CURRENT_TIMESTAMP
+              WHERE id = $2
+            `, [cssSelector, elementId]);
+            console.log(`✅ Updated existing element ${elementId} with CSS selector (preserved existing XPath)`);
+          } else if (xpathSelector) {
+            await query(`
+              UPDATE recorded_elements 
+              SET 
+                xpath = $1,
+                last_updated = CURRENT_TIMESTAMP
+              WHERE id = $2
+            `, [xpathSelector, elementId]);
+            console.log(`✅ Updated existing element ${elementId} with XPath selector (preserved existing CSS)`);
+          }
+        } else {
+          console.log(`⚠️ Still no element found to update, creating new record as last resort`);
+          
+          const newElementResult = await query(`
+            INSERT INTO recorded_elements (
+              element_id,
+              tag,
+              css_selector,
+              xpath,
+              page,
+              logical_key,
+              recorder
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+            RETURNING id
+          `, [
+            reviewItem.element_identifier,
+            'unknown',
+            cssSelector,
+            xpathSelector,
+            reviewItem.page,
+            reviewItem.logical_key,
+            'healing-approved'
+          ]);
+          
+          console.log(`✅ Created new element ${newElementResult.rows[0].id} with healing selectors`);
+        }
+      }
     }
     
     // Mark the review as resolved
@@ -641,12 +755,35 @@ app.post('/api/review-queue/:id/resolve', async (req, res) => {
 });
 
 // Submit healing data from Java framework
+// Helper function to normalize selector format
+function normalizeSelector(selector) {
+  if (!selector || typeof selector !== 'string') return selector;
+  
+  // Remove common prefixes to get plain selectors
+  if (selector.startsWith('css=')) {
+    return selector.substring(4);
+  } else if (selector.startsWith('xpath=')) {
+    return selector.substring(6);
+  } else if (selector.startsWith('id=')) {
+    return '#' + selector.substring(3);
+  } else if (selector.startsWith('name=')) {
+    return `[name="${selector.substring(5)}"]`;
+  } else if (selector.startsWith('class=')) {
+    return '.' + selector.substring(6);
+  } else if (selector.startsWith('tag=')) {
+    return selector.substring(4);
+  }
+  
+  return selector; // Return as-is if no prefix found
+}
+
 app.post('/api/v1/healing/submit', async (req, res) => {
   try {
     const { healing_attempts, session_id, test_run_id } = req.body;
     const { query } = require('./database');
     
     console.log(`🩹 Received healing submission with ${healing_attempts?.length || 0} attempts`);
+    console.log(`📋 Session: ${session_id}, Test Run: ${test_run_id}`);
     
     if (!healing_attempts || !Array.isArray(healing_attempts)) {
       return res.status(400).json({ 
@@ -654,12 +791,91 @@ app.post('/api/v1/healing/submit', async (req, res) => {
         error: 'Invalid healing_attempts data' 
       });
     }
+    
+    // Debug: Log first few attempts to understand the data structure
+    console.log(`🔍 Sample healing attempts:`, healing_attempts.slice(0, 3).map(attempt => ({
+      elementId: attempt.elementId,
+      page: attempt.page,
+      result: attempt.result,
+      originalLocator: attempt.originalLocator,
+      healedLocator: attempt.healedLocator
+    })));
 
     let createdReviews = 0;
     
     // Process each healing attempt and create review items
     for (const attempt of healing_attempts) {
       if (attempt.result === 'SUCCESS' && attempt.healedLocator) {
+        // Look up existing element by element_identifier with flexible matching
+        console.log(`🔍 Looking up element: "${attempt.elementId}" on page: "${attempt.page}"`);
+        
+        // First, let's see what elements actually exist in the database
+        const allElementsQuery = await query(`
+          SELECT id, element_id, page, css_selector, is_active 
+          FROM recorded_elements 
+          WHERE is_active = true 
+          ORDER BY element_id, page
+          LIMIT 20
+        `);
+        console.log(`📊 Available elements in database:`, allElementsQuery.rows.map(r => 
+          `${r.element_id}@${r.page} (id: ${r.id.substring(0,8)}...)`
+        ).join(', '));
+        
+        // Try multiple lookup strategies
+        let elementLookup = await query(`
+          SELECT id, element_id, page FROM recorded_elements 
+          WHERE element_id = $1 AND page = $2 AND is_active = true 
+          ORDER BY last_updated DESC 
+          LIMIT 1
+        `, [attempt.elementId || 'unknown', attempt.page || 'unknown']);
+        
+        console.log(`🔍 Exact match query result: ${elementLookup.rows.length} rows`);
+        
+        // If not found, try with case-insensitive matching
+        if (elementLookup.rows.length === 0) {
+          console.log(`🔍 Trying case-insensitive match for: "${attempt.elementId}" on "${attempt.page}"`);
+          elementLookup = await query(`
+            SELECT id, element_id, page FROM recorded_elements 
+            WHERE LOWER(element_id) = LOWER($1) AND LOWER(page) = LOWER($2) AND is_active = true 
+            ORDER BY last_updated DESC 
+            LIMIT 1
+          `, [attempt.elementId || 'unknown', attempt.page || 'unknown']);
+          console.log(`🔍 Case-insensitive query result: ${elementLookup.rows.length} rows`);
+        }
+        
+        // If still not found, try without page constraint (element_id only)
+        if (elementLookup.rows.length === 0) {
+          elementLookup = await query(`
+            SELECT id, element_id, page FROM recorded_elements 
+            WHERE LOWER(element_id) = LOWER($1) AND is_active = true 
+            ORDER BY last_updated DESC 
+            LIMIT 1
+          `, [attempt.elementId || 'unknown']);
+        }
+        
+        // If still not found, try partial matching on element_id (for cases like inventory_item_desc vs inventory_item_description)
+        if (elementLookup.rows.length === 0) {
+          const baseElementId = (attempt.elementId || '').replace(/_desc$/, '_description').replace(/_description$/, '_desc');
+          if (baseElementId !== attempt.elementId) {
+            elementLookup = await query(`
+              SELECT id, element_id, page FROM recorded_elements 
+              WHERE LOWER(element_id) = LOWER($1) AND is_active = true 
+              ORDER BY last_updated DESC 
+              LIMIT 1
+            `, [baseElementId]);
+          }
+        }
+        
+        let currentElementId = elementLookup.rows.length > 0 ? elementLookup.rows[0].id : null;
+        
+        if (currentElementId) {
+          const foundElement = elementLookup.rows[0];
+          console.log(`✅ Found existing element: ${foundElement.element_id} (${foundElement.id}) on page: ${foundElement.page}`);
+        } else {
+          console.log(`⚠️ No existing element found for ${attempt.elementId} on page ${attempt.page} - will create review without element link`);
+          // Don't create placeholder elements - let the review approval handle element updates
+        }
+        
         // Create a review item for the successful healing
         const reviewResult = await query(`
           INSERT INTO review_queue (
@@ -667,20 +883,22 @@ app.post('/api/v1/healing/submit', async (req, res) => {
             page,
             issue_type,
             description,
+            current_element_id,
             current_selectors,
             suggested_selectors,
             identity_data,
             logical_key,
             status
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
           RETURNING id
         `, [
           attempt.elementId || 'unknown',
           attempt.page || 'unknown',
           'healing_suggestion',
           `Self-healing suggested new locator for element "${attempt.elementId}". Original locator failed, but healing found a working alternative.`,
-          JSON.stringify([attempt.originalLocator]),
-          JSON.stringify([attempt.healedLocator]),
+          currentElementId,
+          JSON.stringify([normalizeSelector(attempt.originalLocator)]),
+          JSON.stringify([normalizeSelector(attempt.healedLocator)]),
           JSON.stringify({
             timestamp: attempt.timestamp,
             attemptedAlternatives: attempt.attemptedAlternatives || [],

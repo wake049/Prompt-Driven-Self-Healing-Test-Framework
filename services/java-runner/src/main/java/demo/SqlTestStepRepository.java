@@ -159,16 +159,17 @@ public class SqlTestStepRepository {
             String elementId = element.get("element_id").asText();
             String tag = element.get("tag").asText().toLowerCase();
             String cssSelector = getElementSelector(element);
-            String page = getPageFromUrl(element.get("page").asText());
+            String originalPageValue = element.get("page").asText(); // Store original database value
+            String page = getPageFromUrl(originalPageValue); // Transform for step execution
             
             // Generate appropriate action based on element type and attributes
             String action = determineActionForElement(element);
             String data = determineDataForElement(element, action);
             
             if (action != null) {
-                Step step = new Step(page, action, cssSelector, elementId, data);
+                Step step = new Step(page, action, cssSelector, elementId, data, originalPageValue);
                 steps.add(step);
-                System.out.println("Generated step: " + action + " " + elementId + " (" + cssSelector + ")");
+                System.out.println("Generated step: " + action + " " + elementId + " (" + cssSelector + ") [original page: " + originalPageValue + "]");
             }
         }
         
@@ -198,10 +199,23 @@ public class SqlTestStepRepository {
         if (elementId.contains("username") || elementId.contains("user") || elementId.contains("email")) return 1;
         if (elementId.contains("password") || elementId.contains("pass")) return 2;
         if (elementId.contains("login") || elementId.contains("signin") || elementId.contains("submit")) return 3;
-        if (elementId.contains("add") || elementId.contains("select") || elementId.contains("choose")) return 4;
-        if (elementId.contains("cart") || elementId.contains("basket")) return 5;
-        if (elementId.contains("checkout") || elementId.contains("buy")) return 6;
-        if (elementId.contains("verify") || elementId.contains("assert") || elementId.contains("check")) return 7;
+        
+        // After login - basic interaction elements
+        if (elementId.contains("inventory") || elementId.contains("products") || elementId.contains("container")) return 4;
+        if (elementId.contains("title") || elementId.contains("heading")) return 5;
+        
+        // Product interaction (add items)
+        if (elementId.contains("add") && elementId.contains("backpack")) return 6; // Add backpack first
+        if (elementId.contains("add") && !elementId.contains("backpack")) return 7; // Other add buttons
+        
+        // Navigation to cart
+        if (elementId.contains("cart") || elementId.contains("basket")) return 8;
+        
+        // Cart verification
+        if (elementId.contains("item") && (elementId.contains("name") || elementId.contains("desc"))) return 9;
+        
+        // Skip conditional elements entirely (they get filtered out by shouldSkipElement)
+        if (elementId.contains("remove") || elementId.contains("checkout") || elementId.contains("finish")) return 999;
         
         return 100; // Default priority for other elements
     }
@@ -210,6 +224,11 @@ public class SqlTestStepRepository {
         String tag = element.get("tag").asText().toLowerCase();
         String elementId = element.get("element_id").asText().toLowerCase();
         JsonNode attributesNode = element.get("attributes");
+        
+        // Skip conditional elements that require specific preconditions
+        if (shouldSkipElement(elementId)) {
+            return null; // Skip this element
+        }
         
         // Determine action based on element type and purpose
         if (tag.equals("input")) {
@@ -247,6 +266,28 @@ public class SqlTestStepRepository {
         
         // Default action
         return "verify_element";
+    }
+    
+    private boolean shouldSkipElement(String elementId) {
+        // Skip remove buttons - they only exist after adding items
+        if (elementId.contains("remove")) {
+            System.out.println("  Skipping conditional element: " + elementId + " (remove buttons require items to be added first)");
+            return true;
+        }
+        
+        // Skip elements that are recorded but shouldn't be in a basic test flow
+        if (elementId.contains("checkout") && !elementId.contains("continue")) {
+            System.out.println("  Skipping conditional element: " + elementId + " (checkout requires cart items)");
+            return true;
+        }
+        
+        // Skip specific complex elements that require setup
+        if (elementId.contains("continue-shopping") || elementId.contains("finish")) {
+            System.out.println("  Skipping conditional element: " + elementId + " (requires specific workflow state)");
+            return true;
+        }
+        
+        return false;
     }
 
     private String determineDataForElement(JsonNode element, String action) {

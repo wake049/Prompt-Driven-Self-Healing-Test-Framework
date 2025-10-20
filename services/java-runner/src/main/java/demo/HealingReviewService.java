@@ -33,6 +33,8 @@ public class HealingReviewService {
             submission.put("session_id", sessionId);
             submission.put("test_run_id", testRunId);
             submission.put("healing_attempts", healingAttempts);
+            submission.put("healing_attempts", healingAttempts);
+            submission.put("source", "java-framework"); // Add source identification
             
             // Convert to JSON
             String jsonPayload = objectMapper.writeValueAsString(submission);
@@ -94,12 +96,24 @@ public class HealingReviewService {
         Map<String, Object> attempt = new HashMap<>();
         attempt.put("timestamp", java.time.LocalDateTime.now().toString());
         attempt.put("elementId", elementId);
+        attempt.put("element_identifier", elementId); // Critical: This must match recorded_elements.element_identifier
+        attempt.put("logical_key", elementId);
         attempt.put("page", page != null ? page : "unknown");
         attempt.put("originalLocator", originalLocator);
+        attempt.put("current_selectors", originalLocator != null ? List.of(originalLocator) : new ArrayList<>());
+        attempt.put("suggested_selectors", healedLocator != null ? List.of(healedLocator) : new ArrayList<>());
         attempt.put("attemptedAlternatives", attemptedAlternatives != null ? attemptedAlternatives : new ArrayList<>());
         attempt.put("healedLocator", healedLocator);
         attempt.put("result", result);
         attempt.put("error", error);
+        attempt.put("healingSource", "java-framework");
+        
+        // Add identity data structure that matches the expected format
+        Map<String, Object> identityData = new HashMap<>();
+        identityData.put("timestamp", java.time.LocalDateTime.now().toString());
+        identityData.put("healingSource", "java-framework");
+        identityData.put("attemptedAlternatives", attemptedAlternatives != null ? attemptedAlternatives : new ArrayList<>());
+        attempt.put("identity_data", identityData);
         
         return attempt;
     }

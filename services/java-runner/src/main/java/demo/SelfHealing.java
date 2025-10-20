@@ -43,7 +43,7 @@ public class SelfHealing {
     public HealingResult attemptHealing(Step step) {
         String originalLocator = step.getLocator();
         String elementId = step.getElementId();
-        String page = step.getPage();
+        String page = step.getOriginalPage(); // Use original page value for database lookup
         
         System.out.println("Attempting self-healing for element: " + elementId + " with locator: " + originalLocator);
         

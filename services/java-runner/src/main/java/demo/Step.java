@@ -17,6 +17,9 @@ public class Step {
     
     @JsonProperty("data")
     private String data;
+    
+    // Store original page value for healing lookup
+    private String originalPage;
 
     // Default constructor for Jackson
     public Step() {}
@@ -27,6 +30,16 @@ public class Step {
         this.locator = locator;
         this.elementId = elementId;
         this.data = data;
+        this.originalPage = page; // Default to same as page
+    }
+    
+    public Step(String page, String action, String locator, String elementId, String data, String originalPage) {
+        this.page = page;
+        this.action = action;
+        this.locator = locator;
+        this.elementId = elementId;
+        this.data = data;
+        this.originalPage = originalPage;
     }
 
     // Getters and setters
@@ -68,6 +81,14 @@ public class Step {
 
     public void setData(String data) {
         this.data = data;
+    }
+    
+    public String getOriginalPage() {
+        return originalPage != null ? originalPage : page;
+    }
+    
+    public void setOriginalPage(String originalPage) {
+        this.originalPage = originalPage;
     }
 
     @Override
