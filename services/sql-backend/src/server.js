@@ -137,8 +137,8 @@ app.post('/api/chrome/record-element', async (req, res) => {
         
         // Compare selectors to see if they're different
         const existingSelectors = existing.selectors || [];
-        const newSelectors = elementData.selectors || [];
-        const newCssSelector = elementData.cssSelector || elementData.css_selector;
+        const newSelectors = (elementData.selectors || []).map(sel => cleanExtensionArtifacts(sel));
+        const newCssSelector = cleanExtensionArtifacts(elementData.cssSelector || elementData.css_selector);
         const newXpath = elementData.xpath;
         
         // Check if main selectors are different
@@ -220,10 +220,10 @@ app.post('/api/chrome/record-element', async (req, res) => {
       elementData.text_content || elementData.text,
       JSON.stringify(elementData.attributes || {}),
       elementData.xpath,
-      elementData.cssSelector || elementData.css_selector,
+      cleanExtensionArtifacts(elementData.cssSelector || elementData.css_selector),
       elementData.position_x || elementData.position?.x || 0,
       elementData.position_y || elementData.position?.y || 0,
-      JSON.stringify(elementData.selectors || []),
+      JSON.stringify((elementData.selectors || []).map(sel => cleanExtensionArtifacts(sel))),
       elementData.page,
       logicalKey,
       JSON.stringify(identityData),
@@ -755,6 +755,23 @@ app.post('/api/review-queue/:id/resolve', async (req, res) => {
 });
 
 // Submit healing data from Java framework
+// Helper function to clean Chrome extension artifact classes
+function cleanExtensionArtifacts(selector) {
+  if (!selector || typeof selector !== 'string') return selector;
+  
+  // Remove MCP Chrome extension classes
+  selector = selector
+    .replace(/\.mcp-hover-highlight/g, '')
+    .replace(/\.mcp-recorded-highlight/g, '')
+    .replace(/\.mcp-[a-zA-Z0-9-]+/g, '') // Remove any other mcp- classes
+    .replace(/\.\.+/g, '.') // Replace multiple dots with single dot
+    .replace(/\.$/, '') // Remove trailing dot
+    .replace(/^\s+|\s+$/g, ''); // Trim whitespace
+  
+  console.log(`🧹 Cleaned selector artifacts: "${arguments[0]}" → "${selector}"`);
+  return selector;
+}
+
 // Helper function to normalize selector format
 function normalizeSelector(selector) {
   if (!selector || typeof selector !== 'string') return selector;
