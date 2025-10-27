@@ -1,10 +1,10 @@
 # AI Model Specification: Intent Classification for Test Automation
 
-## 🎯 AI-Specific Intent
+##  AI-Specific Intent
 
 This project centers on training and deploying a **Natural Language Understanding (NLU) model** that converts human language test descriptions into structured, executable test plans. The core AI component is an **intent classification system** that understands user intent from natural language prompts.
 
-## 🧠 Machine Learning Model Architecture
+##  Machine Learning Model Architecture
 
 ### **Model Type**: Multi-class Text Classification Pipeline
 - **Feature Extraction**: TF-IDF Vectorization with n-gram analysis
@@ -39,7 +39,7 @@ LinearSVC(
 - **VERIFY_TITLE**: Page validation operations
 - **UNKNOWN**: Fallback for unrecognized intents
 
-## 📊 Training Data & Performance
+##  Training Data & Performance
 
 ### **Dataset Composition**
 ```
@@ -121,7 +121,7 @@ class LocalPlanner:
         # Convert intent to executable actions
 ```
 
-## 🎯 AI-Specific Contributions
+##  AI-Specific Contributions
 
 ### **1. Natural Language Understanding**
 - Converts human language to structured intent categories
@@ -138,12 +138,12 @@ class LocalPlanner:
 - Performance monitoring and evaluation metrics
 - Continuous improvement through data collection
 
-## 🚀 AI Enhancement Roadmap
+##  AI Enhancement Roadmap
 
 ### **Phase 1: Current (Completed)**
-- ✅ Basic intent classification (4 categories)
-- ✅ TF-IDF + SVM pipeline
-- ✅ Model persistence and deployment
+-  Basic intent classification (4 categories)
+-  TF-IDF + SVM pipeline
+-  Model persistence and deployment
 
 ### **Phase 2: Planned Enhancements**
 - 🔄 Expanded training dataset (100+ samples)
@@ -152,12 +152,12 @@ class LocalPlanner:
 - 🔄 Intent confidence scoring
 
 ### **Phase 3: Advanced AI Features**
-- 📋 Deep learning models (BERT, transformer-based)
-- 📋 Few-shot learning for new intent types
-- 📋 Semantic similarity for test case matching
-- 📋 Automated test failure analysis
+-  Deep learning models (BERT, transformer-based)
+-  Few-shot learning for new intent types
+-  Semantic similarity for test case matching
+-  Automated test failure analysis
 
-## 📈 AI Performance Metrics & Validation
+##  AI Performance Metrics & Validation
 
 ### **Model Evaluation Strategy**
 1. **Cross-validation**: K-fold validation on expanded dataset
@@ -171,7 +171,7 @@ class LocalPlanner:
 - **Latency**: <100ms prediction time
 - **Robustness**: Handles typos and variations
 
-## 🔧 AI Development Tools & Environment
+##  AI Development Tools & Environment
 
 ### **Machine Learning Stack**
 - **scikit-learn**: Core ML framework

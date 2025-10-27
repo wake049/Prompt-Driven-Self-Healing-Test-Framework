@@ -22,7 +22,8 @@ public class SelfHealing {
     private SqlElementRepository sqlElementRepository;
     private List<HealingLogEntry> healingLog;
     private static final String HEALING_LOG_FILE = "healing_log.json";
-    private static final String REVIEW_SERVICE_URL = "http://localhost:8001/review/create";
+    private static final String HEALING_SERVICE_URL = "http://localhost:8000/api/v1/healing/submit";
+    private static final String SELECTOR_GENERATION_URL = "http://localhost:8000/api/v1/selectors/generate";
     private boolean useSqlBackend;
 
     public SelfHealing(WebDriver driver, ElementRepository elementRepository) {
@@ -63,16 +64,25 @@ public class SelfHealing {
         }
         
         if (alternatives.isEmpty()) {
-            logEntry.setResult("NO_ALTERNATIVES");
-            logEntry.setError("No alternative locators found in repository");
-            healingLog.add(logEntry);
-            saveHealingLog();
+            System.out.println("No alternatives found in repository, trying AI-generated alternatives...");
             
-            // Send POST request for healing failure
-            sendHealingFailureRequest(step, "No alternative locators found");
+            // Try to get AI-generated alternatives
+            alternatives = getAIGeneratedAlternatives(step);
             
-            return new HealingResult(false, originalLocator, null, 
-                "No alternative locators found for element: " + elementId);
+            if (alternatives.isEmpty()) {
+                logEntry.setResult("NO_ALTERNATIVES");
+                logEntry.setError("No alternative locators found in repository or AI generation");
+                healingLog.add(logEntry);
+                saveHealingLog();
+                
+                // Send POST request for healing failure
+                sendHealingFailureRequest(step, "No alternative locators found", new ArrayList<>());
+                
+                return new HealingResult(false, originalLocator, null, 
+                    "No alternative locators found for element: " + elementId);
+            } else {
+                System.out.println("✓ AI generated " + alternatives.size() + " alternative selectors");
+            }
         }
 
         for (String alternative : alternatives) {
@@ -92,6 +102,9 @@ public class SelfHealing {
                         sqlElementRepository.saveHealingSuccess(elementId, page, originalLocator, alternative);
                     }
                     
+                    // Send healing success to unified API
+                    sendHealingSuccessRequest(step, alternative, logEntry.getAttemptedAlternatives());
+                    
                     System.out.println("✓ Self-healing successful! Found element with: " + alternative);
                     return new HealingResult(true, originalLocator, alternative, null);
                 }
@@ -108,7 +121,7 @@ public class SelfHealing {
         saveHealingLog();
         
         // Send POST request for complete healing failure
-        sendHealingFailureRequest(step, "All alternative locators failed");
+        sendHealingFailureRequest(step, "All alternative locators failed", logEntry.getAttemptedAlternatives());
         
         return new HealingResult(false, originalLocator, null, 
             "All " + alternatives.size() + " alternative locators failed");
@@ -146,18 +159,102 @@ public class SelfHealing {
         }
     }
 
-    private void sendHealingFailureRequest(Step step, String error) {
+    private List<String> getAIGeneratedAlternatives(Step step) {
+        List<String> alternatives = new ArrayList<>();
+        
         try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
-            HttpPost httpPost = new HttpPost(REVIEW_SERVICE_URL);
+            HttpPost httpPost = new HttpPost(SELECTOR_GENERATION_URL);
             httpPost.setHeader("Content-Type", "application/json");
             
+            // Create request payload for AI selector generation
             String jsonPayload = String.format(
-                "{\"elementId\":\"%s\",\"page\":\"%s\",\"originalLocator\":\"%s\",\"error\":\"%s\",\"timestamp\":\"%s\"}",
-                step.getElementId(),
-                step.getPage(),
+                "{" +
+                "\"original_selector\":\"%s\"," +
+                "\"element_id\":\"%s\"," +
+                "\"page\":\"%s\"," +
+                "\"action_type\":\"%s\"" +
+                "}",
                 step.getLocator(),
-                error,
-                LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+                step.getElementId(),
+                step.getOriginalPage(),
+                "verify_text" // Default action type, could be enhanced to detect actual action
+            );
+            
+            httpPost.setEntity(new StringEntity(jsonPayload));
+            
+            try (CloseableHttpResponse response = httpClient.execute(httpPost)) {
+                int statusCode = response.getStatusLine().getStatusCode();
+                if (statusCode == 200) {
+                    // Parse the JSON response to extract alternatives
+                    String responseBody = new String(response.getEntity().getContent().readAllBytes());
+                    alternatives = parseAlternativesFromResponse(responseBody);
+                    System.out.println("✓ AI selector generation succeeded, got " + alternatives.size() + " alternatives");
+                } else {
+                    System.out.println("✗ AI selector generation failed. Status: " + statusCode);
+                }
+            }
+        } catch (Exception e) {
+            System.out.println("⚠ Warning: Could not get AI-generated alternatives: " + e.getMessage());
+        }
+        
+        return alternatives;
+    }
+    
+    private List<String> parseAlternativesFromResponse(String responseBody) {
+        List<String> alternatives = new ArrayList<>();
+        
+        try {
+            // Simple JSON parsing - extract selector values from alternatives array
+            // This is a basic implementation - could be enhanced with proper JSON parsing library
+            String[] lines = responseBody.split("\"selector\":");
+            for (int i = 1; i < lines.length; i++) {
+                String line = lines[i];
+                int startQuote = line.indexOf("\"");
+                int endQuote = line.indexOf("\"", startQuote + 1);
+                if (startQuote != -1 && endQuote != -1) {
+                    String selector = line.substring(startQuote + 1, endQuote);
+                    alternatives.add(selector);
+                }
+            }
+        } catch (Exception e) {
+            System.out.println("⚠ Warning: Could not parse AI response: " + e.getMessage());
+        }
+        
+        return alternatives;
+    }
+
+    private void sendHealingSuccessRequest(Step step, String healedLocator, List<String> attemptedAlternatives) {
+        try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
+            HttpPost httpPost = new HttpPost(HEALING_SERVICE_URL);
+            httpPost.setHeader("Content-Type", "application/json");
+            
+            // Create healing submission for success
+            String timestamp = LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME);
+            
+            // Build attempted alternatives JSON array
+            StringBuilder alternativesJson = new StringBuilder("[");
+            for (int i = 0; i < attemptedAlternatives.size(); i++) {
+                if (i > 0) alternativesJson.append(",");
+                alternativesJson.append("\"").append(attemptedAlternatives.get(i)).append("\"");
+            }
+            alternativesJson.append("]");
+            
+            String jsonPayload = String.format(
+                "{\"healing_attempts\":[{" +
+                "\"timestamp\":\"%s\"," +
+                "\"elementId\":\"%s\"," +
+                "\"page\":\"%s\"," +
+                "\"originalLocator\":\"%s\"," +
+                "\"attemptedAlternatives\":%s," +
+                "\"healedLocator\":\"%s\"," +
+                "\"result\":\"SUCCESS\"" +
+                "}]}",
+                timestamp,
+                step.getElementId(),
+                step.getOriginalPage(),
+                step.getLocator(),
+                alternativesJson.toString(),
+                healedLocator
             );
             
             httpPost.setEntity(new StringEntity(jsonPayload));
@@ -165,13 +262,62 @@ public class SelfHealing {
             try (CloseableHttpResponse response = httpClient.execute(httpPost)) {
                 int statusCode = response.getStatusLine().getStatusCode();
                 if (statusCode == 200 || statusCode == 201) {
-                    System.out.println("Successfully reported healing failure to review service");
+                    System.out.println("✓ Successfully reported healing success to unified API");
                 } else {
-                    System.out.println("Failed to report healing failure. Status: " + statusCode);
+                    System.out.println("✗ Failed to report healing success. Status: " + statusCode);
                 }
             }
         } catch (IOException e) {
-            System.out.println("Warning: Could not send healing failure request: " + e.getMessage());
+            System.out.println("⚠ Warning: Could not send healing success request: " + e.getMessage());
+        }
+    }
+
+    private void sendHealingFailureRequest(Step step, String error, List<String> attemptedAlternatives) {
+        try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
+            HttpPost httpPost = new HttpPost(HEALING_SERVICE_URL);
+            httpPost.setHeader("Content-Type", "application/json");
+            
+            // Create healing submission in the format expected by the unified API
+            String timestamp = LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME);
+            
+            // Build attempted alternatives JSON array
+            StringBuilder alternativesJson = new StringBuilder("[");
+            for (int i = 0; i < attemptedAlternatives.size(); i++) {
+                if (i > 0) alternativesJson.append(",");
+                alternativesJson.append("\"").append(attemptedAlternatives.get(i)).append("\"");
+            }
+            alternativesJson.append("]");
+            
+            String jsonPayload = String.format(
+                "{\"healing_attempts\":[{" +
+                "\"timestamp\":\"%s\"," +
+                "\"elementId\":\"%s\"," +
+                "\"page\":\"%s\"," +
+                "\"originalLocator\":\"%s\"," +
+                "\"attemptedAlternatives\":%s," +
+                "\"result\":\"FAILED\"," +
+                "\"error\":\"%s\"" +
+                "}]}",
+                timestamp,
+                step.getElementId(),
+                step.getOriginalPage(),
+                step.getLocator(),
+                alternativesJson.toString(),
+                error
+            );
+            
+            httpPost.setEntity(new StringEntity(jsonPayload));
+            
+            try (CloseableHttpResponse response = httpClient.execute(httpPost)) {
+                int statusCode = response.getStatusLine().getStatusCode();
+                if (statusCode == 200 || statusCode == 201) {
+                    System.out.println("✓ Successfully reported healing failure to unified API");
+                } else {
+                    System.out.println("✗ Failed to report healing failure. Status: " + statusCode);
+                }
+            }
+        } catch (IOException e) {
+            System.out.println("⚠ Warning: Could not send healing failure request: " + e.getMessage());
         }
     }
 

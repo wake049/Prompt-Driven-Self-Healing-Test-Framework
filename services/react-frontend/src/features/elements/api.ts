@@ -19,12 +19,11 @@ import {
   TestSelectorRequest,
   TestSelectorResult
 } from '.';
-
-const API_BASE_URL = 'http://localhost:8001';
+import { config } from '../../app/config';
 
 class ApiService {
   private async fetchJson<T>(endpoint: string, options?: RequestInit): Promise<T> {
-    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+    const response = await fetch(`${config.apiBaseUrl}${endpoint}`, {
       headers: {
         'Content-Type': 'application/json',
         // Remove auth for now since MCP server might not expect it

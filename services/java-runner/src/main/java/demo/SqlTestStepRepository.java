@@ -15,9 +15,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class SqlTestStepRepository {
-    private static final String SQL_BACKEND_URL = "http://localhost:3001";
-    private static final String ELEMENTS_ENDPOINT = "/api/elements";
-    private static final String SESSIONS_ENDPOINT = "/api/sessions";
+    private static final String SQL_BACKEND_URL = "http://localhost:8000";
+    private static final String ELEMENTS_ENDPOINT = "/api/v1/sql/elements";
+    private static final String SESSIONS_ENDPOINT = "/api/v1/sql/sessions";
     private final ObjectMapper objectMapper;
 
     public SqlTestStepRepository() {
@@ -28,8 +28,19 @@ public class SqlTestStepRepository {
         List<Step> steps = new ArrayList<>();
         
         try {
-            System.out.println("Generating test steps from SQL backend elements...");
+            System.out.println("Loading test steps from unified API...");
             
+            // Try to load the latest prompt/plan steps first
+            steps = loadLatestPromptSteps();
+            
+            if (!steps.isEmpty()) {
+                System.out.println("✓ Loaded " + steps.size() + " test steps from latest prompt");
+                return steps;
+            }
+            
+            System.out.println("No prompt steps found, trying element-based generation...");
+            
+            // Fallback to element-based generation (original logic)
             // First, find the session by name
             String sessionId = findSessionByName(sessionName);
             if (sessionId == null) {
@@ -67,6 +78,110 @@ public class SqlTestStepRepository {
         }
         
         return steps;
+    }
+    
+    private List<Step> loadLatestPromptSteps() throws IOException {
+        List<Step> steps = new ArrayList<>();
+        
+        try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
+            // Get the latest prompt with steps
+            HttpGet httpGet = new HttpGet(SQL_BACKEND_URL + "/api/v1/sql/prompts?limit=1&order_by=created_at&order=desc");
+            httpGet.setHeader("Accept", "application/json");
+            
+            try (CloseableHttpResponse response = httpClient.execute(httpGet)) {
+                if (response.getStatusLine().getStatusCode() == 200) {
+                    String responseBody = EntityUtils.toString(response.getEntity());
+                    JsonNode rootNode = objectMapper.readTree(responseBody);
+                    
+                    if (rootNode.has("success") && rootNode.get("success").asBoolean()) {
+                        JsonNode dataNode = rootNode.get("data");
+                        if (dataNode != null && dataNode.isArray() && dataNode.size() > 0) {
+                            JsonNode latestPrompt = dataNode.get(0);
+                            System.out.println("Found latest prompt: " + latestPrompt.get("prompt").asText().substring(0, Math.min(50, latestPrompt.get("prompt").asText().length())) + "...");
+                            
+                            // Check if this prompt has steps
+                            JsonNode stepsNode = latestPrompt.get("steps");
+                            if (stepsNode != null && stepsNode.isArray()) {
+                                System.out.println("Converting " + stepsNode.size() + " steps from prompt to Java Step objects...");
+                                
+                                for (JsonNode stepNode : stepsNode) {
+                                    Step step = convertJsonStepToJavaStep(stepNode);
+                                    if (step != null) {
+                                        steps.add(step);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        return steps;
+    }
+    
+    private Step convertJsonStepToJavaStep(JsonNode stepNode) {
+        try {
+            String action = stepNode.get("action").asText();
+            JsonNode argsNode = stepNode.get("args");
+            String description = stepNode.has("description") ? stepNode.get("description").asText() : "";
+            
+            // Convert different action types to Java Step format
+            switch (action) {
+                case "open_url":
+                    String url = argsNode.get("url").asText();
+                    return new Step("page", "open", "", "page", url);
+                    
+                case "type":
+                    String selector = argsNode.get("selector").asText();
+                    String text = argsNode.has("text") ? argsNode.get("text").asText() : "";
+                    return new Step("page", "enter_text", selector, generateElementId(selector), text);
+                    
+                case "click":
+                    String clickSelector = argsNode.get("selector").asText();
+                    return new Step("page", "click", clickSelector, generateElementId(clickSelector), "");
+                    
+                case "assert_visible":
+                    String visibleSelector = argsNode.get("selector").asText();
+                    return new Step("page", "verify_element", visibleSelector, generateElementId(visibleSelector), "");
+                    
+                case "assert_text":
+                    String textSelector = argsNode.get("selector").asText();
+                    String expectedText = argsNode.has("text") ? argsNode.get("text").asText() : "";
+                    return new Step("page", "verify_text", textSelector, generateElementId(textSelector), expectedText);
+                    
+                case "wait_for":
+                    String waitSelector = argsNode.get("selector").asText();
+                    return new Step("page", "wait", waitSelector, generateElementId(waitSelector), "");
+                    
+                case "screenshot":
+                    return new Step("page", "screenshot", "", "screenshot", description);
+                    
+                default:
+                    System.out.println("Unknown action type: " + action + ", treating as verify_element");
+                    String defaultSelector = argsNode.has("selector") ? argsNode.get("selector").asText() : "";
+                    return new Step("page", "verify_element", defaultSelector, generateElementId(defaultSelector), "");
+            }
+            
+        } catch (Exception e) {
+            System.err.println("Error converting JSON step to Java Step: " + e.getMessage());
+            return null;
+        }
+    }
+    
+    private String generateElementId(String selector) {
+        // Generate a reasonable element ID from the selector
+        if (selector.startsWith("#")) {
+            return selector.substring(1); // Remove # from ID selector
+        } else if (selector.startsWith(".")) {
+            return selector.substring(1).replace(".", "_"); // Remove . and replace dots with underscores
+        } else if (selector.contains("=")) {
+            // Handle css= or xpath= prefixes
+            return selector.substring(selector.indexOf("=") + 1).replaceAll("[^a-zA-Z0-9_-]", "_");
+        } else {
+            // Generate ID from selector
+            return selector.replaceAll("[^a-zA-Z0-9_-]", "_");
+        }
     }
 
     private String findSessionByName(String sessionName) throws IOException {
@@ -383,6 +498,7 @@ public class SqlTestStepRepository {
                 return response.getStatusLine().getStatusCode() == 200;
             }
         } catch (Exception e) {
+            System.out.println("Unified API not available at " + SQL_BACKEND_URL + ": " + e.getMessage());
             return false;
         }
     }

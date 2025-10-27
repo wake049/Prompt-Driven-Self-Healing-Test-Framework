@@ -2,7 +2,7 @@
 
 A modern test automation framework that converts natural language prompts into executable test plans using AI-powered planning and self-healing capabilities.
 
-## 🎯 Overview
+##  Overview
 
 This capstone project demonstrates an innovative AI-powered approach to test automation by training and deploying a **Natural Language Understanding (NLU) model** that converts human language into executable test plans.
 
@@ -18,7 +18,7 @@ This capstone project demonstrates an innovative AI-powered approach to test aut
 - **Model Persistence**: Trained model deployment via joblib serialization
 - **Hybrid Intelligence**: ML-first approach with rule-based fallback for robustness
 
-## 🧠 AI Model Architecture
+##  AI Model Architecture
 
 ### **Machine Learning Pipeline**
 ```
@@ -51,10 +51,10 @@ See [AI Model Specification](docs/AI_MODEL_SPECIFICATION.md) for complete techni
 - 🤖 **AI Planning Engine** - Converts prompts to executable actions
 - 🔄 **Self-Healing** - Automatically recovers from element changes
 - 🐳 **Containerized** - Easy deployment with Docker Compose
-- 📊 **Test Reporting** - Comprehensive test execution reports
-- 🎯 **Multiple Scenarios** - Supports login flows, navigation, verification
+-  **Test Reporting** - Comprehensive test execution reports
+-  **Multiple Scenarios** - Supports login flows, navigation, verification
 
-## 🚀 Quick Start
+##  Quick Start
 
 ### Prerequisites
 - Python 3.11+
@@ -167,7 +167,7 @@ make plan-login
 python -m pytest services/python-ai/tests/ -v
 ```
 
-## 🔧 Configuration
+##  Configuration
 
 ### Environment Variables
 - `PLANNER_ENV` - Environment (dev/prod)
@@ -204,7 +204,7 @@ make down     # Stop Docker services
 
 ## 🚧 Roadmap
 
-### Current Status (v0.1.0) ✅
+### Current Status (v0.1.0) 
 - [x] AI Planning Service
 - [x] Natural language prompt processing
 - [x] Contract testing with golden files
@@ -217,7 +217,7 @@ make down     # Stop Docker services
 - [ ] Web frontend interface
 - [ ] Extended test scenario support
 
-### Future Enhancements (v1.0.0) 📋
+### Future Enhancements (v1.0.0) 
 - [ ] Machine learning for better prompt understanding
 - [ ] Visual test reporting dashboard
 - [ ] Integration with CI/CD pipelines
@@ -231,7 +231,7 @@ make down     # Stop Docker services
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
-## 📄 License
+##  License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 

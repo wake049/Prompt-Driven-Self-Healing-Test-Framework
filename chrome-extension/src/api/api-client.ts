@@ -3,7 +3,7 @@
  * Handles communication between Chrome Extension and SQL Backend
  */
 
-const API_BASE_URL = 'http://localhost:3001/api';
+const API_BASE_URL = 'http://localhost:8000/api/v1';
 
 interface ApiRequestOptions {
   method?: string;
@@ -75,30 +75,74 @@ class MCPApiClient {
     });
   }
 
-  // Recorded Elements
+  // Recorded Elements - Updated for unified API
   async recordElement(elementData: any, sessionId: string | null = null): Promise<ApiResponse> {
-    return this.request('/chrome/record-element', {
+    // Generate a page ID based on the current URL for better organization
+    const currentUrl = window.location.href;
+    // Create a more consistent page ID based on the base URL (without query params)
+    const baseUrl = currentUrl.split('?')[0].split('#')[0];
+    const pageId = sessionId || `page_${btoa(baseUrl).replace(/[^a-zA-Z0-9]/g, '').substring(0, 32)}`;
+    
+    // Map old element structure to new unified API format that matches database schema
+    const elementDataForAPI = {
+      element_key: elementData.id || elementData.element_id || `element_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      page_id: pageId,
+      primary_selector: {
+        css_selector: elementData.cssSelector || elementData.css_selector || '',
+        xpath: elementData.xpath || '',
+        tag: elementData.tag || 'div'
+      },
+      alt_selectors: elementData.alt_selectors || [],
+      attributes: {
+        text_content: elementData.text || elementData.textContent || '',
+        url: baseUrl,  // Use clean base URL
+        full_url: currentUrl,  // Keep full URL for reference
+        ...elementData.attributes
+      },
+      ai_reasoning: elementData.reasoning || `Chrome extension recorded element on ${baseUrl}`,
+      is_active: true
+    };
+
+    // FastAPI expects parameters as separate fields in the request body
+    const requestBody = {
+      element_data: elementDataForAPI,
+      session_info: { 
+        session_id: sessionId || pageId, 
+        name: document.title || 'Untitled Page',
+        url: baseUrl  // Use clean base URL for page identification
+      }
+    };
+
+    console.log(' Sending element data to API:', requestBody);
+
+    return this.request('/sql/record-element', {
       method: 'POST',
-      body: JSON.stringify({
-        elementData,
-        sessionInfo: sessionId ? { session_id: sessionId } : null
-      })
+      body: JSON.stringify(requestBody)
     });
   }
 
   async bulkRecordElements(elements: any[], sessionId: string | null = null): Promise<ApiResponse> {
-    return this.request('/elements/bulk', {
-      method: 'POST',
-      body: JSON.stringify({
-        elements,
-        session_id: sessionId
-      })
-    });
+    // For now, record elements individually as bulk endpoint may not be available
+    const results = [];
+    for (const element of elements) {
+      try {
+        const result = await this.recordElement(element, sessionId);
+        results.push(result);
+      } catch (error) {
+        console.warn('Failed to record element:', element, error);
+        results.push({ success: false, error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+    return {
+      success: true,
+      data: results,
+      message: `Processed ${results.length} elements`
+    };
   }
 
   async getElements(filters: Record<string, string> = {}): Promise<ApiResponse> {
     const params = new URLSearchParams(filters);
-    return this.request(`/elements?${params}`);
+    return this.request(`/sql/elements?${params}`);
   }
 
   async updateElement(elementId: string, updates: any): Promise<ApiResponse> {
@@ -116,28 +160,41 @@ class MCPApiClient {
 
   // Test Executions
   async recordExecution(executionData: any, sessionId: string | null = null): Promise<ApiResponse> {
-    return this.request('/chrome/record-execution', {
+    // Map execution data to healing API format
+    const healingData = {
+      healing_attempts: [{
+        elementId: executionData.elementId || 'unknown',
+        page: executionData.page || 'unknown',
+        originalLocator: executionData.originalSelector || '',
+        healedLocator: executionData.healedSelector,
+        result: executionData.success ? 'SUCCESS' : 'FAILED'
+      }],
+      session_id: sessionId
+    };
+
+    return this.request('/sql/healing/submit', {
       method: 'POST',
-      body: JSON.stringify({
-        executionData,
-        sessionId
-      })
+      body: JSON.stringify(healingData)
     });
   }
 
   async getExecutions(filters: Record<string, string> = {}): Promise<ApiResponse> {
-    const params = new URLSearchParams(filters);
-    return this.request(`/executions?${params}`);
+    // Return empty for now as this endpoint may not be available
+    return {
+      success: true,
+      data: [],
+      message: 'Executions endpoint not implemented in unified API'
+    };
   }
 
   // Chrome Extension Specific
   async getAllData(): Promise<ApiResponse> {
-    return this.request('/chrome/all-data');
+    return this.request('/sql/all-data');
   }
 
   async healthCheck(): Promise<boolean> {
     try {
-      const response = await fetch(`${this.baseUrl.replace('/api', '')}/health`);
+      const response = await fetch(`${this.baseUrl}/sql/health`);
       return response.ok;
     } catch {
       return false;

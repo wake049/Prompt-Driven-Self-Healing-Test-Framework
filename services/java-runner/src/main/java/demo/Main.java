@@ -15,13 +15,22 @@ import java.util.Map;
 import java.util.HashMap;
 
 public class Main {
-    private static final String STEPS_FILE = "steps.json";
+    private static final String DEFAULT_STEPS_FILE = "steps.json";
     private static final String RUN_SUMMARY_FILE = "run_summary.json";
     
     public static void main(String[] args) {
         System.out.println("=== Prompt-Driven Self-Healing Test Framework ===");
         System.out.println("Milestone M5 - Execution Service & Self-Healing Engine");
         System.out.println();
+        
+        // Determine steps file - use argument if provided, otherwise default
+        String stepsFile = DEFAULT_STEPS_FILE;
+        if (args.length > 0 && !args[0].trim().isEmpty()) {
+            stepsFile = args[0].trim();
+            System.out.println("Using custom steps file: " + stepsFile);
+        } else {
+            System.out.println("Using default steps file: " + stepsFile);
+        }
         
         WebDriver driver = null;
         SelfHealing selfHealing = null;
@@ -31,81 +40,147 @@ public class Main {
         try {
             // Initialize WebDriver
             System.out.println("Initializing WebDriver...");
+            System.out.println("Step 1: Setting up ChromeDriver with WebDriverManager...");
             WebDriverManager.chromedriver().setup();
+            System.out.println("Step 2: WebDriverManager setup complete");
             
+            System.out.println("Step 3: Configuring Chrome options...");
             ChromeOptions options = new ChromeOptions();
-            // Remove headless mode - browser should open visibly
-            // options.addArguments("--headless"); // Commented out for visible browser
+            
+            // Detect if running from subprocess or API call (no console/display available)
+            // Allow override with -Dtest.visible=true for debugging
+            boolean forceVisible = "true".equals(System.getProperty("test.visible", "false"));
+            boolean isHeadless = !forceVisible && (System.console() == null || 
+                                System.getProperty("java.awt.headless", "false").equals("true") ||
+                                args.length > 0 && args[0].contains("tmp")); // Temp files indicate API call
+            
+            if (isHeadless) {
+                options.addArguments("--headless=new"); // Use new headless mode
+                options.addArguments("--no-gpu");
+                options.addArguments("--disable-gpu-sandbox");
+                options.addArguments("--disable-software-rasterizer");
+                System.out.println("Chrome options configured for headless mode (API/subprocess execution)...");
+            } else {
+                System.out.println("Chrome options configured for visible browser...");
+            }
+            
+            // Set page load strategy to EAGER to avoid waiting for all resources
+            options.setPageLoadStrategy(org.openqa.selenium.PageLoadStrategy.EAGER);
+            
+            // Additional stability options
             options.addArguments("--no-sandbox");
             options.addArguments("--disable-dev-shm-usage");
             options.addArguments("--disable-blink-features=AutomationControlled");
+            options.addArguments("--disable-extensions");
+            options.addArguments("--disable-plugins");
+            options.addArguments("--disable-images"); // Speed up loading
+            options.addArguments("--disable-web-security");
+            options.addArguments("--ignore-certificate-errors");
             options.addArguments("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
             options.addArguments("--window-size=1920,1080");
-            options.addArguments("--start-maximized");
             
-            System.out.println("Chrome options configured for visible browser...");
-            
-            driver = new ChromeDriver(options);
-            driver.manage().window().maximize();
-            
-            System.out.println("Chrome browser should now be visible...");
-            System.out.println("Waiting 3 seconds for browser to fully initialize...");
-            Thread.sleep(3000); // Give browser time to open visibly
-            
-            // Initialize components
-            ElementRepository elementRepository = new ElementRepository();
-            selfHealing = new SelfHealing(driver, elementRepository);
-            ExecutionService executionService = new ExecutionService(driver, selfHealing);
-            
-            System.out.println("Element repository initialized.");
-            
-            // Load test steps - try SQL backend first, then fall back to JSON file
-            List<Step> steps = new ArrayList<>();
-            SqlTestStepRepository sqlStepRepository = new SqlTestStepRepository();
-            
-            if (sqlStepRepository.isAvailable()) {
-                System.out.println("✓ SQL backend is available - attempting to generate test steps...");
-                
-                // Try the actual session name from your database
-                String[] sessionNames = {
-                    "Session for Home",  // Your actual session name
-                    "Swag Labs Self-Healing Test Session", 
-                    "Sample Login Test", 
-                    "Login Test Session", 
-                    "Test Session"
-                };
-                
-                for (String sessionName : sessionNames) {
-                    System.out.println("  Trying session: " + sessionName);
-                    steps = sqlStepRepository.generateTestStepsFromElements(sessionName);
-                    if (!steps.isEmpty()) {
-                        System.out.println("✓ Generated " + steps.size() + " test steps from session: " + sessionName);
-                        break;
-                    }
-                }
-                
-                if (steps.isEmpty()) {
-                    System.out.println("⚠ No test steps generated from SQL backend");
-                    System.out.println("  This might be because:");
-                    System.out.println("  - Session not found");
-                    System.out.println("  - No elements in session");
-                    System.out.println("  - Elements don't have required data");
-                    System.out.println("  → Falling back to JSON file");
-                }
-            } else {
-                System.out.println("⚠ SQL backend not available - using JSON file mode");
+            if (!isHeadless) {
+                options.addArguments("--start-maximized");
             }
             
-            // Fall back to JSON file if SQL backend didn't provide steps
-            if (steps.isEmpty()) {
-                System.out.println("Loading test steps from " + STEPS_FILE + "...");
+            System.out.println("Step 4: Creating ChromeDriver instance...");
+            driver = new ChromeDriver(options);
+            System.out.println("Step 5: ChromeDriver created successfully");
+            
+            System.out.println("Step 6: Setting timeouts...");
+            // Set aggressive timeouts to prevent hanging
+            driver.manage().timeouts().pageLoadTimeout(java.time.Duration.ofSeconds(10)); // Shorter timeout
+            driver.manage().timeouts().implicitlyWait(java.time.Duration.ofSeconds(5));
+            driver.manage().timeouts().scriptTimeout(java.time.Duration.ofSeconds(10));
+            System.out.println("Step 7: Timeouts configured");
+            
+            if (!isHeadless) {
+                System.out.println("Step 8: Maximizing window...");
+                driver.manage().window().maximize();
+            }
+            
+            System.out.println("Step 9: Chrome browser initialized");
+            System.out.println("Step 10: Waiting 2 seconds for browser stability...");
+            Thread.sleep(2000); // Reduced wait time
+            
+            // Load test steps directly from provided file (skip repository initialization for API calls)
+            List<Step> steps = new ArrayList<>();
+            boolean isApiCall = args.length > 0 && args[0].contains("tmp");
+            
+            // Declare execution service outside the blocks
+            ExecutionService executionService;
+            
+            if (isApiCall) {
+                System.out.println("API mode detected - loading steps directly from file: " + stepsFile);
                 try {
-                    steps = JsonUtil.readListFromFile(STEPS_FILE, new TypeReference<List<Step>>() {});
-                    System.out.println("✓ Loaded " + steps.size() + " test steps from JSON file");
+                    steps = JsonUtil.readListFromFile(stepsFile, new TypeReference<List<Step>>() {});
+                    System.out.println("✓ Loaded " + steps.size() + " test steps from API file");
                 } catch (IOException e) {
                     System.err.println("Error loading steps file: " + e.getMessage());
-                    System.err.println("Please ensure " + STEPS_FILE + " exists or populate SQL backend with test elements");
                     return;
+                }
+                
+                // Initialize minimal components for API execution
+                ElementRepository elementRepository = new ElementRepository();
+                selfHealing = new SelfHealing(driver, elementRepository);
+                executionService = new ExecutionService(driver, selfHealing);
+                
+            } else {
+                // Original logic for non-API calls
+                // Initialize components
+                ElementRepository elementRepository = new ElementRepository();
+                selfHealing = new SelfHealing(driver, elementRepository);
+                executionService = new ExecutionService(driver, selfHealing);
+                
+                System.out.println("Element repository initialized.");
+                
+                // Load test steps - try SQL backend first, then fall back to JSON file
+                SqlTestStepRepository sqlStepRepository = new SqlTestStepRepository();
+                
+                if (sqlStepRepository.isAvailable()) {
+                    System.out.println("✓ SQL backend is available - attempting to generate test steps...");
+                    
+                    // Try the actual session name from your database
+                    String[] sessionNames = {
+                        "Session for Home",  // Your actual session name
+                        "Swag Labs Self-Healing Test Session", 
+                        "Sample Login Test", 
+                        "Login Test Session", 
+                        "Test Session"
+                    };
+                    
+                    for (String sessionName : sessionNames) {
+                        System.out.println("  Trying session: " + sessionName);
+                        steps = sqlStepRepository.generateTestStepsFromElements(sessionName);
+                        if (!steps.isEmpty()) {
+                            System.out.println("✓ Generated " + steps.size() + " test steps from session: " + sessionName);
+                            break;
+                        }
+                    }
+                    
+                    if (steps.isEmpty()) {
+                        System.out.println("⚠ No test steps generated from SQL backend");
+                        System.out.println("  This might be because:");
+                        System.out.println("  - Session not found");
+                        System.out.println("  - No elements in session");
+                        System.out.println("  - Elements don't have required data");
+                        System.out.println("  → Falling back to JSON file");
+                    }
+                } else {
+                    System.out.println("⚠ SQL backend not available - using JSON file mode");
+                }
+                
+                // Fall back to JSON file if SQL backend didn't provide steps
+                if (steps.isEmpty()) {
+                    System.out.println("Loading test steps from " + stepsFile + "...");
+                    try {
+                        steps = JsonUtil.readListFromFile(stepsFile, new TypeReference<List<Step>>() {});
+                        System.out.println("✓ Loaded " + steps.size() + " test steps from JSON file");
+                    } catch (IOException e) {
+                        System.err.println("Error loading steps file: " + e.getMessage());
+                        System.err.println("Please ensure " + stepsFile + " exists or populate SQL backend with test elements");
+                        return;
+                    }
                 }
             }
             
@@ -135,6 +210,12 @@ public class Main {
             
             // Print console summary
             printConsoleSummary(summary);
+            
+            // Generate and print performance report
+            if (executionService != null) {
+                executionService.printPerformanceReport();
+                executionService.performGcAnalysis();
+            }
             
             // Save run summary to file
             try {

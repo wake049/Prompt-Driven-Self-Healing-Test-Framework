@@ -1,22 +1,22 @@
 # Custom AI Development Process
 
-## 🎯 AI-Centric Approach (NOT LLM-Dependent)
+##  AI-Centric Approach (NOT LLM-Dependent)
 
 This project demonstrates **custom AI model development** rather than relying on pre-built LLM APIs. Here's why this approach meets AI capstone requirements:
 
-### **❌ What We DON'T Do (Not AI-Centric)**
+### ** What We DON'T Do (Not AI-Centric)**
 - Call OpenAI/Claude APIs for test generation
 - Use pre-trained models without customization  
 - Rely on external LLM services
 - Simple prompt engineering without learning
 
-### **✅ What We DO (AI-Centric)**
+### ** What We DO (AI-Centric)**
 - Train custom intent classification models from scratch
 - Implement feature engineering pipelines
 - Develop domain-specific ML models
 - Create personalized AI for test automation
 
-## 🧠 Custom AI Model Development Process
+##  Custom AI Model Development Process
 
 ### **1. Problem Definition**
 **Challenge**: Convert natural language test descriptions into structured, executable test plans
@@ -55,7 +55,7 @@ TRAINING_DATA = [
 - **Inference**: Real-time prediction API
 - **Integration**: FastAPI service with <100ms latency
 
-## 📊 AI Performance Metrics
+##  AI Performance Metrics
 
 ### **Current Model Performance**
 ```
@@ -92,7 +92,7 @@ Accuracy: 1.000
 - TF-IDF min/max document frequency
 - N-gram range optimization
 
-## 🚀 AI Innovation Aspects
+##  AI Innovation Aspects
 
 ### **Domain-Specific Intelligence**
 - Custom vocabulary for test automation
@@ -109,7 +109,7 @@ Accuracy: 1.000
 - A/B testing framework ready
 - Model versioning and rollback
 
-## 📈 Future AI Enhancements
+##  Future AI Enhancements
 
 ### **Advanced ML Techniques**
 - Deep learning models (BERT, transformers)

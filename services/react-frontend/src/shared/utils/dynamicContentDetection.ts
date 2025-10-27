@@ -99,9 +99,9 @@ export function getDynamicContentWarning(matches: DynamicContentMatch[]): string
   
   switch (severity) {
     case 'high':
-      return `⚠️ High Risk: Contains ${types} - likely to change frequently`;
+      return ` High Risk: Contains ${types} - likely to change frequently`;
     case 'medium':
-      return `⚡ Medium Risk: Contains ${types} - may change over time`;
+      return ` Medium Risk: Contains ${types} - may change over time`;
     case 'low':
       return `ℹ️ Low Risk: Contains ${types} - may occasionally change`;
     default:

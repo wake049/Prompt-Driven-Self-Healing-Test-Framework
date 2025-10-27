@@ -23,6 +23,7 @@ services:
       - MCP_AUTH_REQUIRED=false
       - MCP_DEBUG=false
       - ENVIRONMENT=production
+      - MCP_DATABASE_URL=postgresql://planner:planner@db:5432/planner
     restart: unless-stopped
     depends_on:
       - db

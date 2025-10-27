@@ -2,7 +2,7 @@
  * API Client for React Frontend to communicate with SQL Backend
  */
 
-const API_BASE_URL = import.meta.env.VITE_SQL_API_URL || 'http://localhost:3001/api';
+const API_BASE_URL = import.meta.env.VITE_SQL_API_URL || 'http://localhost:8000/api/v1';
 
 interface ApiResponse<T = any> {
   success: boolean;
@@ -25,9 +25,9 @@ interface TestSession {
 }
 
 interface RecordedElementDB {
-  id: string;
+  id: string; // Database UUID primary key
   session_id: string;
-  element_id: string;
+  logical_key: string; // Replaces element_id - user-friendly identifier
   tag: string;
   text_content?: string;
   attributes: Record<string, any>;
@@ -98,7 +98,7 @@ class SqlApiClient {
   // Health check
   async healthCheck(): Promise<boolean> {
     try {
-      const response = await fetch(`${this.baseUrl.replace('/api', '')}/health`);
+      const response = await fetch(`${this.baseUrl}/health`);
       return response.ok;
     } catch {
       return false;
@@ -162,7 +162,7 @@ class SqlApiClient {
 
   async createElement(elementData: {
     session_id?: string;
-    element_id: string;
+    logical_key: string; // Updated to match simplified schema
     tag: string;
     text_content?: string;
     attributes?: Record<string, any>;
@@ -241,19 +241,63 @@ class SqlApiClient {
 
   // Convert database format to frontend format
   convertElementToFrontend(dbElement: RecordedElementDB): RecordedElement {
+    // Parse attributes if it's a string
+    let parsedAttributes = {};
+    try {
+      if (typeof dbElement.attributes === 'string') {
+        parsedAttributes = JSON.parse(dbElement.attributes);
+      } else if (typeof dbElement.attributes === 'object' && dbElement.attributes !== null) {
+        parsedAttributes = dbElement.attributes;
+      }
+    } catch (e) {
+      console.warn('Failed to parse attributes:', dbElement.attributes);
+      parsedAttributes = {};
+    }
+
+    // Filter out recording-related attributes and classes
+    const cleanAttributes = this.filterRecordingAttributes(parsedAttributes);
+
     return {
-      id: dbElement.element_id, // User-friendly ID
+      id: dbElement.logical_key, // User-friendly ID (now using logical_key from simplified schema)
       dbId: dbElement.id, // Database UUID for API operations
       tag: dbElement.tag,
       text: dbElement.text_content,
-      attributes: dbElement.attributes || {},
+      attributes: cleanAttributes,
       xpath: dbElement.xpath || '',
       cssSelector: dbElement.css_selector || '',
       position: { x: dbElement.position_x, y: dbElement.position_y },
-      selectors: dbElement.selectors || [],
+      selectors: Array.isArray(dbElement.selectors) ? dbElement.selectors : [],
       page: dbElement.page,
       timestamp: new Date(dbElement.timestamp_recorded).getTime(),
     };
+  }
+
+  // Helper method to filter out recording-related attributes
+  private filterRecordingAttributes(attributes: Record<string, any>): Record<string, any> {
+    const filtered = { ...attributes };
+    
+    // Remove MCP recording-related attributes
+    delete filtered['mcp-hover-highlight'];
+    delete filtered['mcp-recorded-highlight'];
+    delete filtered['mcp-element-id'];
+    delete filtered['mcp-recorded'];
+    
+    // Clean up class attribute to remove MCP-related classes
+    if (filtered.class && typeof filtered.class === 'string') {
+      const classes = filtered.class.split(' ').filter(cls => 
+        !cls.startsWith('mcp-') && 
+        cls !== 'mcp-hover-highlight' && 
+        cls !== 'mcp-recorded-highlight'
+      );
+      
+      if (classes.length > 0) {
+        filtered.class = classes.join(' ');
+      } else {
+        delete filtered.class;
+      }
+    }
+    
+    return filtered;
   }
 
   convertExecutionToFrontend(dbExecution: TestExecutionDB): TestExecution {
@@ -287,7 +331,7 @@ class SqlApiClient {
 
 // Frontend interfaces (from original component)
 interface RecordedElement {
-  id: string; // This is the element_id (user-friendly, like "password")
+  id: string; // This is the logical_key (user-friendly, like "password")
   dbId?: string; // This is the database UUID for API operations
   tag: string;
   text?: string;

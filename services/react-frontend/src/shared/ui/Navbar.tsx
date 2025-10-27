@@ -4,8 +4,9 @@ const Navbar = () => {
   const location = useLocation();
 
   const navItems = [
-    { path: '/', label: 'Elements', icon: '🔍' },
-    { path: '/review', label: 'Review Queue', icon: '📋' }
+    { path: '/', label: 'Elements', icon: '' },
+    { path: '/policy', label: 'Policy Dashboard', icon: '🚦' },
+    { path: '/prompts', label: 'Prompts', icon: '📝' }
   ];
 
   const navbarStyle: React.CSSProperties = {

@@ -177,7 +177,7 @@ export async function askShard(
     if (error?.name === 'AbortError') {
       console.warn('⏰ AI service request timed out after 5000ms');
     } else {
-      console.error('❌ AI service request failed:', error);
+      console.error(' AI service request failed:', error);
     }
     return { candidates: [] };
   }

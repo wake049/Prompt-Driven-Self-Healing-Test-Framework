@@ -3,7 +3,7 @@
 ## Overview
 Your React frontend can now display test data recorded by the Chrome Extension! Here's how it works:
 
-## 🎯 **What You Get**
+##  **What You Get**
 
 ### **1. MCP Test Viewer Component**
 - **Location**: `/mcp-tests` route in your React app
@@ -42,7 +42,7 @@ The extension can also send data directly to your API:
 - Test executions are logged with results
 - Page context is tracked for organization
 
-## 📋 **Data Structure**
+##  **Data Structure**
 
 ### **Recorded Element**
 ```json
@@ -75,7 +75,7 @@ The extension can also send data directly to your API:
 }
 ```
 
-## 🔧 **Technical Details**
+##  **Technical Details**
 
 ### **Component Features**
 - **Real-time Data**: Loads from localStorage and Chrome Extension
@@ -97,14 +97,14 @@ The extension provides these message types:
 - `EXPORT_TO_WEBSITE` - Send data to your API
 - `GET_RECORDING_DATA` - Get latest recordings
 
-## 🚀 **Next Steps**
+##  **Next Steps**
 
 1. **Test the Integration**: Record some elements and view them on your frontend
 2. **Customize the UI**: Modify the MCPTestViewer component styling
 3. **Add API Persistence**: Implement the backend endpoints for data storage
 4. **Extend Functionality**: Add test replay, element validation, etc.
 
-## 💡 **Tips**
+##  **Tips**
 
 - **Keep Extension Open**: Keep the popup open while recording to see real-time feedback
 - **Page Context**: Always set the page context for better organization

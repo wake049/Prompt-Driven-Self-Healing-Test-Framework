@@ -1,4 +1,5 @@
 import { http } from "../../shared/api/http";
+import { config } from "../../app/config";
 import {
   ReviewItem,
   ReviewCreate,
@@ -8,9 +9,9 @@ import {
   SuggestResponse,
 } from "./types";
 
-// Custom http function for review API that points to the SQL backend on port 3001
+// Custom http function for review API that points to the unified API
 async function reviewHttp<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const url = `http://localhost:3001${path}`;
+  const url = `${config.apiBaseUrl}${path}`;
   const token = localStorage.getItem("auth_token");
   const headers: Record<string, string> = {
     "Content-Type": "application/json",

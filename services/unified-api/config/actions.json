@@ -1,0 +1,140 @@
+{
+  "core_actions": [
+    {
+      "name": "open_url",
+      "description": "Navigate to a URL",
+      "css_variant": "open_url",
+      "xpath_variant": "open_url",
+      "params": ["url"]
+    },
+    {
+      "name": "type",
+      "description": "Type text into an element",
+      "css_variant": "type_css",
+      "xpath_variant": "type_xpath",
+      "params": ["selector", "text"]
+    },
+    {
+      "name": "click",
+      "description": "Click an element",
+      "css_variant": "click_css",
+      "xpath_variant": "click_xpath",
+      "params": ["selector"]
+    },
+    {
+      "name": "assert_title_contains",
+      "description": "Verify page title contains text",
+      "css_variant": "assert_title_contains",
+      "xpath_variant": "assert_title_contains",
+      "params": ["text"]
+    },
+    {
+      "name": "wait_for",
+      "description": "Wait for element to be present",
+      "css_variant": "wait_for_css",
+      "xpath_variant": "wait_for_xpath",
+      "params": ["selector"]
+    },
+    {
+      "name": "assert_text",
+      "description": "Verify element contains text",
+      "css_variant": "assert_text_css",
+      "xpath_variant": "assert_text_xpath",
+      "params": ["selector", "text"]
+    },
+    {
+      "name": "navigate_back",
+      "description": "Go back in browser history",
+      "css_variant": "navigate_back",
+      "xpath_variant": "navigate_back",
+      "params": []
+    },
+    {
+      "name": "screenshot",
+      "description": "Take a screenshot",
+      "css_variant": "screenshot",
+      "xpath_variant": "screenshot",
+      "params": []
+    }
+  ],
+  "extended_actions": [
+    {
+      "name": "hover",
+      "description": "Hover over an element",
+      "css_variant": "hover_css",
+      "xpath_variant": "hover_xpath",
+      "params": ["selector"]
+    },
+    {
+      "name": "double_click",
+      "description": "Double click an element",
+      "css_variant": "double_click_css",
+      "xpath_variant": "double_click_xpath",
+      "params": ["selector"]
+    },
+    {
+      "name": "right_click",
+      "description": "Right click an element",
+      "css_variant": "right_click_css",
+      "xpath_variant": "right_click_xpath",
+      "params": ["selector"]
+    },
+    {
+      "name": "select_option",
+      "description": "Select an option from dropdown",
+      "css_variant": "select_option_css",
+      "xpath_variant": "select_option_xpath",
+      "params": ["selector", "value"]
+    },
+    {
+      "name": "upload_file",
+      "description": "Upload a file to input element",
+      "css_variant": "upload_file_css",
+      "xpath_variant": "upload_file_xpath",
+      "params": ["selector", "file_path"]
+    },
+    {
+      "name": "scroll_to",
+      "description": "Scroll to an element",
+      "css_variant": "scroll_to_css",
+      "xpath_variant": "scroll_to_xpath",
+      "params": ["selector"]
+    },
+    {
+      "name": "wait_for_text",
+      "description": "Wait for element to contain specific text",
+      "css_variant": "wait_for_text_css",
+      "xpath_variant": "wait_for_text_xpath",
+      "params": ["selector", "text"]
+    },
+    {
+      "name": "assert_visible",
+      "description": "Verify element is visible",
+      "css_variant": "assert_visible_css",
+      "xpath_variant": "assert_visible_xpath",
+      "params": ["selector"]
+    },
+    {
+      "name": "assert_not_visible",
+      "description": "Verify element is not visible",
+      "css_variant": "assert_not_visible_css",
+      "xpath_variant": "assert_not_visible_xpath",
+      "params": ["selector"]
+    },
+    {
+      "name": "get_text",
+      "description": "Get text content from element",
+      "css_variant": "get_text_css",
+      "xpath_variant": "get_text_xpath",
+      "params": ["selector"]
+    }
+  ],
+  "action_categories": {
+    "navigation": ["open_url", "navigate_back"],
+    "interaction": ["click", "double_click", "right_click", "type", "hover"],
+    "form": ["type", "select_option", "upload_file"],
+    "verification": ["assert_title_contains", "assert_text", "assert_visible", "assert_not_visible"],
+    "waiting": ["wait_for", "wait_for_text"],
+    "utility": ["screenshot", "scroll_to", "get_text"]
+  }
+}

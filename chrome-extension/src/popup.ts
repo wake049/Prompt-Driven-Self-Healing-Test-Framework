@@ -208,19 +208,21 @@ class MCPClient {
     try {
       const intent = intentInput?.value?.trim() || '';
       if (status) status.style.display = 'block';
-      if (btn) { btn.disabled = true; btn.textContent = intent ? '🎯 Analyzing...' : '🔍 Discovering...'; }
+      if (btn) { btn.disabled = true; btn.textContent = intent ? ' Analyzing...' : ' Discovering...'; }
       if (msg) msg.textContent = intent ? `Searching for elements related to: "${intent}"...`
                                         : 'Discovering all interactive elements on the page...';
 
       const tab = await this.getActiveTab();
-      await this.ensureContentScript(tab.id!);                 // ✅ ensure content.js
+      await this.ensureContentScript(tab.id!);
 
+      // Call the fixed optimized selector method
       const response = await chrome.tabs.sendMessage(tab.id!, {
-        type: intent ? 'SUGGEST_OPTIMIZED_SELECTOR' : 'SUGGEST_ELEMENTS',
-        payload: intent ? { intent } : {}
+        type: 'SUGGEST_OPTIMIZED_SELECTOR',
+        payload: { intent }
       });
 
       if (!response?.success) throw new Error(response?.error || 'Failed to get suggestions');
+      
       if (msg) msg.textContent = intent
         ? `Found elements for "${intent}"! Check the elements page for results.`
         : 'Element discovery completed! Check the elements page for results.';
@@ -228,10 +230,10 @@ class MCPClient {
     } catch (error) {
       console.error('Element suggestion failed:', error);
       const text = error instanceof Error ? error.message : String(error);
-      if (msg) msg.textContent = `AI suggestion failed: ${text}`;
+      if (msg) msg.textContent = `Discovery failed: ${text}`;
       setTimeout(() => { if (status) status.style.display = 'none'; }, 5000);
     } finally {
-      if (btn) { btn.disabled = false; btn.textContent = '🔍 Discover Elements'; }
+      if (btn) { btn.disabled = false; btn.textContent = ' Discover Elements'; }
     }
   }
 
@@ -245,7 +247,7 @@ class MCPClient {
       if (msg) msg.textContent = 'Analyzing page structure and suggesting test elements...';
 
       const tab = await this.getActiveTab();
-      await this.ensureContentScript(tab.id!);                 // ✅ ensure content.js
+      await this.ensureContentScript(tab.id!);                 //  ensure content.js
 
       const response = await chrome.tabs.sendMessage(tab.id!, { type: 'SUGGEST_ELEMENTS', payload: {} });
       if (!response?.success) throw new Error(response?.error || 'Failed to get suggestions');

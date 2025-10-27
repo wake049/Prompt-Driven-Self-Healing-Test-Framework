@@ -1,0 +1,1 @@
+export { promptsApiService } from '../api';
