@@ -1,10 +1,8 @@
 import { config } from "../../app/config";
-
 function authHeader(): Record<string, string> {
   const token = localStorage.getItem(config.authTokenKey);
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
-
 function buildHeaders(initHeaders?: HeadersInit, extra?: Record<string, string>): Headers {
   const h = new Headers(initHeaders ?? {});
   // default content-type unless caller overrides
@@ -16,7 +14,6 @@ function buildHeaders(initHeaders?: HeadersInit, extra?: Record<string, string>)
   }
   return h;
 }
-
 export async function http<T>(path: string, init: RequestInit = {}): Promise<T> {
   const url = `${config.apiBaseUrl}${path}`;
   const token = localStorage.getItem("auth_token");

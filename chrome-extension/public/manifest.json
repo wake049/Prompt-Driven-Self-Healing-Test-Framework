@@ -1,10 +1,20 @@
 {
   "manifest_version": 3,
-  "name": "Prompt-Driven Test Recorder",
-  "version": "0.4.0",
-  "action": { "default_popup": "popup.html" },
+  "name": "MCP-Only Test Runner - Self-Healing Test Framework",
+  "version": "0.6.0",
+  "description": "MCP-only Chrome extension requiring active MCP server connection. No fallback modes - pure MCP protocol communication.",
+  "action": { 
+    "default_popup": "popup-mcp.html",
+    "default_title": "MCP-Only Test Runner"
+  },
   "permissions": ["activeTab", "scripting", "storage"],
-  "host_permissions": ["http://localhost:8000/*", "http://localhost:3000/*", "https://*/*", "http://*/*"],
+  "host_permissions": [
+    "http://localhost:8000/*", 
+    "http://localhost:3000/*", 
+    "ws://localhost:8765/*",
+    "https://*/*", 
+    "http://*/*"
+  ],
   "background": { 
     "service_worker": "background.js"
   },
@@ -13,6 +23,12 @@
       "matches": ["<all_urls>"],
       "js": ["content.js"],
       "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["popup-mcp.html"],
+      "matches": ["<all_urls>"]
     }
   ]
 }

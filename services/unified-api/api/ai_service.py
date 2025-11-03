@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import asyncio
 from pathlib import Path
 import asyncio
+from fastapi import Depends
 
 try:
     from openai import OpenAI
@@ -39,6 +40,8 @@ from core.element_ranking import ElementRankingService
 from core.caching import CacheService  
 from core.cost_management import CostManagementService
 from core.database import get_database
+from core.auth import get_current_active_user
+from models.auth_models import CurrentUser
 
 logger = logging.getLogger(__name__)
 
@@ -346,7 +349,7 @@ class EnterpriseAIService:
     # ENTERPRISE API METHODS
     # =========================
     
-    async def plan_test_steps(self, prompt_envelope: PromptEnvelope) -> PlanResponse:
+    async def plan_test_steps(self, prompt_envelope: PromptEnvelope, current_user=None) -> PlanResponse:
         """
         Enterprise /v1/plan endpoint implementation.
         
@@ -372,6 +375,11 @@ class EnterpriseAIService:
         start_time = time.time()
         
         try:
+            # SAFETY POLICY: Validate prompt for destructive operations
+            if current_user:
+                from core.safety_policy import safety_policy
+                await safety_policy.validate_prompt_content(current_user, prompt_envelope.prompt)
+            
             # Load existing bindings for this prompt if available
             existing_bindings = None
             prompt_id = getattr(prompt_envelope, 'prompt_id', None)
@@ -428,6 +436,30 @@ class EnterpriseAIService:
                                 element_selectors[element['element_key']] = css_selector
                     
                     logger.info(f"🏗️ Found {len(element_selectors)} price/total elements in repository: {list(element_selectors.keys())}")
+                    
+                    # Cache policy preference for synchronous selector methods
+                    try:
+                        policy_query = """
+                        SELECT context FROM policy.policy_decisions 
+                        WHERE context->>'config_type' = 'dashboard_config'
+                        ORDER BY created_at DESC
+                        LIMIT 1
+                        """
+                        policy_result = await db.execute_one(policy_query)
+                        
+                        prefer_css = True  # Default
+                        if policy_result and policy_result.get("context"):
+                            import json
+                            config_data = json.loads(policy_result["context"])
+                            locator_healing = config_data.get("configurations", {}).get("locatorHealing", {})
+                            prefer_css = locator_healing.get("preferCssOverXpath", True)
+                        
+                        # Cache the preference for sync methods
+                        self._cache_policy_preference(prefer_css)
+                        
+                    except Exception as e:
+                        logger.warning(f"Failed to load policy preference, using CSS default: {e}")
+                        self._cache_policy_preference(True)
                     
                 except Exception as e:
                     logger.error(f" Failed to load data bindings: {e}")
@@ -631,7 +663,12 @@ class EnterpriseAIService:
                 else:
                     # Fallback to auto-detection
                     logger.info(" Smart context not found, using auto-detection...")
-                    element_selectors = [self._get_element_selector(el) for el in prompt_envelope.page_slice.elements]
+                    # Use async method to get policy-based selectors
+                    element_selectors = []
+                    for el in prompt_envelope.page_slice.elements:
+                        selector = await self._get_policy_based_element_selector(el)
+                        element_selectors.append(selector)
+                    
                     prompt_envelope.page_context = page_context_service.detect_page_context(
                         page_url=prompt_envelope.page_url,
                         element_selectors=element_selectors
@@ -725,10 +762,29 @@ class EnterpriseAIService:
                 method = "ai-powered"
                 model = self.config["openai"]["model"]
             else:
-                steps, actual_tokens = self._generate_heuristic_plan(prompt_envelope, ranked_elements)
+                steps, actual_tokens = await self._generate_heuristic_plan(prompt_envelope, ranked_elements)
                 method = "heuristic-fallback"
                 model = "rule-based"
                 cache_hits += 1  # Heuristic is essentially cached
+            
+            # SAFETY POLICY: Validate generated steps for destructive operations
+            if current_user:
+                from core.safety_policy import safety_policy
+                validated_steps = []
+                for step in steps:
+                    try:
+                        await safety_policy.validate_step_action(
+                            current_user, 
+                            step.action, 
+                            step.args
+                        )
+                        validated_steps.append(step)
+                    except Exception as e:
+                        logger.warning(f"🚫 SECURITY: Filtered destructive step: {step.action} - {e}")
+                        # Skip this step instead of failing the entire request
+                        continue
+                steps = validated_steps
+                logger.info(f"🔐 SECURITY: Validated {len(steps)} steps after safety filtering")
             
             # Track actual usage
             cost_summary = self.cost_management.track_usage(
@@ -759,6 +815,17 @@ class EnterpriseAIService:
             )
             
             logger.info(f" Generated {len(steps)} steps for {prompt_envelope.tenant_id} in {response.processing_time_ms}ms")
+            
+            # Log final response steps for debugging
+            logger.info(f"🚀 FINAL RESPONSE: Returning {len(response.steps)} steps to frontend:")
+            for i, step in enumerate(response.steps):
+                logger.info(f"   Response Step {i+1}: action='{step.action}', target='{step.target}', args={step.args}")
+                cached_pref = getattr(self, '_cached_policy_preference', 'unknown')
+                if step.target and '#' in step.target:
+                    logger.error(f"❌ PROBLEM: Response step {i+1} has CSS target '{step.target}' but policy prefers {cached_pref}")
+                elif step.target and '//*[@' in step.target:
+                    logger.info(f"✅ GOOD: Response step {i+1} has XPath target '{step.target}'")
+            
             return response
             
         except Exception as e:
@@ -896,14 +963,52 @@ class EnterpriseAIService:
             
             # Convert to PlanStep objects with variable validation
             steps = []
-            for raw_step in raw_steps[:prompt_envelope.max_steps]:
+            for i, raw_step in enumerate(raw_steps[:prompt_envelope.max_steps]):
+                # Apply policy-based selector transformation to AI-generated target
+                original_target = raw_step.get("target")
+                if original_target and original_target.startswith('#'):
+                    # AI generated CSS selector, apply policy
+                    if getattr(self, '_cached_policy_preference', 'css') == 'xpath':
+                        # Convert CSS ID selector to XPath
+                        element_id = original_target[1:]  # Remove #
+                        policy_target = f"//*[@id='{element_id}']"
+                        logger.info(f"🔄 Policy conversion: {original_target} -> {policy_target}")
+                    else:
+                        policy_target = original_target
+                else:
+                    policy_target = original_target
+                
+                # Apply same policy to args selector if present
+                args = raw_step.get("args", {}).copy()
+                if 'selector' in args and args['selector'].startswith('#'):
+                    if getattr(self, '_cached_policy_preference', 'css') == 'xpath':
+                        element_id = args['selector'][1:]  # Remove #
+                        args['selector'] = f"//*[@id='{element_id}']"
+                        logger.info(f"🔄 Policy conversion (args): {raw_step.get('args', {}).get('selector')} -> {args['selector']}")
+                
                 step = PlanStep(
                     action=raw_step.get("action", ""),
-                    target=raw_step.get("target"),
-                    args=raw_step.get("args", {}),
+                    target=policy_target,
+                    args=args,
                     confidence=raw_step.get("confidence", 0.8),
-                    description=raw_step.get("description")
+                    description=raw_step.get("description"),
+                    selector_policy=getattr(self, '_cached_policy_preference', 'css')
                 )
+                
+                # Log detailed step information for debugging
+                logger.info(f"🔍 AI Step {i+1}: action='{step.action}', target='{step.target}', args={step.args}")
+                if step.target and '#' in step.target:
+                    logger.warning(f"⚠️ AI generated CSS-style target: '{step.target}' (expected XPath with policy={getattr(self, '_cached_policy_preference', 'unknown')})")
+                elif step.target and '//*[@' in step.target:
+                    logger.info(f"✅ AI generated XPath target: '{step.target}'")
+                
+                # Check args for selectors too
+                if step.args and 'selector' in step.args:
+                    selector = step.args['selector']
+                    if '#' in selector:
+                        logger.warning(f"⚠️ AI generated CSS-style args selector: '{selector}'")
+                    elif '//*[@' in selector:
+                        logger.info(f"✅ AI generated XPath args selector: '{selector}'")
                 
                 # Validate and correct variables in the step
                 validated_step = self.variable_validator.validate_step_variables(step)
@@ -921,7 +1026,7 @@ class EnterpriseAIService:
             logger.error(f" AI generation failed: {e}")
             raise Exception(f"AI service unavailable: {str(e)}")
 
-    def _generate_heuristic_plan(
+    async def _generate_heuristic_plan(
         self,
         prompt_envelope: PromptEnvelope,
         ranked_elements: List[Any]
@@ -933,7 +1038,8 @@ class EnterpriseAIService:
         
         # Analyze prompt for intent
         if "login" in prompt or "sign in" in prompt:
-            steps.extend(self._generate_login_steps(ranked_elements))
+            login_steps = await self._generate_login_steps(ranked_elements)
+            steps.extend(login_steps)
         elif "search" in prompt:
             search_term = self._extract_search_term(prompt_envelope.prompt)
             if search_term:
@@ -967,8 +1073,8 @@ class EnterpriseAIService:
     # STEP GENERATION HELPERS
     # =========================
     
-    def _generate_login_steps(self, elements: List[Any]) -> List[PlanStep]:
-        """Generate login-specific steps"""
+    async def _generate_login_steps(self, elements: List[Any]) -> List[PlanStep]:
+        """Generate login-specific steps with policy-based selectors"""
         steps = []
         
         logger.info(f"🔑 Looking for login elements in {len(elements)} available elements")
@@ -976,12 +1082,13 @@ class EnterpriseAIService:
         # Find username/email field
         username_el = self._find_element_by_keywords(elements, ["email", "username", "user", "user-name"])
         if username_el:
-            logger.info(f" Found username field: {self._get_element_tag(username_el)} - '{self._get_element_text(username_el)}' - {self._get_element_selector(username_el)}")
+            username_selector = await self._get_policy_based_element_selector(username_el)
+            logger.info(f" Found username field: {self._get_element_tag(username_el)} - '{self._get_element_text(username_el)}' - {username_selector}")
             steps.append(PlanStep(
                 action="type",
-                target=self._get_element_id(username_el),
+                target=username_selector,  # Use policy-based selector for target too
                 args={
-                    "selector": self._get_element_selector(username_el), 
+                    "selector": username_selector, 
                     "text": "standard_user",
                     "element_type": "username_field"
                 },
@@ -994,12 +1101,13 @@ class EnterpriseAIService:
         # Find password field
         password_el = self._find_element_by_keywords(elements, ["password"])
         if password_el:
-            logger.info(f" Found password field: {self._get_element_tag(password_el)} - '{self._get_element_text(password_el)}' - {self._get_element_selector(password_el)}")
+            password_selector = await self._get_policy_based_element_selector(password_el)
+            logger.info(f" Found password field: {self._get_element_tag(password_el)} - '{self._get_element_text(password_el)}' - {password_selector}")
             steps.append(PlanStep(
                 action="type", 
-                target=self._get_element_id(password_el),
+                target=password_selector,  # Use policy-based selector for target too
                 args={
-                    "selector": self._get_element_selector(password_el), 
+                    "selector": password_selector, 
                     "text": "secret_sauce",
                     "element_type": "password_field"
                 },
@@ -1012,12 +1120,13 @@ class EnterpriseAIService:
         # Find submit button
         submit_el = self._find_element_by_keywords(elements, ["submit", "login", "signin"])
         if submit_el:
-            logger.info(f" Found submit button: {self._get_element_tag(submit_el)} - '{self._get_element_text(submit_el)}' - {self._get_element_selector(submit_el)}")
+            submit_selector = await self._get_policy_based_element_selector(submit_el)
+            logger.info(f" Found submit button: {self._get_element_tag(submit_el)} - '{self._get_element_text(submit_el)}' - {submit_selector}")
             steps.append(PlanStep(
                 action="click",
-                target=self._get_element_id(submit_el),
+                target=submit_selector,  # Use policy-based selector for target too
                 args={
-                    "selector": self._get_element_selector(submit_el),
+                    "selector": submit_selector,
                     "element_type": "submit_button"
                 },
                 description="Click login button",
@@ -1038,7 +1147,7 @@ class EnterpriseAIService:
         if search_el:
             steps.append(PlanStep(
                 action="type",
-                target=self._get_element_id(search_el),
+                target=self._get_element_selector(search_el),
                 args={
                     "selector": self._get_element_selector(search_el), 
                     "text": search_term,
@@ -1053,7 +1162,7 @@ class EnterpriseAIService:
         if button_el:
             steps.append(PlanStep(
                 action="click",
-                target=self._get_element_id(button_el),
+                target=self._get_element_selector(button_el),
                 args={
                     "selector": self._get_element_selector(button_el),
                     "element_type": "search_button"
@@ -1073,7 +1182,7 @@ class EnterpriseAIService:
         if link_el:
             steps.append(PlanStep(
                 action="click",
-                target=self._get_element_id(link_el),
+                target=self._get_element_selector(link_el),
                 args={
                     "selector": self._get_element_selector(link_el),
                     "element_type": "link"
@@ -1102,7 +1211,7 @@ class EnterpriseAIService:
             if tag == 'input':
                 steps.append(PlanStep(
                     action="type",
-                    target=self._get_element_id(interactive_el),
+                    target=self._get_element_selector(interactive_el),
                     args={
                         "selector": self._get_element_selector(interactive_el),
                         "text": "test input",
@@ -1114,7 +1223,7 @@ class EnterpriseAIService:
             elif tag in ['button', 'a']:
                 steps.append(PlanStep(
                     action="click",
-                    target=self._get_element_id(interactive_el),
+                    target=self._get_element_selector(interactive_el),
                     args={
                         "selector": self._get_element_selector(interactive_el),
                         "element_type": tag
@@ -1680,16 +1789,178 @@ CRITICAL: Adapt completely to the website type. Don't use e-commerce patterns fo
         return None
     
     def _get_element_id(self, element: Any) -> str:
-        """Get element ID for targeting"""
+        """Get element ID for targeting - prefers actual CSS selector from repository"""
+        # First try to get actual CSS selector from repository
+        if hasattr(element, 'selector_css') and element.selector_css:
+            return element.selector_css
+        elif hasattr(element, 'css_selector') and element.css_selector:
+            return element.css_selector
+        elif isinstance(element, dict):
+            css_selector = element.get('css_selector') or element.get('selector')
+            if css_selector:
+                return css_selector
+        
+        # Fallback to element_id if available
         if hasattr(element, 'element_id'):
             return element.element_id
+        
+        # Last resort - generate ID
         return element.get("id", f"el_{int(time.time()*1000)}")
     
     def _get_element_selector(self, element: Any) -> str:
-        """Get element CSS selector"""
-        if hasattr(element, 'selector_css'):
-            return element.selector_css or ""
-        return element.get("css_selector", "") or element.get("selector", "")
+        """Get element selector based on current policy preference - uses repository selectors"""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        try:
+            # Get both selectors from element repository
+            css_selector = None
+            xpath_selector = None
+            
+            # Extract CSS selector
+            if hasattr(element, 'selector_css') and element.selector_css:
+                css_selector = element.selector_css
+            elif hasattr(element, 'css_selector') and element.css_selector:
+                css_selector = element.css_selector
+            elif isinstance(element, dict):
+                css_selector = element.get('css_selector') or element.get('selector')
+            
+            # Extract XPath selector  
+            if hasattr(element, 'selector_xpath') and element.selector_xpath:
+                xpath_selector = element.selector_xpath
+            elif hasattr(element, 'xpath_selector') and element.xpath_selector:
+                xpath_selector = element.xpath_selector
+            elif isinstance(element, dict):
+                xpath_selector = element.get('xpath_selector') or element.get('xpath')
+            
+            # Apply policy preference
+            cached_preference = getattr(self, '_cached_policy_preference', 'css')
+            prefer_css = (cached_preference == 'css')
+            
+            # Choose selector based on policy and availability
+            if prefer_css and css_selector:
+                logger.info(f"🎯 Using CSS selector (policy preference): {css_selector}")
+                return css_selector
+            elif not prefer_css and xpath_selector:
+                logger.info(f"🎯 Using XPath selector (policy preference): {xpath_selector}")
+                return xpath_selector
+            elif css_selector:  # Fallback to available CSS
+                logger.warning(f"⚠️ XPath preferred but not available, using CSS: {css_selector}")
+                return css_selector
+            elif xpath_selector:  # Fallback to available XPath
+                logger.warning(f"⚠️ CSS preferred but not available, using XPath: {xpath_selector}")
+                return xpath_selector
+            else:
+                # Last resort fallback
+                element_id = getattr(element, 'element_id', 'unknown')
+                fallback_selector = f"#{element_id}" if prefer_css else f"//*[@id='{element_id}']"
+                logger.error(f"❌ No selectors found in repository, using fallback: {fallback_selector}")
+                return fallback_selector
+                
+        except Exception as e:
+            logger.warning(f"Failed to get element selector: {e}")
+            return f"[data-testid='unknown']"
+    
+    def _css_to_xpath_simple(self, css_selector: str) -> str:
+        """Simple CSS to XPath conversion for policy compliance"""
+        try:
+            if css_selector.startswith('#'):
+                # ID selector: #id -> //*[@id='id']
+                element_id = css_selector[1:]
+                return f"//*[@id='{element_id}']"
+            elif css_selector.startswith('.'):
+                # Class selector: .class -> //*[contains(@class,'class')]
+                class_name = css_selector[1:]
+                return f"//*[contains(@class,'{class_name}')]"
+            elif css_selector.startswith('[data-testid='):
+                # Data testid: [data-testid='value'] -> //*[@data-testid='value']
+                testid = css_selector.split("'")[1]
+                return f"//*[@data-testid='{testid}']"
+            else:
+                # For other selectors, wrap in generic XPath
+                return f"//*[@data-testid='{css_selector}']"
+        except Exception:
+            return f"//*[@data-testid='{css_selector}']"
+    
+    def _cache_policy_preference(self, prefer_css: bool):
+        """Cache the policy preference for sync selector generation"""
+        self._cached_policy_preference = "css" if prefer_css else "xpath"
+        logging.getLogger(__name__).info(f"📋 Cached policy preference: {'CSS' if prefer_css else 'XPath'} (stored as: {self._cached_policy_preference})")
+    
+    async def _get_policy_based_element_selector(self, element: Any) -> str:
+        """Get element selector respecting CSS vs XPath policy preference"""
+        try:
+            # Get current policy configuration
+            from core.database import get_database
+            db = await get_database()
+            
+            policy_query = """
+            SELECT context FROM policy.policy_decisions 
+            WHERE context->>'config_type' = 'dashboard_config'
+            ORDER BY created_at DESC
+            LIMIT 1
+            """
+            policy_result = await db.execute_one(policy_query)
+            
+            # Default to CSS preference
+            prefer_css = True
+            
+            if policy_result and policy_result.get("context"):
+                import json
+                config_data = json.loads(policy_result["context"])
+                locator_healing = config_data.get("configurations", {}).get("locatorHealing", {})
+                prefer_css = locator_healing.get("preferCssOverXpath", True)
+            
+            # Get both selectors if available
+            css_selector = ""
+            xpath_selector = ""
+            
+            if hasattr(element, 'selector_css'):
+                css_selector = element.selector_css or ""
+            else:
+                css_selector = element.get("css_selector", "") or element.get("selector", "")
+            
+            if hasattr(element, 'selector_xpath'):
+                xpath_selector = element.selector_xpath or ""
+            else:
+                xpath_selector = element.get("xpath_selector", "") or element.get("xpath", "")
+            
+            # Apply policy preference
+            if prefer_css and css_selector:
+                logger.info(f"🎯 Using CSS selector (policy preference): {css_selector}")
+                return css_selector
+            elif not prefer_css and xpath_selector:
+                logger.info(f"🎯 Using XPath selector (policy preference): {xpath_selector}")
+                return xpath_selector
+            elif css_selector:
+                logger.info(f"🎯 Fallback to CSS selector: {css_selector}")
+                return css_selector
+            elif xpath_selector:
+                logger.info(f"🎯 Fallback to XPath selector: {xpath_selector}")
+                return xpath_selector
+            else:
+                # Generate basic selectors if none exist
+                if prefer_css:
+                    element_id = self._get_element_id(element)
+                    if element_id:
+                        return f"#{element_id}"
+                    else:
+                        tag = self._get_element_tag(element)
+                        return f"{tag}"
+                else:
+                    element_id = self._get_element_id(element)
+                    if element_id:
+                        return f"//*[@id='{element_id}']"
+                    else:
+                        tag = self._get_element_tag(element)
+                        return f"//{tag}"
+                        
+        except Exception as e:
+            logger.warning(f"Failed to get policy-based selector: {e}")
+            # Fallback to original logic
+            if hasattr(element, 'selector_css'):
+                return element.selector_css or ""
+            return element.get("css_selector", "") or element.get("selector", "")
     
     def _get_element_tag(self, element: Any) -> str:
         """Get element tag name"""
@@ -1785,6 +2056,284 @@ CRITICAL: Adapt completely to the website type. Don't use e-commerce patterns fo
             method="budget_check_failed"
         )
     
+    async def generate_minimal_reproduction_steps(
+        self,
+        execution_id: str,
+        execution_context: Dict[str, Any],
+        all_steps: List[Any],
+        failed_steps: List[Any],
+        optimization_level: str = "moderate",
+        preserve_context: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Generate minimal reproduction steps using AI analysis.
+        Analyzes the execution flow and identifies the minimum steps needed to reproduce the failure.
+        """
+        try:
+            # Build context for AI analysis
+            context_prompt = f"""
+Analyze this failed test execution and identify which ORIGINAL steps are essential for reproducing the failure:
+
+EXECUTION CONTEXT:
+- Test Purpose: {execution_context.get('prompt_text', 'Unknown')}
+- Total Steps: {execution_context.get('total_steps', 0)}
+- Failed Steps: {execution_context.get('failed_steps_count', 0)}
+
+OPTIMIZATION LEVEL: {optimization_level}
+PRESERVE CONTEXT: {preserve_context}
+
+ALL STEPS EXECUTED (WITH ORIGINAL SELECTORS):
+"""
+            
+            for i, step in enumerate(all_steps):
+                status_indicator = "❌" if step.get("status") == "failed" else "✅" if step.get("status") == "passed" else "⏸️"
+                context_prompt += f"\n{i+1}. {status_indicator} [{step.get('step_order')}] {step.get('action', 'unknown')} on '{step.get('target', 'unknown')}'"
+                if step.get("error_message") and step.get("status") == "failed":
+                    context_prompt += f" - ERROR: {step.get('error_message')}"
+            
+            context_prompt += f"""
+
+CRITICAL REQUIREMENT: You must return the EXACT ORIGINAL STEPS (step_order numbers) that are essential for reproducing the failure.
+DO NOT generate new steps or modify the action/target values - only identify which existing steps are needed.
+
+ANALYSIS TASK:
+1. Identify the critical path that leads to the failure
+2. Remove unnecessary steps (redundant navigation, non-essential assertions)
+3. Keep only steps that are essential for reproducing the failure state
+4. Maintain logical flow and necessary setup steps
+5. Optimization level "{optimization_level}": 
+   - conservative: Keep more context steps (70-80% reduction)
+   - moderate: Balance between context and efficiency (50-70% reduction) 
+   - aggressive: Minimal steps only (30-50% reduction)
+
+Generate a JSON response with:
+{{
+  "essentialStepOrders": [1, 3, 5, 7],
+  "analysisReport": {{
+    "criticalPath": ["step types that are essential"],
+    "removedSteps": ["step types that were removed"],
+    "reasoning": "explanation of why these specific steps reproduce the failure"
+  }}
+}}
+
+IMPORTANT: Return only the step_order numbers of the original steps that are essential. The original step data will be preserved exactly as-is.
+"""
+            
+            # Use AI to analyze and generate minimal steps
+            if not self.client:
+                # Fallback to heuristic approach if AI is not available
+                return self._generate_heuristic_minimal_repro(all_steps, failed_steps, optimization_level)
+            
+            response = await self._chat_json(
+                model=self.config["openai"]["model"],
+                system="You are an expert test automation engineer specializing in failure analysis and test optimization. You select which original test steps are essential for reproducing failures.",
+                user=context_prompt,
+                max_tokens=2000,
+                temperature=0.1,
+                retries=3,
+                timeout_ms=30000
+            )
+            
+            analysis_result = json.loads(response)
+            essential_step_orders = analysis_result.get("essentialStepOrders", [])
+            analysis_report = analysis_result.get("analysisReport", {})
+            
+            # Extract the original steps that were identified as essential
+            essential_steps = []
+            step_order_to_step = {step.get("step_order"): step for step in all_steps}
+            
+            for step_order in essential_step_orders:
+                if step_order in step_order_to_step:
+                    original_step = step_order_to_step[step_order]
+                    
+                    # Create the essential step with all necessary data preserved
+                    essential_step = {
+                        "step_order": original_step.get("step_order"),
+                        "action": original_step.get("action"),
+                        "target": original_step.get("target"),
+                        "text_value": original_step.get("text_value", ""),  # Include text values for typing
+                        "status": original_step.get("status"),
+                        "originalStepId": str(original_step.get("id", ""))
+                    }
+                    
+                    # Log for debugging
+                    if essential_step["action"] == "type" and essential_step["text_value"]:
+                        logger.info(f"✅ Preserved text value for step {step_order}: '{essential_step['text_value']}'")
+                    elif essential_step["action"] == "type":
+                        logger.warning(f"⚠️ Missing text value for type step {step_order}")
+                    
+                    essential_steps.append(essential_step)
+            
+            # Calculate metrics
+            original_count = len(all_steps)
+            reduced_count = len(essential_steps)
+            reduction_percentage = (1 - reduced_count / original_count) if original_count > 0 else 0
+            
+            # Estimate reproduction guarantee based on steps included
+            confidence = min(0.95, 0.6 + (reduced_count / original_count) * 0.35)
+            
+            return {
+                "success": True,
+                "minimalSteps": essential_steps,
+                "originalStepsCount": original_count,
+                "reducedStepsCount": reduced_count,
+                "reproductionGuarantee": confidence,
+                "analysisReport": analysis_report
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ AI minimal reproduction generation failed: {str(e)}")
+            return self._generate_heuristic_minimal_repro(all_steps, failed_steps, optimization_level)
+    
+    def _generate_heuristic_minimal_repro(
+        self,
+        all_steps: List[Any],
+        failed_steps: List[Any],
+        optimization_level: str
+    ) -> Dict[str, Any]:
+        """
+        Fallback heuristic approach for minimal reproduction when AI is unavailable.
+        Returns original steps based on heuristic rules.
+        """
+        failed_step_numbers = {step.get("step_order", 0) for step in failed_steps}
+        
+        # Heuristic rules based on optimization level
+        essential_actions = {"open_url", "click", "type", "select"}
+        setup_actions = {"wait", "navigate", "wait_for"}
+        verification_actions = {"assert", "verify", "check"}
+        
+        essential_steps = []
+        
+        for step in all_steps:
+            step_number = step.get("step_order", 0)
+            action = step.get("action", "").lower()
+            
+            include_step = False
+            
+            # Always include failed steps and preceding setup
+            if step_number in failed_step_numbers:
+                include_step = True
+            
+            # Include essential actions (navigation, input)
+            elif any(essential_action in action for essential_action in essential_actions):
+                include_step = True
+            
+            # Include setup steps based on optimization level
+            elif any(setup_action in action for setup_action in setup_actions):
+                if optimization_level == "conservative":
+                    include_step = True
+                elif optimization_level == "moderate" and step_number <= max(failed_step_numbers):
+                    include_step = True
+            
+            # Skip most verification steps unless conservative
+            elif any(verify_action in action for verify_action in verification_actions):
+                if optimization_level == "conservative":
+                    include_step = True
+            
+            if include_step:
+                essential_steps.append({
+                    "step_order": step.get("step_order"),
+                    "action": step.get("action"),
+                    "target": step.get("target"),
+                    "text_value": step.get("text_value", ""),  # Include text values for typing
+                    "status": step.get("status"),
+                    "originalStepId": str(step.get("id", ""))
+                })
+        
+        return {
+            "success": True,
+            "minimalSteps": essential_steps,
+            "originalStepsCount": len(all_steps),
+            "reducedStepsCount": len(essential_steps),
+            "reproductionGuarantee": 0.75,
+            "analysisReport": {
+                "criticalPath": ["heuristic analysis"],
+                "removedSteps": ["verification steps", "redundant navigation"],
+                "reasoning": f"Heuristic approach using {optimization_level} optimization level"
+            }
+        }
+    
+    async def generate_element_failure_recommendations(
+        self,
+        element_id: str,
+        failure_data: Dict[str, Any]
+    ) -> List[str]:
+        """
+        Generate AI-powered recommendations for element failure patterns.
+        """
+        try:
+            if not self.client:
+                return self._generate_heuristic_failure_recommendations(failure_data)
+            
+            context_prompt = f"""
+Analyze failure patterns for UI element "{element_id}" and provide specific recommendations:
+
+FAILURE ANALYSIS DATA:
+- Total Failures: {failure_data.get('total_failures', 0)} over {failure_data.get('time_period_days', 30)} days
+- Error Patterns: {list(failure_data.get('error_patterns', {}).keys())[:5]}
+- Action Patterns: {list(failure_data.get('action_patterns', {}).keys())}
+
+TOP ERRORS:
+"""
+            
+            for error, count in list(failure_data.get('error_patterns', {}).items())[:3]:
+                context_prompt += f"\n- {error} (occurred {count} times)"
+            
+            context_prompt += """
+
+Generate 3-6 specific, actionable recommendations to improve element stability and reduce failures.
+Focus on practical solutions like:
+- Selector improvements (if selectors are weak)
+- Wait strategies (if timing issues)
+- Error handling (if environmental issues)
+- Test design changes (if test logic issues)
+- Element identification improvements
+
+Return a JSON array of recommendation strings.
+"""
+            
+            response = await self._chat_json(
+                model=self.config["openai"]["model"],
+                system="You are a senior QA automation engineer providing specific technical recommendations to fix test failures.",
+                user=context_prompt,
+                max_tokens=800,
+                temperature=0.2
+            )
+            
+            recommendations = json.loads(response)
+            if isinstance(recommendations, list):
+                return recommendations[:6]  # Limit to 6 recommendations
+            else:
+                return ["AI analysis completed but returned unexpected format"]
+                
+        except Exception as e:
+            logger.error(f"❌ AI recommendation generation failed: {str(e)}")
+            return self._generate_heuristic_failure_recommendations(failure_data)
+    
+    def _generate_heuristic_failure_recommendations(self, failure_data: Dict[str, Any]) -> List[str]:
+        """Fallback heuristic recommendations when AI is unavailable."""
+        recommendations = []
+        total_failures = failure_data.get('total_failures', 0)
+        
+        if total_failures > 10:
+            recommendations.append("🔧 High failure rate detected - consider reviewing element selector stability")
+        
+        error_patterns = failure_data.get('error_patterns', {})
+        if any("timeout" in error.lower() for error in error_patterns.keys()):
+            recommendations.append("⏱️ Timeout errors detected - add explicit wait conditions before interacting with this element")
+        
+        if any("not found" in error.lower() or "no such element" in error.lower() for error in error_patterns.keys()):
+            recommendations.append("🎯 Element not found errors - verify selector stability and consider alternative locator strategies")
+        
+        action_patterns = failure_data.get('action_patterns', {})
+        if "click" in action_patterns and action_patterns["click"]["count"] > 5:
+            recommendations.append("🖱️ Click action failures detected - ensure element is visible and clickable before interaction")
+        
+        if len(recommendations) == 0:
+            recommendations.append("📊 Monitor element stability and consider adding additional error handling")
+        
+        return recommendations
+
     def _create_error_response(self, error_message: str, start_time: float) -> PlanResponse:
         """Create response for error scenarios"""
         return PlanResponse(
@@ -2007,8 +2556,9 @@ Return JSON with:
 # FASTAPI ROUTER INTEGRATION
 # =========================
 
-from fastapi import APIRouter, HTTPException, Header
+from fastapi import APIRouter, HTTPException, Header, Depends
 from fastapi.responses import JSONResponse
+from core.database import DatabaseManager, get_database_manager
 import gzip
 
 router = APIRouter(tags=["ai"])
@@ -2197,11 +2747,18 @@ Return JSON with:
             
             elements = []
             for i, el in enumerate(options["availableElements"]):
+                # Use actual CSS selector as element_id if available
+                css_selector = el.get("css_selector") or el.get("selector")
+                xpath_selector = el.get("xpath_selector") or el.get("xpath")
+                element_id = css_selector if css_selector else f"el_{i}"
+                
+                logger.info(f"🔍 Processing element {i}: css='{css_selector}', xpath='{xpath_selector}', id='{element_id}'")
+                
                 page_element = PageElement(
-                    element_id=f"el_{i}",
+                    element_id=element_id,
                     tag=el.get("tag", "div"),
-                    selector_css=el.get("css_selector") or el.get("selector"),
-                    selector_xpath=el.get("xpath"),
+                    selector_css=css_selector,
+                    selector_xpath=xpath_selector,
                     text=el.get("text"),
                     attributes=el.get("attributes", {}),
                     is_interactive=el.get("isInteractive", False),
@@ -2216,8 +2773,8 @@ Return JSON with:
                 elements=elements
             )
         
-        # Call enterprise service
-        response = await self.enterprise_service.plan_test_steps(prompt_envelope)
+        # Call enterprise service (legacy method - no current_user available)
+        response = await self.enterprise_service.plan_test_steps(prompt_envelope, None)
         
         # Convert response to legacy format
         actions = []
@@ -2325,20 +2882,22 @@ async def smart_page_context_endpoint(request: Dict[str, Any]):
 async def plan_endpoint(
     request: Dict[str, Any],
     if_none_match: Optional[str] = Header(None, alias="If-None-Match"),
-    accept_encoding: Optional[str] = Header(None, alias="Accept-Encoding")
+    accept_encoding: Optional[str] = Header(None, alias="Accept-Encoding"),
+    current_user: CurrentUser = Depends(get_current_active_user)
 ):
     """
     Enterprise /v1/plan endpoint implementing the Prompt/Actions/Elements contract.
     
     Accepts PromptEnvelope and returns PlanResponse with cost tracking.
     Supports ETag caching and gzip compression.
+    Includes safety policy validation for destructive operations.
     """
     try:
         # Validate and parse request
         prompt_envelope = PromptEnvelope(**request)
         
-        # Generate plan
-        response = await enterprise_ai_service.plan_test_steps(prompt_envelope)
+        # Generate plan with safety policy validation
+        response = await enterprise_ai_service.plan_test_steps(prompt_envelope, current_user)
         
         # Convert to dict for JSON response (with proper datetime serialization)
         response_dict = response.model_dump(mode='json')
@@ -2367,6 +2926,92 @@ async def plan_endpoint(
     except Exception as e:
         logger.error(f" /v1/plan endpoint error: {e}")
         raise HTTPException(status_code=500, detail=f"Plan generation failed: {str(e)}")
+
+
+@router.get("/v1/safety-policy")
+async def get_safety_policy(
+    current_user: CurrentUser = Depends(get_current_active_user)
+):
+    """
+    Get the current safety policy configuration.
+    Shows what destructive operations are blocked for non-admin users.
+    """
+    try:
+        from core.safety_policy import safety_policy
+        
+        policy_summary = safety_policy.get_policy_summary()
+        
+        # Add user-specific information
+        is_admin = await safety_policy.check_user_admin_status(current_user)
+        
+        return {
+            "policy": policy_summary,
+            "user_status": {
+                "email": current_user.user.email,
+                "is_admin": is_admin,
+                "can_perform_destructive_operations": is_admin
+            },
+            "examples": {
+                "blocked_for_non_admin": [
+                    "delete all test data",
+                    "remove all elements from page",
+                    "cleanup database records", 
+                    "purge old test results"
+                ],
+                "allowed_for_all": [
+                    "click login button",
+                    "type username in field",
+                    "verify page title",
+                    "extract price values"
+                ]
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting safety policy: {e}")
+        raise HTTPException(status_code=500, detail=f"Safety policy retrieval failed: {str(e)}")
+
+
+@router.post("/v1/test-safety-policy")
+async def test_safety_policy(
+    request: Dict[str, Any],
+    current_user: CurrentUser = Depends(get_current_active_user)
+):
+    """
+    Test endpoint to validate prompts against the safety policy.
+    Use this to check if a prompt would be blocked before submitting to /v1/plan.
+    """
+    try:
+        from core.safety_policy import safety_policy
+        
+        prompt_text = request.get("prompt", "")
+        if not prompt_text:
+            raise HTTPException(status_code=400, detail="Missing 'prompt' field in request")
+        
+        # Test the prompt
+        try:
+            await safety_policy.validate_prompt_content(current_user, prompt_text)
+            
+            return {
+                "prompt": prompt_text,
+                "safety_check": "PASSED",
+                "message": "Prompt is allowed and will be processed normally",
+                "user_is_admin": await safety_policy.check_user_admin_status(current_user)
+            }
+            
+        except HTTPException as safety_error:
+            return {
+                "prompt": prompt_text,
+                "safety_check": "BLOCKED",
+                "message": safety_error.detail,
+                "user_is_admin": await safety_policy.check_user_admin_status(current_user),
+                "status_code": safety_error.status_code
+            }
+        
+    except Exception as e:
+        logger.error(f"Error testing safety policy: {e}")
+        raise HTTPException(status_code=500, detail=f"Safety policy test failed: {str(e)}")
+
 
 @router.get("/v1/catalog/{catalog_id}/v/{version}")
 async def get_catalog_endpoint(
@@ -2405,6 +3050,252 @@ async def get_catalog_endpoint(
     except Exception as e:
         logger.error(f" Catalog endpoint error: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get catalog: {str(e)}")
+
+@router.post("/generate-minimal-repro")
+async def generate_minimal_reproduction_steps(
+    request: Dict[str, Any],
+    db: DatabaseManager = Depends(get_database_manager)
+):
+    """
+    Generate minimal reproduction steps for a failed test execution using AI analysis.
+    Analyzes failed steps and creates an optimized test path that reproduces the failure
+    with the minimum number of steps necessary.
+    """
+    try:
+        execution_id = request.get("execution_id")
+        failed_steps = request.get("failed_steps", [])
+        optimization_level = request.get("optimization_level", "moderate")
+        preserve_context = request.get("preserve_context", True)
+        
+        if not execution_id or not failed_steps:
+            raise HTTPException(status_code=400, detail="execution_id and failed_steps are required")
+        
+        logger.info(f"🔍 Generating minimal reproduction for execution {execution_id} with {len(failed_steps)} failed steps")
+        
+        # Get execution details and original plan data
+        # Follow the relationship: exec.runs -> tests.test_cases -> planner.prompts -> planner.plans
+        execution_query = """
+        SELECT r.*, 
+               p.text as prompt_text, 
+               p.intent as prompt_title, 
+               pl.plan_json
+        FROM exec.runs r
+        LEFT JOIN tests.test_cases tc ON r.test_case_id = tc.id
+        LEFT JOIN planner.prompts p ON tc.source_ref_id = p.id
+        LEFT JOIN planner.plans pl ON p.id = pl.prompt_id
+        WHERE r.id = $1
+        """
+        execution = await db.execute_one(execution_query, execution_id)
+        
+        if not execution:
+            raise HTTPException(status_code=404, detail=f"Execution {execution_id} not found")
+        
+        # Parse the original plan to get step data with text values
+        original_plan_steps = []
+        if execution.get('plan_json'):
+            import json
+            plan_data = json.loads(execution['plan_json'])
+            original_plan_steps = plan_data.get('steps', [])
+            logger.info(f"🗂️ Found {len(original_plan_steps)} steps in original plan")
+        else:
+            logger.warning("⚠️ No plan_json found for execution - text values will be missing")
+        
+        # Get all steps for this execution with full step data
+        steps_query = """
+        SELECT id, step_order, action, target, status, error_message, created_at
+        FROM exec.step_results 
+        WHERE test_run_id = $1 
+        ORDER BY step_order ASC
+        """
+        all_steps = await db.execute(steps_query, execution_id)
+        logger.info(f"📊 Found {len(all_steps)} executed steps")
+        
+        # Enrich step data with original plan information (including text values)
+        enriched_steps = []
+        for step in all_steps:
+            step_order = step.get('step_order', 0)
+            enriched_step = dict(step)
+            
+            # Try to find the corresponding plan step (plan steps are 1-indexed)
+            if step_order <= len(original_plan_steps):
+                plan_step = original_plan_steps[step_order - 1]
+                params = plan_step.get('params', {})
+                
+                # Add the text value from the original plan
+                text_value = params.get('text', '')
+                enriched_step['text_value'] = text_value
+                enriched_step['selector'] = params.get('selector', step.get('target', ''))
+                enriched_step['description'] = params.get('description', '')
+                
+                # Log text values for debugging
+                if step.get('action') == 'type' and text_value:
+                    logger.info(f"🔤 Step {step_order} ({step.get('action')}) has text value: '{text_value}'")
+            else:
+                enriched_step['text_value'] = ''
+                enriched_step['selector'] = step.get('target', '')
+                enriched_step['description'] = ''
+                logger.warning(f"⚠️ Step {step_order} not found in plan (plan has {len(original_plan_steps)} steps)")
+            
+            enriched_steps.append(enriched_step)
+        
+        all_steps = enriched_steps
+        
+        # Use AI to analyze and generate minimal reproduction steps
+        response = await enterprise_ai_service.generate_minimal_reproduction_steps(
+            execution_id=execution_id,
+            execution_context={
+                "prompt_text": execution.get("prompt_text", ""),
+                "prompt_title": execution.get("prompt_title", ""),
+                "total_steps": len(all_steps),
+                "failed_steps_count": len(failed_steps)
+            },
+            all_steps=all_steps,
+            failed_steps=failed_steps,
+            optimization_level=optimization_level,
+            preserve_context=preserve_context
+        )
+        
+        logger.info(f"✅ Generated minimal reproduction: {response['reducedStepsCount']} steps (from {response['originalStepsCount']})")
+        
+        return response
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Failed to generate minimal reproduction: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate minimal reproduction: {str(e)}")
+
+@router.get("/analyze-element-failures/{element_id}")
+async def analyze_element_failure_patterns(
+    element_id: str,
+    days: int = 30,
+    db: DatabaseManager = Depends(get_database_manager)
+):
+    """
+    Analyze failure patterns for a specific element over the specified time period.
+    Provides insights into common errors, failure trends, and AI-generated recommendations.
+    """
+    try:
+        logger.info(f"🔍 Analyzing failure patterns for element {element_id} over {days} days")
+        
+        # Get failures involving this element
+        failure_query = """
+        SELECT 
+            sr.error_message,
+            sr.action,
+            sr.step_order,
+            sr.created_at,
+            r.id as execution_id,
+            tc.prompt_text,
+            tc.prompt_title
+        FROM exec.step_results sr
+        JOIN exec.runs r ON sr.test_run_id = r.id
+        LEFT JOIN tests.test_cases tc ON r.test_case_id = tc.id
+        WHERE sr.status = 'failed' 
+        AND sr.target LIKE $1
+        AND sr.created_at >= CURRENT_TIMESTAMP - INTERVAL '{} days'
+        ORDER BY sr.created_at DESC
+        """.format(days)
+        
+        # Search for element in target field (could be CSS selector, XPath, or element ID)
+        search_pattern = f"%{element_id}%"
+        failures = await db.execute(failure_query, search_pattern)
+        
+        if not failures:
+            return {
+                "elementId": element_id,
+                "failureAnalysis": {
+                    "totalFailures": 0,
+                    "commonErrors": [],
+                    "failureTrends": [],
+                    "affectedActions": []
+                },
+                "recommendations": [
+                    "No recent failures detected for this element",
+                    "Element appears to be stable and reliable",
+                    "Continue monitoring for any future issues"
+                ]
+            }
+        
+        # Analyze failure patterns
+        error_counts = {}
+        action_failures = {}
+        daily_failures = {}
+        
+        for failure in failures:
+            error_msg = failure.get("error_message", "Unknown error")
+            action = failure.get("action", "unknown")
+            date_key = failure.get("created_at").strftime("%Y-%m-%d")
+            step_order = failure.get("step_order", 0)
+            
+            # Count errors
+            error_counts[error_msg] = error_counts.get(error_msg, 0) + 1
+            
+            # Count action failures
+            if action not in action_failures:
+                action_failures[action] = {"count": 0, "total_steps": 0, "positions": []}
+            action_failures[action]["count"] += 1
+            action_failures[action]["positions"].append(step_order)
+            
+            # Daily trends
+            daily_failures[date_key] = daily_failures.get(date_key, 0) + 1
+        
+        # Generate AI-powered recommendations
+        recommendations = await enterprise_ai_service.generate_element_failure_recommendations(
+            element_id=element_id,
+            failure_data={
+                "total_failures": len(failures),
+                "error_patterns": error_counts,
+                "action_patterns": action_failures,
+                "time_period_days": days
+            }
+        )
+        
+        # Format response
+        common_errors = [
+            {
+                "error": error,
+                "count": count,
+                "firstSeen": min([f.get("created_at") for f in failures if f.get("error_message") == error]).isoformat(),
+                "lastSeen": max([f.get("created_at") for f in failures if f.get("error_message") == error]).isoformat()
+            }
+            for error, count in sorted(error_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+        ]
+        
+        affected_actions = [
+            {
+                "action": action,
+                "failureRate": round(data["count"] / max(data["total_steps"], data["count"]) * 100, 2),
+                "avgStepPosition": round(sum(data["positions"]) / len(data["positions"]), 1)
+            }
+            for action, data in action_failures.items()
+        ]
+        
+        failure_trends = [
+            {"date": date, "failures": count}
+            for date, count in sorted(daily_failures.items())
+        ]
+        
+        result = {
+            "elementId": element_id,
+            "failureAnalysis": {
+                "totalFailures": len(failures),
+                "commonErrors": common_errors,
+                "failureTrends": failure_trends,
+                "affectedActions": affected_actions
+            },
+            "recommendations": recommendations
+        }
+        
+        logger.info(f"✅ Analysis complete: {len(failures)} failures analyzed, {len(recommendations)} recommendations generated")
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Failed to analyze element failures: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to analyze element failures: {str(e)}")
 
 @router.get("/health")
 async def health_check():

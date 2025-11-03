@@ -2,16 +2,13 @@
  * API Client for React Frontend to communicate with Unified MCP API Server
  * Updated to use the new unified API endpoint
  */
-
 const API_BASE_URL = import.meta.env.VITE_POLICY_API_URL || 'http://localhost:8000/api/v1/policy';
-
 interface ApiResponse<T = any> {
   success: boolean;
   data?: T;
   error?: string;
   message?: string;
 }
-
 // Policy Types based on MCP server models
 interface Policy {
   id: string;
@@ -28,13 +25,11 @@ interface Policy {
   created_at: string;
   updated_at: string;
 }
-
 interface PolicyRule {
   condition_expression: string;
   action_mapping: Record<string, any>;
   confidence_threshold: number;
 }
-
 interface PolicyExecutionLog {
   id: string;
   run_id: string;
@@ -49,7 +44,6 @@ interface PolicyExecutionLog {
   outcome_classification?: OutcomeClassification;
   applied_actions?: Array<Record<string, any>>;
 }
-
 interface ExecutionContext {
   element_id?: string;
   page: string;
@@ -57,7 +51,6 @@ interface ExecutionContext {
   test_environment: string;
   user_context: Record<string, any>;
 }
-
 interface PolicyEvaluationResult {
   policy_id: string;
   matched: boolean;
@@ -66,14 +59,12 @@ interface PolicyEvaluationResult {
   reasoning: string;
   evaluation_time_ms: number;
 }
-
 interface OutcomeClassification {
   classification: string;
   confidence: number;
   detected_outcomes: Array<Record<string, any>>;
   reasoning: string;
 }
-
 interface PolicyStats {
   total_policies: number;
   active_policies: number;
@@ -84,7 +75,6 @@ interface PolicyStats {
   cache_size: number;
   uptime_seconds: number;
 }
-
 interface OutcomeStatistics {
   verification_engine: {
     total_verifications: number;
@@ -103,14 +93,11 @@ interface OutcomeStatistics {
     policy_integration_rate: number;
   };
 }
-
 class McpPolicyApiClient {
   private baseUrl: string;
-
   constructor(baseUrl: string = API_BASE_URL) {
     this.baseUrl = baseUrl;
   }
-
   private async request<T = any>(endpoint: string, options: RequestInit = {}): Promise<T> {
     const url = `${this.baseUrl}${endpoint}`;
     const config: RequestInit = {
@@ -120,24 +107,18 @@ class McpPolicyApiClient {
       },
       ...options,
     };
-
     try {
-      console.log(`MCP Policy API Request: ${config.method || 'GET'} ${url}`);
       const response = await fetch(url, config);
-
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
-
       const data = await response.json();
-      console.log(`MCP Policy API Response:`, data);
       return data;
     } catch (error) {
-      console.error(`MCP Policy API Error for ${endpoint}:`, error);
+      console.error($1);
       throw error;
     }
   }
-
   // Health check
   async healthCheck(): Promise<boolean> {
     try {
@@ -147,24 +128,19 @@ class McpPolicyApiClient {
       return false;
     }
   }
-
   // Dashboard endpoints (no auth required)
   async getDashboardStats(): Promise<PolicyStats> {
     return this.request('/dashboard/stats');
   }
-
   async getDashboardOutcomeStatistics(): Promise<OutcomeStatistics> {
     return this.request('/dashboard/outcome-statistics');
   }
-
   async getDashboardExecutionLogs(limit: number = 50): Promise<PolicyExecutionLog[]> {
     return this.request(`/dashboard/execution-logs?limit=${limit}`);
   }
-
   async getDashboardPolicies(): Promise<Policy[]> {
     return this.request('/dashboard/policies');
   }
-
   // Policy management endpoints (requires auth for full functionality)
   async getAllPolicies(filters: {
     policy_type?: string;
@@ -176,35 +152,29 @@ class McpPolicyApiClient {
         params.append(key, value);
       }
     });
-
     const endpoint = params.toString() ? `/policies?${params}` : '/policies';
     return this.request(endpoint);
   }
-
   async getPolicy(policyId: string): Promise<Policy> {
     return this.request(`/policies/${policyId}`);
   }
-
   async createPolicy(policy: Partial<Policy>): Promise<{ success: boolean; policy_id: string; message: string }> {
     return this.request('/policies', {
       method: 'POST',
       body: JSON.stringify(policy),
     });
   }
-
   async updatePolicy(policyId: string, policy: Partial<Policy>): Promise<{ success: boolean; policy_id: string; message: string }> {
     return this.request(`/policies/${policyId}`, {
       method: 'PUT',
       body: JSON.stringify(policy),
     });
   }
-
   async deletePolicy(policyId: string): Promise<{ success: boolean; policy_id: string; message: string }> {
     return this.request(`/policies/${policyId}`, {
       method: 'DELETE',
     });
   }
-
   // Policy evaluation
   async evaluatePolicies(
     context: ExecutionContext,
@@ -220,7 +190,6 @@ class McpPolicyApiClient {
       }),
     });
   }
-
   // Execution logs
   async getExecutionLogs(filters: {
     run_id?: string;
@@ -233,11 +202,9 @@ class McpPolicyApiClient {
         params.append(key, value.toString());
       }
     });
-
     const endpoint = params.toString() ? `/execution-logs?${params}` : '/execution-logs';
     return this.request(endpoint);
   }
-
   async logExecution(
     runId: string,
     stepIndex: number,
@@ -260,7 +227,6 @@ class McpPolicyApiClient {
       }),
     });
   }
-
   // Policy validation
   async validatePolicy(policy: Policy): Promise<{
     valid: boolean;
@@ -274,7 +240,6 @@ class McpPolicyApiClient {
       body: JSON.stringify(policy),
     });
   }
-
   // Outcome classification
   async classifyOutcome(
     context: ExecutionContext,
@@ -290,7 +255,6 @@ class McpPolicyApiClient {
       }),
     });
   }
-
   // Multi-outcome verification
   async verifyWithMultiOutcomes(
     item: Record<string, any>,
@@ -308,7 +272,6 @@ class McpPolicyApiClient {
       }),
     });
   }
-
   async getMultiOutcomeHistory(
     verificationId?: string,
     limit: number = 100
@@ -316,10 +279,8 @@ class McpPolicyApiClient {
     const params = new URLSearchParams();
     if (verificationId) params.append('verification_id', verificationId);
     params.append('limit', limit.toString());
-
     return this.request(`/multi-outcome-history?${params}`);
   }
-
   // LLM classification
   async llmClassifyOutcome(
     executionContext: ExecutionContext,
@@ -337,25 +298,21 @@ class McpPolicyApiClient {
       }),
     });
   }
-
   async getLlmPerformanceStats(): Promise<Record<string, any>> {
     return this.request('/llm-performance-stats');
   }
-
   // Utility methods for converting data
   formatTimestamp(timestamp: string): string {
     const date = new Date(timestamp);
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
     const diffMins = Math.floor(diffMs / (1000 * 60));
-    
     if (diffMins < 1) return 'Just now';
     if (diffMins < 60) return `${diffMins} minute${diffMins === 1 ? '' : 's'} ago`;
     const diffHours = Math.floor(diffMins / 60);
     if (diffHours < 24) return `${diffHours} hour${diffHours === 1 ? '' : 's'} ago`;
     return date.toLocaleDateString();
   }
-
   convertPolicyToFrontendFormat(policy: Policy): {
     id: string;
     name: string;
@@ -371,7 +328,6 @@ class McpPolicyApiClient {
       last_executed: policy.updated_at,
     };
   }
-
   convertExecutionToFrontendFormat(execution: PolicyExecutionLog): {
     id: string;
     policy_name: string;
@@ -394,10 +350,8 @@ class McpPolicyApiClient {
     };
   }
 }
-
 // Create singleton instance
 const mcpPolicyApiClient = new McpPolicyApiClient();
-
 export default mcpPolicyApiClient;
 export { McpPolicyApiClient };
 export type {

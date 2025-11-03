@@ -98,6 +98,19 @@ class DatabaseManager:
         async with self.get_connection() as conn:
             return await conn.execute(query, *args)
     
+    # Compatibility methods for existing code that expects asyncpg-style interface
+    async def fetch(self, query: str, *args) -> List[Dict[str, Any]]:
+        """Compatibility method: same as execute()"""
+        return await self.execute(query, *args)
+    
+    async def fetchrow(self, query: str, *args) -> Optional[Dict[str, Any]]:
+        """Compatibility method: same as execute_one()"""
+        return await self.execute_one(query, *args)
+    
+    async def fetchval(self, query: str, *args) -> Any:
+        """Compatibility method: same as execute_scalar()"""
+        return await self.execute_scalar(query, *args)
+    
     async def health_check(self) -> Dict[str, Any]:
         """Check database health"""
         try:

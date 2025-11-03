@@ -1,19 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { http } from '../../../shared/api';
-
+import SelectorPolicyDemo from './SelectorPolicyDemo';
 // TypeScript interfaces for styled components
 interface PolicyRuleProps {
   $isActive?: boolean;
 }
-
 interface RuleTypeProps {
   $color?: string;
 }
-
 // Policy type definitions
 type PolicyType = 'locatorHealing' | 'executionSafety' | 'multiOutcomeHandling' | 'auditReview';
-
 type PolicyConfigurations = {
   locatorHealing: {
     confidenceThreshold: number;
@@ -41,7 +38,6 @@ type PolicyConfigurations = {
     active: boolean;
   };
 };
-
 type PackConfigurations = {
   strict: {
     locatorHealing?: Partial<PolicyConfigurations['locatorHealing']>;
@@ -68,48 +64,40 @@ type PackConfigurations = {
     auditReview?: Partial<PolicyConfigurations['auditReview']>;
   };
 };
-
 // ================================
 // Styled Components
 // ================================
-
 const Container = styled.div`
   min-height: 100vh;
   background: #f8f9fa;
 `;
-
 const Header = styled.div`
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
   padding: 2rem;
   text-align: center;
 `;
-
 const Title = styled.h1`
   margin: 0 0 0.5rem 0;
   font-size: 2.5rem;
   font-weight: 700;
 `;
-
 const Subtitle = styled.p`
   margin: 0;
   font-size: 1.1rem;
   opacity: 0.9;
 `;
-
 const MainContent = styled.div`
   max-width: 1400px;
   margin: 0 auto;
   padding: 2rem;
 `;
-
 const PolicyGrid = styled.div`
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 2rem;
   margin-bottom: 2rem;
 `;
-
 const PolicyCard = styled.div`
   background: white;
   border-radius: 12px;
@@ -117,7 +105,6 @@ const PolicyCard = styled.div`
   box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
   border: 1px solid #e5e7eb;
 `;
-
 const CardTitle = styled.h3`
   margin: 0 0 1rem 0;
   color: #1f2937;
@@ -127,7 +114,6 @@ const CardTitle = styled.h3`
   align-items: center;
   gap: 0.5rem;
 `;
-
 const PolicySection = styled.div`
   background: white;
   border-radius: 12px;
@@ -136,7 +122,6 @@ const PolicySection = styled.div`
   border: 1px solid #e5e7eb;
   margin-bottom: 2rem;
 `;
-
 const SectionTitle = styled.h2`
   margin: 0 0 1.5rem 0;
   color: #1f2937;
@@ -145,7 +130,6 @@ const SectionTitle = styled.h2`
   border-bottom: 2px solid #f3f4f6;
   padding-bottom: 0.5rem;
 `;
-
 const PolicyRule = styled.div<PolicyRuleProps>`
   display: flex;
   justify-content: space-between;
@@ -156,11 +140,9 @@ const PolicyRule = styled.div<PolicyRuleProps>`
   margin-bottom: 0.5rem;
   background: ${props => props.$isActive ? '#f0f9ff' : '#f9fafb'};
 `;
-
 const RuleInfo = styled.div`
   flex: 1;
 `;
-
 const RuleType = styled.span<RuleTypeProps>`
   background: ${props => props.$color || '#6b7280'};
   color: white;
@@ -170,19 +152,16 @@ const RuleType = styled.span<RuleTypeProps>`
   font-weight: 600;
   text-transform: uppercase;
 `;
-
 const RuleDescription = styled.p`
   margin: 0.5rem 0 0 0;
   color: #6b7280;
   font-size: 0.9rem;
 `;
-
 const RuleAction = styled.span`
   color: #059669;
   font-weight: 600;
   font-size: 0.9rem;
 `;
-
 const PolicyToggle = styled.div<{ $isActive: boolean }>`
   position: relative;
   width: 60px;
@@ -191,7 +170,6 @@ const PolicyToggle = styled.div<{ $isActive: boolean }>`
   border-radius: 16px;
   cursor: pointer;
   transition: background 0.3s;
-  
   &:before {
     content: '';
     position: absolute;
@@ -205,21 +183,18 @@ const PolicyToggle = styled.div<{ $isActive: boolean }>`
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
   }
 `;
-
 const ThresholdControl = styled.div`
   display: flex;
   align-items: center;
   gap: 1rem;
   margin: 0.5rem 0;
 `;
-
 const ThresholdSlider = styled.input`
   flex: 1;
   height: 6px;
   border-radius: 3px;
   background: #d1d5db;
   outline: none;
-  
   &::-webkit-slider-thumb {
     appearance: none;
     width: 20px;
@@ -229,19 +204,16 @@ const ThresholdSlider = styled.input`
     cursor: pointer;
   }
 `;
-
 const ThresholdValue = styled.span`
   font-weight: 600;
   color: #1f2937;
   min-width: 60px;
 `;
-
 const PolicyPackSelector = styled.div`
   display: flex;
   gap: 1rem;
   margin-bottom: 2rem;
 `;
-
 const PolicyPackButton = styled.button<{ $isActive: boolean }>`
   padding: 0.75rem 1.5rem;
   border: 2px solid ${props => props.$isActive ? '#3b82f6' : '#e5e7eb'};
@@ -251,13 +223,11 @@ const PolicyPackButton = styled.button<{ $isActive: boolean }>`
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
-  
   &:hover {
     border-color: #3b82f6;
     background: ${props => props.$isActive ? '#2563eb' : '#f3f4f6'};
   }
 `;
-
 const AuditLog = styled.div`
   max-height: 300px;
   overflow-y: auto;
@@ -265,32 +235,26 @@ const AuditLog = styled.div`
   border-radius: 8px;
   padding: 1rem;
 `;
-
 const LogEntry = styled.div`
   padding: 0.5rem;
   border-bottom: 1px solid #f3f4f6;
   font-size: 0.875rem;
-  
   &:last-child {
     border-bottom: none;
   }
 `;
-
 const LogTimestamp = styled.span`
   color: #6b7280;
   font-weight: 600;
 `;
-
 const LogAction = styled.span`
   color: #059669;
   font-weight: 600;
   margin: 0 0.5rem;
 `;
-
 // ================================
 // Policy Engine Component  
 // ================================
-
 const PolicyEngine: React.FC = () => {
   const [activePolicyPack, setActivePolicyPack] = useState('balanced');
   const [loading, setLoading] = useState(true);
@@ -322,31 +286,25 @@ const PolicyEngine: React.FC = () => {
       active: true
     }
   });
-  
   const [auditLogs, setAuditLogs] = useState<Array<{timestamp: string, action: string, decision: string, element: string}>>([]);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-
   // Load policies from MCP server on component mount
   useEffect(() => {
     const loadPolicies = async () => {
       try {
         setLoading(true);
         setError(null);
-        
         // Fetch policies and configurations from unified API
         const [dashboardStats, executionLogs, policyConfig] = await Promise.all([
           http<any>('/api/v1/policy/dashboard/stats'),
           http<any[]>('/api/v1/policy/dashboard/execution-logs?limit=10'),
           http<any>('/api/v1/policy/dashboard/config')
         ]);
-        
         // Load policy configurations if available
         if (policyConfig && policyConfig.success && policyConfig.data) {
-          console.log('Loaded policy configurations:', policyConfig.data);
           setPolicies(policyConfig.data);
         }
-        
         // Update audit logs from real data
         if (executionLogs && executionLogs.length > 0) {
           const formattedLogs = executionLogs.map((log: any) => ({
@@ -357,58 +315,64 @@ const PolicyEngine: React.FC = () => {
           }));
           setAuditLogs(formattedLogs);
         }
-        
         // You can also fetch specific policy configurations if available
         // For now, using defaults since the API structure may vary
-        console.log('Loaded dashboard stats:', dashboardStats);
-        console.log('Loaded execution logs:', executionLogs);
-        
-      } catch (err) {
-        console.error('Failed to load policies from MCP server:', err);
-        setError('Failed to connect to policy server. Using default settings.');
+      } catch (err) {setError('Failed to connect to policy server. Using default settings.');
         // Keep default policies if API fails
       } finally {
         setLoading(false);
       }
     };
-
     loadPolicies();
   }, []);
-
   // Save policy changes to unified API
   const savePolicyChanges = async (updatedPolicies?: PolicyConfigurations) => {
     try {
       setIsSaving(true);
+      setError(null); // Clear any previous errors
       const policiesToSave = updatedPolicies || policies;
-      console.log('Saving policy changes:', policiesToSave);
-      
       // Call the unified API endpoint to save policy configurations
-      await http('/api/v1/policy/dashboard/config', {
+      const response = await http('/api/v1/policy/dashboard/config', {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(policiesToSave)
       });
-      
-      console.log(' Policy configurations saved successfully');
       setHasUnsavedChanges(false);
-      
+      // Show success message temporarily
+      const originalTitle = document.title;
+      document.title = '✅ Policy Settings Saved';
+      setTimeout(() => {
+        document.title = originalTitle;
+      }, 3000);
     } catch (err) {
-      console.error('Failed to save policy changes:', err);
-      setError('Failed to save changes to server');
+      let errorMessage = 'Failed to save changes to server';
+      const error = err as Error;
+      if (error.message?.includes('fetch')) {
+        errorMessage = 'Cannot connect to server - please check if the backend is running';
+      } else if (error.message?.includes('401') || error.message?.includes('403')) {
+        errorMessage = 'Authentication error - please refresh the page and try again';
+      } else if (error.message?.includes('500')) {
+        errorMessage = 'Server error - please check the backend logs';
+      }
+      setError(errorMessage);
+      // Show error in page title temporarily
+      const originalTitle = document.title;
+      document.title = '❌ Policy Save Failed';
+      setTimeout(() => {
+        document.title = originalTitle;
+      }, 5000);
     } finally {
       setIsSaving(false);
     }
   };
-
   const policyPacks: Array<{id: keyof PackConfigurations, name: string, description: string}> = [
     { id: 'strict', name: 'Strict', description: 'High security, manual approval for most actions' },
     { id: 'balanced', name: 'Balanced', description: 'Recommended settings for most environments' },
     { id: 'lenient', name: 'Lenient', description: 'Allow more automation, faster execution' },
     { id: 'dev', name: 'Dev Mode', description: 'Development environment with relaxed constraints' }
   ];
-
   const togglePolicy = (policyType: PolicyType, property: string) => {
     const updatedPolicies = {
       ...policies,
@@ -420,7 +384,6 @@ const PolicyEngine: React.FC = () => {
     setPolicies(updatedPolicies);
     setHasUnsavedChanges(true);
   };
-
   const updateThreshold = (policyType: PolicyType, property: string, value: number) => {
     const updatedPolicies = {
       ...policies,
@@ -432,10 +395,8 @@ const PolicyEngine: React.FC = () => {
     setPolicies(updatedPolicies);
     setHasUnsavedChanges(true);
   };
-
   const applyPolicyPack = (packId: keyof PackConfigurations) => {
     setActivePolicyPack(packId);
-    
     const packConfigs: PackConfigurations = {
       strict: {
         locatorHealing: { confidenceThreshold: 0.95, maxRetries: 1 },
@@ -462,7 +423,6 @@ const PolicyEngine: React.FC = () => {
         auditReview: { retentionDays: 7 }
       }
     };
-
     const config = packConfigs[packId];
     const updatedPolicies = {
       locatorHealing: { ...policies.locatorHealing, ...config.locatorHealing },
@@ -470,18 +430,28 @@ const PolicyEngine: React.FC = () => {
       multiOutcomeHandling: { ...policies.multiOutcomeHandling, ...config.multiOutcomeHandling },
       auditReview: { ...policies.auditReview, ...config.auditReview }
     };
-    
     setPolicies(updatedPolicies);
     savePolicyChanges(updatedPolicies);
   };
-
   return (
     <Container>
       <Header>
         <div>
           <Title> Policy Engine</Title>
           <Subtitle>Governance & Decision Layer for Prompt-Driven Self-Healing Framework</Subtitle>
-          {error && <div style={{color: '#ef4444', marginTop: '8px', fontSize: '14px'}}> {error}</div>}
+          {error && (
+            <div style={{
+              color: '#ef4444', 
+              marginTop: '12px', 
+              fontSize: '14px',
+              backgroundColor: 'rgba(239, 68, 68, 0.1)',
+              padding: '8px 16px',
+              borderRadius: '6px',
+              border: '1px solid rgba(239, 68, 68, 0.2)'
+            }}>
+              ❌ {error}
+            </div>
+          )}
           {loading && <div style={{color: '#6b7280', marginTop: '8px', fontSize: '14px'}}>🔄 Loading policies from server...</div>}
         </div>
         <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
@@ -491,7 +461,9 @@ const PolicyEngine: React.FC = () => {
             </span>
           )}
           <button
-            onClick={() => savePolicyChanges()}
+            onClick={() => {
+              savePolicyChanges();
+            }}
             disabled={!hasUnsavedChanges || isSaving}
             style={{
               backgroundColor: hasUnsavedChanges ? '#10b981' : '#9ca3af',
@@ -508,11 +480,10 @@ const PolicyEngine: React.FC = () => {
               gap: '8px'
             }}
           >
-            {isSaving ? ' Saving...' : ' Save Changes'}
+            {isSaving ? '🔄 Saving...' : '💾 Save Changes'}
           </button>
         </div>
       </Header>
-
       <MainContent>
         {/* Policy Pack Selector */}
         <PolicySection>
@@ -532,7 +503,6 @@ const PolicyEngine: React.FC = () => {
             ))}
           </PolicyPackSelector>
         </PolicySection>
-
         {/* Policy Categories Grid */}
         <PolicyGrid>
           {/* Locator Healing Policies */}
@@ -540,7 +510,6 @@ const PolicyEngine: React.FC = () => {
             <CardTitle>
                Locator Healing & Retry
             </CardTitle>
-            
             <PolicyRule $isActive={policies.locatorHealing.active}>
               <RuleInfo>
                 <RuleType $color="#3b82f6">HEALING</RuleType>
@@ -580,7 +549,6 @@ const PolicyEngine: React.FC = () => {
                 onClick={() => togglePolicy('locatorHealing', 'active')}
               />
             </PolicyRule>
-
             <PolicyRule $isActive={policies.locatorHealing.preferCssOverXpath}>
               <RuleInfo>
                 <RuleType $color="#10b981">PREFERENCE</RuleType>
@@ -592,7 +560,6 @@ const PolicyEngine: React.FC = () => {
                 onClick={() => togglePolicy('locatorHealing', 'preferCssOverXpath')}
               />
             </PolicyRule>
-
             <PolicyRule $isActive={policies.locatorHealing.useRepositoryFallback}>
               <RuleInfo>
                 <RuleType $color="#8b5cf6">FALLBACK</RuleType>
@@ -605,13 +572,11 @@ const PolicyEngine: React.FC = () => {
               />
             </PolicyRule>
           </PolicyCard>
-
           {/* Execution Safety Policies */}
           <PolicyCard>
             <CardTitle>
               🛡️ Execution Safety & Validation
             </CardTitle>
-            
             <PolicyRule $isActive={policies.executionSafety.blockDestructiveActions}>
               <RuleInfo>
                 <RuleType $color="#ef4444">SECURITY</RuleType>
@@ -623,7 +588,6 @@ const PolicyEngine: React.FC = () => {
                 onClick={() => togglePolicy('executionSafety', 'blockDestructiveActions')}
               />
             </PolicyRule>
-
             <PolicyRule $isActive={policies.executionSafety.allowTestModeOverride}>
               <RuleInfo>
                 <RuleType $color="#f59e0b">OVERRIDE</RuleType>
@@ -636,13 +600,11 @@ const PolicyEngine: React.FC = () => {
               />
             </PolicyRule>
           </PolicyCard>
-
           {/* Multi-Outcome Handling */}
           <PolicyCard>
             <CardTitle>
                Multi-Outcome Handling
             </CardTitle>
-            
             <PolicyRule $isActive={policies.multiOutcomeHandling.preferVisibleElements}>
               <RuleInfo>
                 <RuleType $color="#06b6d4">RANKING</RuleType>
@@ -683,13 +645,11 @@ const PolicyEngine: React.FC = () => {
               />
             </PolicyRule>
           </PolicyCard>
-
           {/* Audit & Review Integration */}
           <PolicyCard>
             <CardTitle>
                Audit & Review Integration
             </CardTitle>
-            
             <PolicyRule $isActive={policies.auditReview.logAllDecisions}>
               <RuleInfo>
                 <RuleType $color="#6b7280">AUDIT</RuleType>
@@ -712,7 +672,6 @@ const PolicyEngine: React.FC = () => {
                 onClick={() => togglePolicy('auditReview', 'active')}
               />
             </PolicyRule>
-
             <PolicyRule $isActive={policies.auditReview.escalateUnknownElements}>
               <RuleInfo>
                 <RuleType $color="#ec4899">ESCALATION</RuleType>
@@ -726,7 +685,6 @@ const PolicyEngine: React.FC = () => {
             </PolicyRule>
           </PolicyCard>
         </PolicyGrid>
-
         {/* Audit Log */}
         <PolicySection>
           <SectionTitle>Recent Policy Decisions</SectionTitle>
@@ -741,9 +699,13 @@ const PolicyEngine: React.FC = () => {
             ))}
           </AuditLog>
         </PolicySection>
+        {/* Selector Policy Demo */}
+        <PolicySection>
+          <SectionTitle>Selector Policy Testing</SectionTitle>
+          <SelectorPolicyDemo />
+        </PolicySection>
       </MainContent>
     </Container>
   );
 };
-
 export default PolicyEngine;

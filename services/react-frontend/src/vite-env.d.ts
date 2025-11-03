@@ -3,7 +3,6 @@ interface ImportMetaEnv {
   // add more vars here as needed
   readonly VITE_OTHER_KEY?: string;
 }
-
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }

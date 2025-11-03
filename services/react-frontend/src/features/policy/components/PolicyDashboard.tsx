@@ -12,11 +12,9 @@ import type {
   OutcomeStatistics,
   Policy
 } from '../../../shared/utils/mcpPolicyApiClient';
-
 // ================================
 // Types
 // ================================
-
 interface PolicyStatsLocal {
   total_policies: number;
   active_policies: number;
@@ -25,7 +23,6 @@ interface PolicyStatsLocal {
   avg_evaluation_time_ms: number;
   success_rate: number;
 }
-
 interface PolicyExecutionLocal {
   id: string;
   policy_name: string;
@@ -36,14 +33,12 @@ interface PolicyExecutionLocal {
   execution_time_ms: number;
   action_taken: string;
 }
-
 interface OutcomeData {
   auto_approved: number;
   sent_to_review: number;
   failed_validation: number;
   manual_override: number;
 }
-
 interface ActivePolicy {
   id: string;
   name: string;
@@ -51,20 +46,16 @@ interface ActivePolicy {
   executions_count: number;
   last_executed: string;
 }
-
 // ================================
 // Styled Components
 // ================================
-
 const Container = styled.div`
   min-height: 100vh;
   background: #f8f9fa;
 `;
-
 const MainContent = styled.div`
   background: #f8f9fa;
 `;
-
 const Header = styled.div`
   padding: 30px 40px;
   border-bottom: 1px solid #e9ecef;
@@ -73,14 +64,12 @@ const Header = styled.div`
   align-items: center;
   background: white;
 `;
-
 const PageTitle = styled.h1`
   margin: 0;
   color: #2c3e50;
   font-size: 2rem;
   font-weight: 600;
 `;
-
 const RefreshButton = styled.button`
   background: #007bff;
   color: white;
@@ -90,28 +79,23 @@ const RefreshButton = styled.button`
   font-weight: 600;
   cursor: pointer;
   transition: background-color 0.2s;
-  
   &:hover {
     background: #0056b3;
   }
-  
   &:disabled {
     background: #6c757d;
     cursor: not-allowed;
   }
 `;
-
 const ContentArea = styled.div`
   padding: 30px 40px;
 `;
-
 const MetricsGrid = styled.div`
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 24px;
   margin-bottom: 40px;
 `;
-
 const MetricCard = styled.div`
   background: white;
   border-radius: 12px;
@@ -119,13 +103,11 @@ const MetricCard = styled.div`
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
   border: 1px solid #e9ecef;
 `;
-
 const MetricHeader = styled.div`
   display: flex;
   align-items: center;
   margin-bottom: 16px;
 `;
-
 const MetricIcon = styled.div<{ color: string }>`
   width: 48px;
   height: 48px;
@@ -135,51 +117,43 @@ const MetricIcon = styled.div<{ color: string }>`
   align-items: center;
   justify-content: center;
   margin-right: 16px;
-  
   svg {
     width: 24px;
     height: 24px;
     color: white;
   }
 `;
-
 const MetricTitle = styled.h3`
   margin: 0;
   color: #2c3e50;
   font-size: 1.1rem;
   font-weight: 600;
 `;
-
 const MetricValue = styled.div`
   font-size: 2.5rem;
   font-weight: bold;
   color: #2c3e50;
   margin-bottom: 8px;
 `;
-
 const MetricDescription = styled.div`
   color: #6c757d;
   font-size: 0.9rem;
 `;
-
 const SectionTitle = styled.h2`
   font-size: 1.5rem;
   font-weight: 600;
   color: #2c3e50;
   margin-bottom: 24px;
 `;
-
 const ChartsGrid = styled.div`
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 24px;
   margin-bottom: 40px;
-  
   @media (max-width: 768px) {
     grid-template-columns: 1fr;
   }
 `;
-
 const ChartCard = styled.div`
   background: white;
   border-radius: 12px;
@@ -187,20 +161,17 @@ const ChartCard = styled.div`
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
   border: 1px solid #e9ecef;
 `;
-
 const ChartTitle = styled.h3`
   margin: 0 0 20px 0;
   color: #2c3e50;
   font-size: 1.2rem;
   font-weight: 600;
 `;
-
 const PolicyList = styled.div`
   display: flex;
   flex-direction: column;
   gap: 12px;
 `;
-
 const PolicyItem = styled.div`
   display: flex;
   justify-content: space-between;
@@ -210,13 +181,11 @@ const PolicyItem = styled.div`
   border-radius: 8px;
   border: 1px solid #e9ecef;
 `;
-
 const PolicyName = styled.div`
   font-weight: 600;
   color: #2c3e50;
   flex: 1;
 `;
-
 const PolicyStatus = styled.div<{ status: 'active' | 'inactive' }>`
   padding: 4px 12px;
   border-radius: 16px;
@@ -225,40 +194,33 @@ const PolicyStatus = styled.div<{ status: 'active' | 'inactive' }>`
   background: ${props => props.status === 'active' ? '#d4edda' : '#f8d7da'};
   color: ${props => props.status === 'active' ? '#155724' : '#721c24'};
 `;
-
 const ExecutionList = styled.div`
   max-height: 400px;
   overflow-y: auto;
 `;
-
 const ExecutionItem = styled.div`
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: 12px 0;
   border-bottom: 1px solid #e9ecef;
-  
   &:last-child {
     border-bottom: none;
   }
 `;
-
 const ExecutionDetails = styled.div`
   flex: 1;
 `;
-
 const ExecutionPolicy = styled.div`
   font-weight: 600;
   color: #2c3e50;
   font-size: 0.9rem;
 `;
-
 const ExecutionTime = styled.div`
   color: #6c757d;
   font-size: 0.8rem;
   margin-top: 4px;
 `;
-
 const ExecutionResult = styled.div<{ success: boolean }>`
   padding: 4px 8px;
   border-radius: 12px;
@@ -267,26 +229,22 @@ const ExecutionResult = styled.div<{ success: boolean }>`
   background: ${props => props.success ? '#d4edda' : '#f8d7da'};
   color: ${props => props.success ? '#155724' : '#721c24'};
 `;
-
 const BarChart = styled.div`
   display: flex;
   flex-direction: column;
   gap: 12px;
 `;
-
 const BarItem = styled.div`
   display: flex;
   align-items: center;
   gap: 12px;
 `;
-
 const BarLabel = styled.div`
   min-width: 120px;
   font-size: 0.9rem;
   color: #2c3e50;
   font-weight: 500;
 `;
-
 const BarTrack = styled.div`
   flex: 1;
   height: 20px;
@@ -295,14 +253,12 @@ const BarTrack = styled.div`
   overflow: hidden;
   border: 1px solid #e9ecef;
 `;
-
 const BarFill = styled.div<{ percentage: number; color: string }>`
   height: 100%;
   width: ${props => props.percentage}%;
   background: ${props => props.color};
   transition: width 0.3s ease;
 `;
-
 const BarValue = styled.div`
   min-width: 40px;
   text-align: right;
@@ -310,7 +266,6 @@ const BarValue = styled.div`
   font-weight: 600;
   color: #2c3e50;
 `;
-
 const LiveIndicator = styled.div`
   display: flex;
   align-items: center;
@@ -323,21 +278,18 @@ const LiveIndicator = styled.div`
   font-weight: 600;
   color: #155724;
 `;
-
 const LiveDot = styled.div`
   width: 8px;
   height: 8px;
   background: #28a745;
   border-radius: 50%;
   animation: pulse 2s infinite;
-  
   @keyframes pulse {
     0% { opacity: 1; }
     50% { opacity: 0.5; }
     100% { opacity: 1; }
   }
 `;
-
 const ErrorMessage = styled.div`
   background: #f8d7da;
   border: 1px solid #f5c6cb;
@@ -346,7 +298,6 @@ const ErrorMessage = styled.div`
   border-radius: 8px;
   margin: 20px 0;
 `;
-
 const PolicyEngineCard = styled.div`
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   border-radius: 12px;
@@ -355,14 +306,12 @@ const PolicyEngineCard = styled.div`
   box-shadow: 0 4px 16px rgba(102, 126, 234, 0.3);
   margin-bottom: 30px;
 `;
-
 const PolicyEngineHeader = styled.div`
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 16px;
 `;
-
 const PolicyEngineTitle = styled.h3`
   margin: 0;
   font-size: 1.3rem;
@@ -371,7 +320,6 @@ const PolicyEngineTitle = styled.h3`
   align-items: center;
   gap: 8px;
 `;
-
 const PolicyPackStatus = styled.div`
   background: rgba(255, 255, 255, 0.2);
   padding: 8px 16px;
@@ -380,13 +328,11 @@ const PolicyPackStatus = styled.div`
   font-weight: 600;
   backdrop-filter: blur(10px);
 `;
-
 const PolicyEngineActions = styled.div`
   display: flex;
   gap: 12px;
   align-items: center;
 `;
-
 const PolicyEngineButton = styled.a`
   background: rgba(255, 255, 255, 0.2);
   color: white;
@@ -397,46 +343,39 @@ const PolicyEngineButton = styled.a`
   transition: all 0.2s;
   backdrop-filter: blur(10px);
   border: 1px solid rgba(255, 255, 255, 0.3);
-  
   &:hover {
     background: rgba(255, 255, 255, 0.3);
     color: white;
     transform: translateY(-1px);
   }
 `;
-
 const PolicyConfigGrid = styled.div`
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 16px;
   margin-top: 16px;
 `;
-
 const PolicyConfigItem = styled.div`
   background: rgba(255, 255, 255, 0.1);
   padding: 12px;
   border-radius: 8px;
   backdrop-filter: blur(10px);
 `;
-
 const PolicyConfigLabel = styled.div`
   font-size: 0.8rem;
   opacity: 0.8;
   margin-bottom: 4px;
 `;
-
 const PolicyConfigValue = styled.div`
   font-weight: 600;
   font-size: 1.1rem;
 `;
-
 const LoadingSpinner = styled.div`
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 40px;
   color: #6c757d;
-  
   &::before {
     content: '';
     width: 24px;
@@ -447,13 +386,11 @@ const LoadingSpinner = styled.div`
     animation: spin 1s linear infinite;
     margin-right: 12px;
   }
-  
   @keyframes spin {
     0% { transform: rotate(0deg); }
     100% { transform: rotate(360deg); }
   }
 `;
-
 export const PolicyDashboard: React.FC = () => {
   const [policyStats, setPolicyStats] = useState<PolicyStatsLocal | null>(null);
   const [activePolicies, setActivePolicies] = useState<ActivePolicy[]>([]);
@@ -487,45 +424,35 @@ export const PolicyDashboard: React.FC = () => {
   }>>([]);
   const [governanceScore, setGovernanceScore] = useState(0);
   const [safetyBlocks, setSafetyBlocks] = useState(0);
-
   // Real-time data fetcher using Unified API with MCP fallback
   const fetchRealTimeData = useCallback(async () => {
     try {
-      console.log('🔄 Fetching real-time policy dashboard data...');
-      
       let policyStatsResponse;
       let policiesResponse;
       let executionLogsResponse;
       let outcomeStatsResponse;
       let isUnifiedApi = true;
-      
       // Try unified API first, fallback to MCP API
       try {
         const healthCheck = await unifiedApiClient.healthCheck();
         if (!healthCheck || healthCheck.status !== 'healthy') {
           throw new Error('Unified API not available');
         }
-        console.log(' Using Unified API');
         policyStatsResponse = await unifiedApiClient.getDashboardStats();
         policiesResponse = await unifiedApiClient.getDashboardPolicies();
         executionLogsResponse = await unifiedApiClient.getDashboardExecutionLogs(8);
         outcomeStatsResponse = await unifiedApiClient.getDashboardOutcomeStatistics();
       } catch (unifiedError) {
-        console.log(' Unified API not available, falling back to MCP API');
         const isHealthy = await mcpPolicyApiClient.healthCheck();
         if (!isHealthy) {
           throw new Error('Neither Unified API nor MCP Policy Engine is available');
         }
         isUnifiedApi = false;
-        console.log(' Using MCP API fallback');
         policyStatsResponse = await mcpPolicyApiClient.getDashboardStats();
         policiesResponse = await mcpPolicyApiClient.getDashboardPolicies();
         executionLogsResponse = await mcpPolicyApiClient.getDashboardExecutionLogs(8);
         outcomeStatsResponse = await mcpPolicyApiClient.getDashboardOutcomeStatistics();
       }
-
-      console.log(' Policy stats received:', policyStatsResponse);
-      
       // Convert to local format
       const localStats: PolicyStatsLocal = {
         total_policies: policyStatsResponse.total_policies,
@@ -535,28 +462,19 @@ export const PolicyDashboard: React.FC = () => {
         avg_evaluation_time_ms: policyStatsResponse.avg_evaluation_time_ms,
         success_rate: policyStatsResponse.success_rate
       };
-      
       setPolicyStats(localStats);
-
       // Calculate governance score from real data
       const successRate = localStats.success_rate || 0;
       const calculatedGovernanceScore = Math.min(99.9, Math.max(85, successRate + (Math.random() - 0.5) * 10));
       setGovernanceScore(calculatedGovernanceScore);
-
       // Calculate safety blocks from execution data
       const calculatedSafetyBlocks = Math.floor((localStats.total_executions || 0) * 0.05); // ~5% blocked
       setSafetyBlocks(calculatedSafetyBlocks);
-
       // Fetch real policies
-      console.log(' Policies received:', policiesResponse);
-      
       // Ensure policiesResponse is an array and validate the data
       const validPolicies = Array.isArray(policiesResponse) ? policiesResponse.filter(policy => 
         policy && typeof policy === 'object' && policy.id && policy.name
       ) : [];
-      
-      console.log(' Valid policies after filtering:', validPolicies);
-      
       const formattedPolicies: ActivePolicy[] = validPolicies.map(policy => ({
         id: policy.id,
         name: policy.name || 'Unnamed Policy',
@@ -564,19 +482,12 @@ export const PolicyDashboard: React.FC = () => {
         executions_count: 0, // This would need to be calculated from execution logs
         last_executed: policy.updated_at || new Date().toISOString(),
       }));
-      
       setActivePolicies(formattedPolicies);
-
       // Fetch real execution logs
-      console.log('📝 Execution logs received:', executionLogsResponse);
-      
       // Ensure executionLogsResponse is an array and validate the data
       const validExecutions = Array.isArray(executionLogsResponse) ? executionLogsResponse.filter(execution => 
         execution && typeof execution === 'object' && execution.id
       ) : [];
-      
-      console.log('📝 Valid executions after filtering:', validExecutions);
-      
       const formattedExecutions: PolicyExecutionLocal[] = validExecutions.map((execution, index) => ({
         id: execution.id || `exec-${index}`,
         policy_name: execution.policy_id || 'Unknown Policy',
@@ -587,9 +498,7 @@ export const PolicyDashboard: React.FC = () => {
         execution_time_ms: execution.execution_time_ms || 50,
         action_taken: execution.evaluation_result?.action_recommendation || 'auto-approved'
       }));
-      
       setRecentExecutions(formattedExecutions);
-
       // Generate policy changes from execution logs
       if (validExecutions.length > 0) {
         const policyChangesList = validExecutions.slice(0, 4).map((log: any, index: number) => ({
@@ -600,7 +509,6 @@ export const PolicyDashboard: React.FC = () => {
         }));
         setPolicyChanges(policyChangesList);
       }
-
       // Only show effectiveness metrics if we have meaningful execution data
       // This means: real executions > 0, real policies > 0, and actual success rate data
       if (validExecutions.length > 0 && localStats.total_executions > 0 && localStats.active_policies > 0 && localStats.success_rate > 0) {
@@ -610,7 +518,6 @@ export const PolicyDashboard: React.FC = () => {
           const baseRate = successRate || 0;
           const variance = (Math.random() - 0.5) * 20; // ±10% variance
           const calculatedRate = Math.max(0, Math.min(100, baseRate + variance));
-          
           return {
             name: type,
             value: Math.round(calculatedRate),
@@ -618,7 +525,6 @@ export const PolicyDashboard: React.FC = () => {
           };
         });
         setEffectivenessMetrics(effectivenessData);
-
         // Calculate compliance metrics from real data
         const complianceTypes = [
           'Safety Policy Adherence',
@@ -638,21 +544,12 @@ export const PolicyDashboard: React.FC = () => {
         setComplianceMetrics(complianceData);
       } else {
         // No meaningful data - set empty metrics
-        console.log('🚫 No meaningful execution data - hiding effectiveness and compliance metrics');
-        console.log('Debug values:', {
-          validExecutionsLength: validExecutions.length,
-          totalExecutions: localStats.total_executions,
-          activePolicies: localStats.active_policies,
-          successRate: localStats.success_rate
-        });
         setEffectivenessMetrics([]);
         setComplianceMetrics([]);
       }
-
       // Derive policy engine configuration from real performance metrics
       const avgTime = localStats.avg_evaluation_time_ms || 0;
       const totalExecutions = localStats.total_executions || 0;
-      
       if (totalExecutions === 0) {
         // No executions - show empty/default state
         setPolicyEngineConfig({
@@ -669,7 +566,6 @@ export const PolicyDashboard: React.FC = () => {
         else if (avgTime > 80 || successRate < 75) activePack = 'Strict';
         else if (successRate > 95) activePack = 'Balanced';
         else activePack = 'Dev';
-
         setPolicyEngineConfig({
           activePack,
           locatorHealing: { 
@@ -688,10 +584,7 @@ export const PolicyDashboard: React.FC = () => {
           }
         });
       }
-
       // Fetch outcome statistics
-      console.log(' Outcome statistics received:', outcomeStatsResponse);
-      
       // Calculate outcome distribution from real data with safe defaults
       const totalProcessed = outcomeStatsResponse?.combined_metrics?.total_processed || 300;
       const outcomes: OutcomeData = {
@@ -700,20 +593,13 @@ export const PolicyDashboard: React.FC = () => {
         failed_validation: Math.floor(totalProcessed * 0.1),
         manual_override: Math.floor(totalProcessed * 0.05)
       };
-
       setOutcomeData(outcomes);
       setLastUpdate(new Date());
       setError(null);
-      
-      console.log(' Real-time policy data updated successfully from MCP server');
-      
     } catch (err: any) {
-      console.error(' Error fetching real-time policy data:', err);
+      console.error($1);
       setError(err.message);
-      
       // Set empty states when no data is available
-      console.log(' No data available - showing empty dashboard');
-      
       setPolicyStats({
         total_policies: 0,
         active_policies: 0,
@@ -722,26 +608,19 @@ export const PolicyDashboard: React.FC = () => {
         avg_evaluation_time_ms: 0,
         success_rate: 0
       });
-
       // Set empty governance metrics
       setGovernanceScore(0);
       setSafetyBlocks(0);
-      
       // Empty policies
       setActivePolicies([]);
-      
       // Empty executions
       setRecentExecutions([]);
-      
       // Empty policy changes
       setPolicyChanges([]);
-
       // Empty effectiveness metrics
       setEffectivenessMetrics([]);
-
       // Empty compliance metrics
       setComplianceMetrics([]);
-
       // Default policy engine config
       setPolicyEngineConfig({
         activePack: 'No Active Pack',
@@ -750,7 +629,6 @@ export const PolicyDashboard: React.FC = () => {
         multiOutcome: { confidenceThreshold: 0, maxCandidates: 0 },
         auditReview: { retentionDays: 0 }
       });
-      
       // Empty outcome data
       setOutcomeData({
         auto_approved: 0,
@@ -758,41 +636,33 @@ export const PolicyDashboard: React.FC = () => {
         failed_validation: 0,
         manual_override: 0
       });
-      
     } finally {
       setLoading(false);
     }
   }, []);
-
   // Real-time updates every 30 seconds
   useEffect(() => {
     fetchRealTimeData();
-    
     const interval = setInterval(() => {
       fetchRealTimeData();
     }, 30000); // Update every 30 seconds
-
     return () => clearInterval(interval);
   }, [fetchRealTimeData]);
-
   const handleRefresh = () => {
     setLoading(true);
     fetchRealTimeData();
   };
-
   const formatTimestamp = (timestamp: string) => {
     const date = new Date(timestamp);
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
     const diffMins = Math.floor(diffMs / (1000 * 60));
-    
     if (diffMins < 1) return 'Just now';
     if (diffMins < 60) return `${diffMins} minute${diffMins === 1 ? '' : 's'} ago`;
     const diffHours = Math.floor(diffMins / 60);
     if (diffHours < 24) return `${diffHours} hour${diffHours === 1 ? '' : 's'} ago`;
     return date.toLocaleDateString();
   };
-
   if (loading && !policyStats) {
     return (
       <Container>
@@ -807,7 +677,6 @@ export const PolicyDashboard: React.FC = () => {
       </Container>
     );
   }
-
   return (
     <Container>
       <MainContent>
@@ -823,13 +692,11 @@ export const PolicyDashboard: React.FC = () => {
             </RefreshButton>
           </div>
         </Header>
-        
         {error && (
           <ErrorMessage>
              {error} - Using fallback data
           </ErrorMessage>
         )}
-        
         <ContentArea>
           {/* Policy Engine Status */}
           <PolicyEngineCard>
@@ -846,7 +713,6 @@ export const PolicyDashboard: React.FC = () => {
                 </PolicyEngineButton>
               </PolicyEngineActions>
             </PolicyEngineHeader>
-            
             <PolicyConfigGrid>
               <PolicyConfigItem>
                 <PolicyConfigLabel>Locator Healing</PolicyConfigLabel>
@@ -866,7 +732,6 @@ export const PolicyDashboard: React.FC = () => {
               </PolicyConfigItem>
             </PolicyConfigGrid>
           </PolicyEngineCard>
-
           {/* Key Metrics */}
           <MetricsGrid>
             <MetricCard>
@@ -881,7 +746,6 @@ export const PolicyDashboard: React.FC = () => {
               <MetricValue>{policyStats?.active_policies || 0}</MetricValue>
               <MetricDescription>of {policyStats?.total_policies || 0} total policies</MetricDescription>
             </MetricCard>
-
             <MetricCard>
               <MetricHeader>
                 <MetricIcon color="#28a745">
@@ -894,7 +758,6 @@ export const PolicyDashboard: React.FC = () => {
               <MetricValue>{policyStats?.recent_executions_24h || 0}</MetricValue>
               <MetricDescription>policy evaluations today</MetricDescription>
             </MetricCard>
-
             <MetricCard>
               <MetricHeader>
                 <MetricIcon color="#ffc107">
@@ -907,7 +770,6 @@ export const PolicyDashboard: React.FC = () => {
               <MetricValue>{policyStats?.avg_evaluation_time_ms || 0}ms</MetricValue>
               <MetricDescription>policy evaluation speed</MetricDescription>
             </MetricCard>
-
             <MetricCard>
               <MetricHeader>
                 <MetricIcon color="#17a2b8">
@@ -920,7 +782,6 @@ export const PolicyDashboard: React.FC = () => {
               <MetricValue>{policyStats?.success_rate || 0}%</MetricValue>
               <MetricDescription>successful policy executions</MetricDescription>
             </MetricCard>
-
             <MetricCard>
               <MetricHeader>
                 <MetricIcon color="#6f42c1">
@@ -933,7 +794,6 @@ export const PolicyDashboard: React.FC = () => {
               <MetricValue>{governanceScore.toFixed(1)}%</MetricValue>
               <MetricDescription>policy compliance rate</MetricDescription>
             </MetricCard>
-
             <MetricCard>
               <MetricHeader>
                 <MetricIcon color="#dc3545">
@@ -947,7 +807,6 @@ export const PolicyDashboard: React.FC = () => {
               <MetricDescription>destructive actions prevented</MetricDescription>
             </MetricCard>
           </MetricsGrid>
-
           {/* Charts Section */}
           <SectionTitle>Policy Analytics</SectionTitle>
           <ChartsGrid>
@@ -964,7 +823,6 @@ export const PolicyDashboard: React.FC = () => {
                 ))}
               </PolicyList>
             </ChartCard>
-
             <ChartCard>
               <ChartTitle>Recent Policy Changes</ChartTitle>
               <ExecutionList>
@@ -993,7 +851,6 @@ export const PolicyDashboard: React.FC = () => {
               </ExecutionList>
             </ChartCard>
           </ChartsGrid>
-
           {/* Policy Effectiveness Section */}
           <SectionTitle>Policy Effectiveness</SectionTitle>
           <ChartsGrid>
@@ -1014,7 +871,6 @@ export const PolicyDashboard: React.FC = () => {
                 ))}
               </BarChart>
             </ChartCard>
-
             <ChartCard>
               <ChartTitle>Governance Compliance</ChartTitle>
               <BarChart>
@@ -1033,9 +889,6 @@ export const PolicyDashboard: React.FC = () => {
               </BarChart>
             </ChartCard>
           </ChartsGrid>
-
-
-
           {/* Recent Executions */}
           <SectionTitle>Recent Policy Executions</SectionTitle>
           <ChartCard>

@@ -24,15 +24,19 @@ public class SqlElementRepository {
     }
 
     public List<String> getAlternatives(String elementId, String page) {
+        return getAlternatives(elementId, page, "css"); // Default to CSS for backward compatibility
+    }
+
+    public List<String> getAlternatives(String elementId, String page, String selectorPolicy) {
         try {
-            System.out.println("Fetching alternatives from SQL backend for element: " + elementId + " on page: " + page);
+            System.out.println("Fetching alternatives from SQL backend for element: " + elementId + " on page: " + page + " with policy: " + selectorPolicy);
             
             // Try to find element by element_id and page
-            List<String> alternatives = fetchAlternativesFromApi(elementId, page);
+            List<String> alternatives = fetchAlternativesFromApi(elementId, page, selectorPolicy);
             
             if (alternatives.isEmpty()) {
                 // Try to find element by element_id on any page (page = "*")
-                alternatives = fetchAlternativesFromApi(elementId, null);
+                alternatives = fetchAlternativesFromApi(elementId, null, selectorPolicy);
             }
             
             if (!alternatives.isEmpty()) {
@@ -49,6 +53,10 @@ public class SqlElementRepository {
     }
 
     private List<String> fetchAlternativesFromApi(String elementId, String page) throws IOException {
+        return fetchAlternativesFromApi(elementId, page, "css"); // Default to CSS for backward compatibility
+    }
+    
+    private List<String> fetchAlternativesFromApi(String elementId, String page, String selectorPolicy) throws IOException {
         List<String> alternatives = new ArrayList<>();
         
         try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
@@ -79,38 +87,58 @@ public class SqlElementRepository {
                                 
                                 // Check if this is the element we're looking for
                                 if (dbElementId.equals(elementId)) {
+                                    // Prioritize selectors based on policy
+                                    List<String> preferredSelectors = new ArrayList<>();
+                                    List<String> fallbackSelectors = new ArrayList<>();
+                                    
                                     // Extract selectors from the element
                                     JsonNode selectorsNode = elementNode.get("selectors");
                                     if (selectorsNode != null && selectorsNode.isArray()) {
                                         for (JsonNode selectorNode : selectorsNode) {
                                             String selector = selectorNode.asText();
                                             if (selector != null && !selector.trim().isEmpty()) {
-                                                alternatives.add(selector);
+                                                if (isPreferredSelector(selector, selectorPolicy)) {
+                                                    preferredSelectors.add(selector);
+                                                } else {
+                                                    fallbackSelectors.add(selector);
+                                                }
                                             }
                                         }
                                     }
                                     
-                                    // Also add xpath and css_selector if available
+                                    // Handle xpath field
                                     JsonNode xpathNode = elementNode.get("xpath");
                                     if (xpathNode != null && !xpathNode.isNull()) {
                                         String xpath = xpathNode.asText();
                                         if (xpath != null && !xpath.trim().isEmpty()) {
-                                            alternatives.add("xpath=" + xpath);
+                                            String prefixedXpath = "xpath=" + xpath;
+                                            if ("xpath".equals(selectorPolicy)) {
+                                                preferredSelectors.add(prefixedXpath);
+                                            } else {
+                                                fallbackSelectors.add(prefixedXpath);
+                                            }
                                         }
                                     }
                                     
+                                    // Handle css_selector field
                                     JsonNode cssSelectorNode = elementNode.get("css_selector");
                                     if (cssSelectorNode != null && !cssSelectorNode.isNull()) {
                                         String cssSelector = cssSelectorNode.asText();
                                         if (cssSelector != null && !cssSelector.trim().isEmpty()) {
-                                            // Only add if it doesn't already start with css=
-                                            if (!cssSelector.startsWith("css=")) {
-                                                alternatives.add("css=" + cssSelector);
+                                            String prefixedCss = cssSelector.startsWith("css=") ? cssSelector : "css=" + cssSelector;
+                                            if ("css".equals(selectorPolicy)) {
+                                                preferredSelectors.add(prefixedCss);
                                             } else {
-                                                alternatives.add(cssSelector);
+                                                fallbackSelectors.add(prefixedCss);
                                             }
                                         }
                                     }
+                                    
+                                    // Add preferred selectors first, then fallback selectors
+                                    alternatives.addAll(preferredSelectors);
+                                    alternatives.addAll(fallbackSelectors);
+                                    
+                                    System.out.println("  Policy-aware selection: " + preferredSelectors.size() + " preferred (" + selectorPolicy + "), " + fallbackSelectors.size() + " fallback");
                                     
                                     break; // Found the element, no need to continue
                                 }
@@ -124,6 +152,15 @@ public class SqlElementRepository {
         }
         
         return alternatives;
+    }
+    
+    private boolean isPreferredSelector(String selector, String selectorPolicy) {
+        if ("xpath".equals(selectorPolicy)) {
+            return selector.startsWith("xpath=") || selector.startsWith("/") || selector.contains("//*[@");
+        } else { // CSS preference
+            return selector.startsWith("css=") || selector.startsWith("#") || selector.startsWith(".") || 
+                   (!selector.startsWith("xpath=") && !selector.startsWith("/") && !selector.contains("//*[@"));
+        }
     }
 
     public void saveHealingSuccess(String elementId, String page, String originalLocator, String healedLocator) {

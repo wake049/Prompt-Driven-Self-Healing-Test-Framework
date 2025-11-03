@@ -75,6 +75,8 @@ class UserProfile(UserBase):
 
 class UserResponse(UserBase):
     """User response for API calls"""
+    is_admin: bool = False
+    
     class Config:
         from_attributes = True
 

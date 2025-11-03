@@ -18,6 +18,9 @@ public class Step {
     @JsonProperty("data")
     private String data;
     
+    @JsonProperty("selectorPolicy")
+    private String selectorPolicy; // "css" or "xpath"
+    
     // Store original page value for healing lookup
     private String originalPage;
 
@@ -30,6 +33,7 @@ public class Step {
         this.locator = locator;
         this.elementId = elementId;
         this.data = data;
+        this.selectorPolicy = "css"; // Default to CSS
         this.originalPage = page; // Default to same as page
     }
     
@@ -39,6 +43,7 @@ public class Step {
         this.locator = locator;
         this.elementId = elementId;
         this.data = data;
+        this.selectorPolicy = "css"; // Default to CSS
         this.originalPage = originalPage;
     }
 
@@ -89,6 +94,14 @@ public class Step {
     
     public void setOriginalPage(String originalPage) {
         this.originalPage = originalPage;
+    }
+    
+    public String getSelectorPolicy() {
+        return selectorPolicy != null ? selectorPolicy : "css";
+    }
+    
+    public void setSelectorPolicy(String selectorPolicy) {
+        this.selectorPolicy = selectorPolicy;
     }
 
     @Override

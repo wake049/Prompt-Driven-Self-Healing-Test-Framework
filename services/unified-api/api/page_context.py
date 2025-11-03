@@ -9,6 +9,8 @@ from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
 import json
 import logging
+from core.auth import get_current_active_user
+from models.auth_models import CurrentUser
 
 from schemas.enterprise import PageContext
 from services.page_context_service import page_context_service
@@ -411,12 +413,20 @@ async def update_page_context_with_files(
 @router.delete("/{context_id}")
 async def delete_page_context(
     context_id: str,
-    repository: PageContextRepository = Depends(get_page_context_repository)
+    repository: PageContextRepository = Depends(get_page_context_repository),
+    current_user: CurrentUser = Depends(get_current_active_user)
 ):
     """
-    Delete a page context
+    Delete a page context - ADMIN ONLY
     """
     try:
+        # SAFETY: Validate admin permissions before deletion
+        from core.delete_protection import DatabaseDeleteProtection
+        await DatabaseDeleteProtection.validate_delete_permission(
+            str(current_user.user.id), 
+            f"delete page context {context_id}"
+        )
+        
         success = await repository.delete_context(context_id)
         
         if not success:

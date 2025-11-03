@@ -10,6 +10,7 @@ import json
 from core.database import get_database, DatabaseManager
 from core.auth import get_current_active_user
 from models.auth_models import CurrentUser
+from services.selector_conversion import convert_steps_to_dual_selector_format
 
 logger = logging.getLogger(__name__)
 
@@ -269,7 +270,7 @@ async def get_prompts(
                 "content": row["text"] or "",
                 "category": row["category"] or "Functional",
                 "starting_url": row["starting_url"] or "",
-                "tags": row["tags"] or [],
+                "tags": json.loads(row["tags"]) if row["tags"] else [],
                 "status": row["status"] or "draft",
                 "priority": row["priority"] or "medium",
                 "version": row["version"] or 1,
@@ -577,18 +578,29 @@ async def create_or_update_test_plan(test_plan_data: Dict[str, Any], db: Databas
             raise HTTPException(status_code=400, detail="prompt_id is required")
         
         steps = test_plan_data.get("generated_steps", test_plan_data.get("steps", []))
+        
+        # Convert steps to dual selector format for better policy support
+        try:
+            steps_with_dual_selectors = convert_steps_to_dual_selector_format(steps)
+            logger.info(f"✅ Converted {len(steps)} steps to dual selector format")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to convert steps to dual selector format: {e}")
+            steps_with_dual_selectors = steps  # Use original steps if conversion fails
+        
         plan_json = {
-            "steps": steps,
+            "steps": steps_with_dual_selectors,
             "metadata": {
                 "generation_method": test_plan_data.get("generation_method", "ai-powered"),
                 "ai_model": test_plan_data.get("ai_model"),
                 "enterprise_mode": test_plan_data.get("enterprise_mode", False),
                 "processing_time_ms": test_plan_data.get("processing_time_ms"),
-                "generation_success": test_plan_data.get("generation_success", True)
+                "generation_success": test_plan_data.get("generation_success", True),
+                "dual_selector_conversion": True,
+                "conversion_timestamp": datetime.now().isoformat()
             }
         }
         
-        logger.info(f" Saving test plan with {len(steps)} steps for prompt {prompt_id}")
+        logger.info(f"💾 Saving test plan with {len(steps_with_dual_selectors)} steps (with dual selectors) for prompt {prompt_id}")
         
         # Check if a plan already exists for this prompt_id
         check_query = "SELECT id FROM planner.plans WHERE prompt_id = $1 ORDER BY created_at DESC LIMIT 1"

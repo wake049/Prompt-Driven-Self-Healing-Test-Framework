@@ -15,6 +15,7 @@ from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from core.delete_protection import DeleteProtectionMiddleware
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 from pathlib import Path
@@ -33,7 +34,10 @@ from api.page_context import router as page_context_router
 from api.ai_service import router as ai_router  # Enterprise AI service (consolidated)
 from api.healing_api import router as healing_router
 from api.selector_generation_api import router as selector_router
+from api.selector_policy import router as selector_policy_router  # Selector policy runtime application
 from api.execution_dashboard_api import router as execution_dashboard_router
+from api.llm_summaries_api import router as llm_summaries_router  # M7: LLM v3 Natural Language Summaries
+from api.data_traceability_api import router as data_traceability_router  # M7: Data Resolver Traceability
 from api.prompts_api import router as prompts_router
 from api.sql_backend import router as sql_router
 from api.test_execution import router as test_execution_router
@@ -162,25 +166,8 @@ async def performance_monitoring_middleware(request: Request, call_next):
         )
         raise
 
-# Add debugging middleware
-@app.middleware("http")
-async def debug_auth_middleware(request, call_next):
-    """Debug middleware to log authentication details"""
-    if request.url.path.startswith("/api/v1/prompts") and request.method == "POST":
-        print(f" POST Request to: {request.url.path}")
-        print(f" Headers: {dict(request.headers)}")
-        auth_header = request.headers.get("authorization")
-        print(f"🔑 Auth header present: {bool(auth_header)}")
-        if auth_header:
-            print(f"🔑 Auth header preview: {auth_header[:30]}...")
-    
-    response = await call_next(request)
-    
-    if request.url.path.startswith("/api/v1/prompts") and request.method == "POST":
-        print(f"📤 Response status: {response.status_code}")
-    
-    return response
-
+# Add delete protection middleware (FIRST - before other middleware)
+app.add_middleware(DeleteProtectionMiddleware)
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=["*"])
 
@@ -232,9 +219,27 @@ app.include_router(
 )
 
 app.include_router(
+    selector_policy_router,
+    prefix="/api/v1/selector-policy",
+    tags=["Selector Policy Runtime"]
+)
+
+app.include_router(
     execution_dashboard_router,
-    prefix="/api/v1/dashboard/execution",
+    prefix="/api/execution-dashboard",
     tags=["Execution Dashboard API"]
+)
+
+app.include_router(
+    llm_summaries_router,
+    prefix="/api/execution-dashboard/llm-summaries",
+    tags=["LLM Natural Language Summaries"]
+)
+
+app.include_router(
+    data_traceability_router,
+    prefix="/api/execution-dashboard/data-traceability",
+    tags=["Data Resolver Traceability"]
 )
 
 app.include_router(
@@ -347,15 +352,19 @@ async def create_test_plan_root(test_plan_data: Dict[str, Any], db: DatabaseMana
 from api.ai_service import plan_endpoint
 from fastapi import Header
 from typing import Optional
+from fastapi import Depends
+from core.auth import get_current_active_user
+from models.auth_models import CurrentUser
 
 @app.post("/api/v1/plan")
 async def plan_endpoint_root(
     request: Dict[str, Any],
     if_none_match: Optional[str] = Header(None, alias="If-None-Match"),
-    accept_encoding: Optional[str] = Header(None, alias="Accept-Encoding")
+    accept_encoding: Optional[str] = Header(None, alias="Accept-Encoding"),
+    current_user: CurrentUser = Depends(get_current_active_user)
 ):
     """Enterprise plan endpoint - root level for frontend compatibility"""
-    return await plan_endpoint(request, if_none_match, accept_encoding)
+    return await plan_endpoint(request, if_none_match, accept_encoding, current_user)
 
 @app.get("/")
 async def root():

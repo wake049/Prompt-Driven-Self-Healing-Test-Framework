@@ -17,11 +17,16 @@ export default defineConfig({
     emptyOutDir: true,
     sourcemap: false,
     rollupOptions: {
-      input: resolve(__dirname, 'src/background.ts'),
+      input: {
+        background: resolve(__dirname, 'src/background.ts'),
+        popup: resolve(__dirname, 'src/popup.ts'),
+        'popup-mcp': resolve(__dirname, 'src/popup-mcp.ts'),
+        content: resolve(__dirname, 'src/content.ts')
+      },
       output: {
-        entryFileNames: 'background.js',
+        entryFileNames: '[name].js',
         format: 'iife',
-        name: 'BackgroundScript'
+        name: 'ChromeExtensionScript'
       }
     },
     target: 'es2020',

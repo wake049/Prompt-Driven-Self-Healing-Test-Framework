@@ -58,7 +58,7 @@ public class SelfHealing {
         List<String> alternatives;
         
         if (useSqlBackend) {
-            alternatives = sqlElementRepository.getAlternatives(elementId, page);
+            alternatives = sqlElementRepository.getAlternatives(elementId, page, step.getSelectorPolicy());
         } else {
             alternatives = elementRepository.getAlternatives(elementId, page);
         }

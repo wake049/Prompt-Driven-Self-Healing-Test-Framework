@@ -1,5 +1,4 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-
 // Types
 interface User {
   id: string;
@@ -9,7 +8,6 @@ interface User {
   created_at: string;
   updated_at: string;
 }
-
 interface AuthContextType {
   user: User | null;
   token: string | null;
@@ -20,11 +18,10 @@ interface AuthContextType {
   register: (email: string, password: string, full_name: string) => Promise<boolean>;
   error: string | null;
   clearError: () => void;
+  refreshAuth: () => Promise<void>; // Add refresh function
 }
-
 // Create context
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
-
 // Custom hook to use auth context
 export const useAuth = () => {
   const context = useContext(AuthContext);
@@ -33,18 +30,15 @@ export const useAuth = () => {
   }
   return context;
 };
-
 // Auth provider component
 interface AuthProviderProps {
   children: ReactNode;
 }
-
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
   // Check for existing token on app load
   useEffect(() => {
     const checkAuthState = async () => {
@@ -52,19 +46,33 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         const storedToken = localStorage.getItem('auth_token');
         if (storedToken) {
           setToken(storedToken);
-          await fetchUserProfile(storedToken);
+          // Try to fetch user profile, but don't fail auth if it doesn't work
+          try {
+            await fetchUserProfile(storedToken);
+          } catch (profileError) {
+            // Profile fetch failed, but we still have a token
+            console.warn('Could not fetch user profile on app load, but token exists. User remains authenticated.');
+            // Set a minimal user object so the app knows the user is authenticated
+            setUser({
+              id: 'unknown',
+              email: 'unknown@example.com',
+              full_name: 'Authenticated User',
+              is_active: true,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            });
+          }
         }
       } catch (error) {
         console.error('Error checking auth state:', error);
+        // Only remove token if there's a parsing error or something fundamentally wrong
         localStorage.removeItem('auth_token');
       } finally {
         setIsLoading(false);
       }
     };
-
     checkAuthState();
   }, []);
-
   // Fetch user profile with token
   const fetchUserProfile = async (authToken: string) => {
     try {
@@ -74,28 +82,39 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           'Content-Type': 'application/json',
         },
       });
-
+      
       if (response.ok) {
         const userData = await response.json();
         setUser(userData.user || userData);
+      } else if (response.status === 401 || response.status === 403) {
+        // Only clear auth state for actual authentication failures
+        console.warn('Authentication failed - token may be expired or invalid');
+        throw new Error('Authentication failed');
       } else {
-        throw new Error('Failed to fetch user profile');
+        // For other errors (500, network issues, etc.), keep the token but log the error
+        console.warn(`Failed to fetch user profile (${response.status}), but keeping auth state`);
+        // We could set a minimal user object or leave it null but keep the token
+        // This allows the app to continue working even if the profile endpoint is down
       }
     } catch (error) {
       console.error('Error fetching user profile:', error);
-      // If profile fetch fails, clear auth state
-      localStorage.removeItem('auth_token');
-      setToken(null);
-      setUser(null);
+      
+      // Only clear auth state if it's an actual authentication error
+      if (error instanceof Error && error.message === 'Authentication failed') {
+        localStorage.removeItem('auth_token');
+        setToken(null);
+        setUser(null);
+      } else {
+        // For network errors or other issues, keep the auth state
+        console.warn('Network or server error, keeping authentication state');
+      }
     }
   };
-
   // Login function
   const login = async (email: string, password: string): Promise<boolean> => {
     try {
       setIsLoading(true);
       setError(null);
-
       const response = await fetch('http://localhost:8000/api/v1/auth/login', {
         method: 'POST',
         headers: {
@@ -103,18 +122,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         },
         body: JSON.stringify({ email, password }),
       });
-
       if (response.ok) {
         const data = await response.json();
         const authToken = data.access_token;
-        
         // Store token
         localStorage.setItem('auth_token', authToken);
         setToken(authToken);
-        
         // Fetch user profile
         await fetchUserProfile(authToken);
-        
         return true;
       } else {
         const errorData = await response.json();
@@ -129,13 +144,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       setIsLoading(false);
     }
   };
-
   // Register function
   const register = async (email: string, password: string, full_name: string): Promise<boolean> => {
     try {
       setIsLoading(true);
       setError(null);
-
       const response = await fetch('http://localhost:8000/api/v1/auth/register', {
         method: 'POST',
         headers: {
@@ -148,10 +161,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           full_name 
         }),
       });
-
       if (response.ok) {
         const data = await response.json();
-        
         // Auto-login after successful registration
         return await login(email, password);
       } else {
@@ -167,7 +178,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       setIsLoading(false);
     }
   };
-
   // Logout function
   const logout = () => {
     localStorage.removeItem('auth_token');
@@ -175,24 +185,37 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     setUser(null);
     setError(null);
   };
-
   // Clear error function
   const clearError = () => {
     setError(null);
   };
 
+  // Refresh auth function - retry fetching user profile
+  const refreshAuth = async () => {
+    const currentToken = token || localStorage.getItem('auth_token');
+    if (currentToken) {
+      try {
+        await fetchUserProfile(currentToken);
+        setError(null);
+      } catch (error) {
+        console.error('Failed to refresh auth:', error);
+        setError('Unable to verify authentication. You may need to log in again.');
+      }
+    }
+  };
+
   const value: AuthContextType = {
     user,
     token,
-    isAuthenticated: !!token && !!user,
+    isAuthenticated: !!token, // Just check for token existence, not user object
     isLoading,
     login,
     logout,
     register,
     error,
     clearError,
+    refreshAuth,
   };
-
   return (
     <AuthContext.Provider value={value}>
       {children}

@@ -1,173 +1,169 @@
 import React from 'react';
 import styled from 'styled-components';
 import { Edit, X, Calendar, Globe, Target, FileText, Image as ImageIcon } from 'lucide-react';
-
 // ================================
 // Styled Components (matching existing app patterns)
 // ================================
-
 const Container = styled.div`
   max-width: 1000px;
   margin: 0 auto;
   background: white;
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  border: 1px solid #e9ecef;
+  border-radius: 16px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
   overflow: hidden;
+  backdrop-filter: blur(10px);
+  /* Dark mode support */
+  @media (prefers-color-scheme: dark) {
+    background: #2a2a2a;
+    border-color: #404040;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+  }
 `;
-
 const Header = styled.div`
-  background: #f8f9fa;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   padding: 24px;
-  border-bottom: 1px solid #e9ecef;
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
+  position: relative;
+  &::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(10px);
+  }
+  > * {
+    position: relative;
+    z-index: 1;
+  }
 `;
-
 const HeaderContent = styled.div`
   flex: 1;
 `;
-
 const TitleRow = styled.div`
   display: flex;
   align-items: center;
   gap: 12px;
   margin-bottom: 12px;
 `;
-
 const Title = styled.h1`
   margin: 0;
-  color: #2c3e50;
+  color: white;
   font-size: 1.75rem;
   font-weight: 600;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 `;
-
 const TypeBadge = styled.span<{ pageType: string }>`
-  padding: 6px 12px;
-  border-radius: 16px;
+  padding: 8px 16px;
+  border-radius: 20px;
   font-size: 0.8rem;
   font-weight: 600;
-  background: ${props => {
-    const colors: Record<string, string> = {
-      ecommerce: '#d4edda',
-      airline: '#d1ecf1',
-      banking: '#fff3cd',
-      form: '#e2e3ff',
-      news: '#f8d7da',
-      social: '#fce4ec',
-      search: '#f8f9fa',
-      streaming: '#e1f5fe',
-      other: '#f8f9fa'
-    };
-    return colors[props.pageType] || colors.other;
-  }};
-  color: ${props => {
-    const colors: Record<string, string> = {
-      ecommerce: '#155724',
-      airline: '#0c5460',
-      banking: '#856404',
-      form: '#3e4094',
-      news: '#721c24',
-      social: '#880e4f',
-      search: '#6c757d',
-      streaming: '#01579b',
-      other: '#6c757d'
-    };
-    return colors[props.pageType] || colors.other;
-  }};
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
 `;
-
 const MetadataRow = styled.div`
   display: flex;
   align-items: center;
   gap: 24px;
   font-size: 0.9rem;
-  color: #6c757d;
+  color: rgba(255, 255, 255, 0.9);
 `;
-
 const MetadataItem = styled.div`
   display: flex;
   align-items: center;
   gap: 4px;
 `;
-
 const MetadataLink = styled.a`
-  color: #007bff;
+  color: rgba(255, 255, 255, 0.9);
   text-decoration: none;
   max-width: 300px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  
   &:hover {
-    color: #0056b3;
+    color: white;
     text-decoration: underline;
   }
 `;
-
 const HeaderActions = styled.div`
   display: flex;
   gap: 8px;
 `;
-
 const ActionButton = styled.button<{ variant?: 'primary' | 'secondary' }>`
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 16px;
+  padding: 12px 20px;
   border: none;
-  border-radius: 6px;
-  font-weight: 500;
+  border-radius: 10px;
+  font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s;
-  
+  transition: all 0.3s ease;
+  backdrop-filter: blur(10px);
   ${props => {
     if (props.variant === 'primary') {
       return `
-        background: #007bff;
+        background: rgba(255, 255, 255, 0.2);
         color: white;
-        &:hover { background: #0056b3; }
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        &:hover {
+          background: rgba(255, 255, 255, 0.3);
+          transform: translateY(-2px);
+          box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+        }
       `;
     }
     return `
-      background: white;
-      color: #6c757d;
-      border: 1px solid #dee2e6;
+      background: rgba(255, 255, 255, 0.1);
+      color: rgba(255, 255, 255, 0.8);
+      border: 1px solid rgba(255, 255, 255, 0.2);
       &:hover {
-        background: #f8f9fa;
-        color: #495057;
+        background: rgba(255, 255, 255, 0.2);
+        color: white;
+        transform: translateY(-2px);
+        box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
       }
     `;
   }}
 `;
-
 const CloseButton = styled.button`
-  padding: 8px;
-  background: none;
-  border: none;
-  color: #6c757d;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.8);
   cursor: pointer;
-  border-radius: 4px;
-  
+  border-radius: 8px;
+  transition: all 0.3s ease;
+  backdrop-filter: blur(10px);
   &:hover {
-    background: #f8f9fa;
-    color: #495057;
+    background: rgba(255, 255, 255, 0.2);
+    color: white;
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
   }
 `;
-
 const Content = styled.div`
   padding: 24px;
+  /* Dark mode support */
+  @media (prefers-color-scheme: dark) {
+    background: #2a2a2a;
+    color: #ffffff;
+  }
 `;
-
 const Section = styled.div`
   margin-bottom: 32px;
-  
   &:last-child {
     margin-bottom: 0;
   }
 `;
-
 const SectionTitle = styled.h3`
   display: flex;
   align-items: center;
@@ -176,114 +172,132 @@ const SectionTitle = styled.h3`
   color: #2c3e50;
   font-size: 1.2rem;
   font-weight: 600;
+  &::after {
+    content: '';
+    flex: 1;
+    height: 2px;
+    background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+    margin-left: 16px;
+    border-radius: 1px;
+  }
+  /* Dark mode support */
+  @media (prefers-color-scheme: dark) {
+    color: #ffffff;
+  }
 `;
-
 const SectionDescription = styled.p`
   color: #495057;
   line-height: 1.6;
   margin: 0;
+  /* Dark mode support */
+  @media (prefers-color-scheme: dark) {
+    color: #aaa;
+  }
 `;
-
 const ScreenshotContainer = styled.div`
-  border: 1px solid #e9ecef;
-  border-radius: 8px;
+  border: 1px solid rgba(102, 126, 234, 0.2);
+  border-radius: 12px;
   overflow: hidden;
   background: #f8f9fa;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  transition: all 0.3s ease;
+  &:hover {
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+    transform: translateY(-2px);
+  }
 `;
-
 const ScreenshotImage = styled.img`
   width: 100%;
   max-height: 400px;
   object-fit: contain;
   background: #f8f9fa;
 `;
-
 const ActionsGrid = styled.div`
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
   gap: 12px;
 `;
-
 const ActionItem = styled.div`
   display: flex;
   align-items: center;
-  padding: 12px 16px;
-  background: #f8f9fa;
-  border-radius: 8px;
-  border: 1px solid #e9ecef;
+  padding: 16px 20px;
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+  border-radius: 12px;
+  border: 1px solid rgba(102, 126, 234, 0.2);
+  transition: all 0.3s ease;
+  &:hover {
+    background: linear-gradient(135deg, rgba(102, 126, 234, 0.15) 0%, rgba(118, 75, 162, 0.15) 100%);
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(102, 126, 234, 0.2);
+  }
 `;
-
 const ActionDot = styled.div`
-  width: 8px;
-  height: 8px;
-  background: #007bff;
+  width: 10px;
+  height: 10px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   border-radius: 50%;
   margin-right: 12px;
   flex-shrink: 0;
+  box-shadow: 0 2px 4px rgba(102, 126, 234, 0.3);
 `;
-
 const ActionText = styled.span`
   color: #495057;
   font-weight: 500;
 `;
-
 const FocusBox = styled.div`
-  background: #e3f2fd;
-  border: 1px solid #bbdefb;
-  border-radius: 8px;
-  padding: 16px;
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+  border: 1px solid rgba(102, 126, 234, 0.3);
+  border-radius: 12px;
+  padding: 20px;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.1);
 `;
-
 const FocusText = styled.p`
-  color: #1565c0;
+  color: #4c63d2;
   margin: 0;
   line-height: 1.5;
+  font-weight: 500;
 `;
-
 const NotesBox = styled.div`
-  background: #f8f9fa;
-  border: 1px solid #e9ecef;
-  border-radius: 8px;
-  padding: 16px;
+  background: linear-gradient(135deg, rgba(248, 249, 250, 0.8) 0%, rgba(233, 236, 239, 0.8) 100%);
+  border: 1px solid rgba(102, 126, 234, 0.2);
+  border-radius: 12px;
+  padding: 20px;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
 `;
-
 const NotesText = styled.p`
   color: #495057;
   margin: 0;
   white-space: pre-wrap;
   line-height: 1.5;
 `;
-
 const MetadataSection = styled.div`
-  border-top: 1px solid #e9ecef;
+  border-top: 2px solid;
+  border-image: linear-gradient(90deg, #667eea 0%, #764ba2 100%) 1;
   padding-top: 24px;
+  margin-top: 32px;
 `;
-
 const MetadataGrid = styled.div`
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 16px;
   font-size: 0.9rem;
 `;
-
 const MetadataField = styled.div``;
-
 const MetadataLabel = styled.span`
   font-weight: 600;
   color: #495057;
   display: block;
   margin-bottom: 4px;
 `;
-
 const MetadataValue = styled.p`
   color: #6c757d;
   margin: 0;
 `;
-
 // ================================
 // Types
 // ================================
-
 interface PageContextItem {
   id: string;
   pageUrl: string;
@@ -298,17 +312,14 @@ interface PageContextItem {
   createdBy?: string;
   usageCount: number;
 }
-
 interface PageContextViewProps {
   context: PageContextItem;
   onEdit: () => void;
   onClose: () => void;
 }
-
 // ================================
 // Component
 // ================================
-
 export const PageContextView: React.FC<PageContextViewProps> = ({
   context,
   onEdit,
@@ -325,7 +336,6 @@ export const PageContextView: React.FC<PageContextViewProps> = ({
     streaming: 'Streaming',
     other: 'Other',
   };
-
   return (
     <Container>
       {/* Header */}
@@ -337,7 +347,6 @@ export const PageContextView: React.FC<PageContextViewProps> = ({
               {pageTypeLabels[context.pageType] || 'Other'}
             </TypeBadge>
           </TitleRow>
-          
           <MetadataRow>
             <MetadataItem>
               <Globe size={16} />
@@ -349,30 +358,25 @@ export const PageContextView: React.FC<PageContextViewProps> = ({
                 {context.pageUrl}
               </MetadataLink>
             </MetadataItem>
-            
             <MetadataItem>
               <Calendar size={16} />
               {new Date(context.createdAt).toLocaleDateString()}
             </MetadataItem>
-            
             <MetadataItem>
               Used {context.usageCount} times
             </MetadataItem>
           </MetadataRow>
         </HeaderContent>
-
         <HeaderActions>
           <ActionButton variant="primary" onClick={onEdit}>
             <Edit size={16} />
             Edit
           </ActionButton>
-          
           <CloseButton onClick={onClose}>
             <X size={20} />
           </CloseButton>
         </HeaderActions>
       </Header>
-
       {/* Content */}
       <Content>
         {/* Screenshot */}
@@ -390,7 +394,6 @@ export const PageContextView: React.FC<PageContextViewProps> = ({
             </ScreenshotContainer>
           </Section>
         )}
-
         {/* Description */}
         <Section>
           <SectionTitle>
@@ -401,7 +404,6 @@ export const PageContextView: React.FC<PageContextViewProps> = ({
             {context.pageDescription}
           </SectionDescription>
         </Section>
-
         {/* Primary Actions */}
         {context.primaryActions.length > 0 && (
           <Section>
@@ -419,7 +421,6 @@ export const PageContextView: React.FC<PageContextViewProps> = ({
             </ActionsGrid>
           </Section>
         )}
-
         {/* Testing Focus */}
         {context.testingFocus && (
           <Section>
@@ -431,7 +432,6 @@ export const PageContextView: React.FC<PageContextViewProps> = ({
             </FocusBox>
           </Section>
         )}
-
         {/* User Notes */}
         {context.userNotes && (
           <Section>
@@ -443,7 +443,6 @@ export const PageContextView: React.FC<PageContextViewProps> = ({
             </NotesBox>
           </Section>
         )}
-
         {/* Metadata */}
         <MetadataSection>
           <SectionTitle>
@@ -456,14 +455,12 @@ export const PageContextView: React.FC<PageContextViewProps> = ({
                 {new Date(context.createdAt).toLocaleString()}
               </MetadataValue>
             </MetadataField>
-            
             {context.createdBy && (
               <MetadataField>
                 <MetadataLabel>Created by:</MetadataLabel>
                 <MetadataValue>{context.createdBy}</MetadataValue>
               </MetadataField>
             )}
-            
             <MetadataField>
               <MetadataLabel>Usage:</MetadataLabel>
               <MetadataValue>

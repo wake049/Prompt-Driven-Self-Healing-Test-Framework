@@ -29,19 +29,18 @@ async def get_prompt_bindings(
 ):
     """Get bindings from datahub.data_bindings table"""
     try:
-        print(f" GET /prompts/{prompt_id}/bindings endpoint reached!")
-        print(f"👤 Current user: {current_user.user.email}")
         
-        # Load active data bindings from datahub.data_bindings table
+        # Load active data bindings from datahub.data_bindings table for this specific prompt
+        scope_name = f"prompt_{prompt_id}"
         bindings_query = """
             SELECT rule_name, scope, source_ref, target 
             FROM datahub.data_bindings 
-            WHERE is_active = true 
+            WHERE is_active = true AND scope = $1
             ORDER BY priority DESC, created_at DESC
         """
         
-        db_bindings = await db.execute(bindings_query)
-        logger.info(f"Found {len(db_bindings)} active data bindings from datahub")
+        db_bindings = await db.execute(bindings_query, scope_name)
+        logger.info(f"Found {len(db_bindings)} active data bindings from datahub for prompt {prompt_id} (scope: {scope_name})")
         
         # Convert to frontend format
         bindings = []
@@ -107,15 +106,12 @@ async def get_prompt_bindings(
             
             bindings.append(frontend_binding)
         
-        print(f" Returning {len(bindings)} bindings in frontend format")
+
         
         return {"bindings": bindings}
         
     except Exception as e:
         logger.error(f"Failed to get bindings for prompt {prompt_id}: {str(e)}")
-        print(f" Error getting bindings: {str(e)}")
-        import traceback
-        traceback.print_exc()
         raise HTTPException(status_code=500, detail="Failed to get bindings")
 
 
@@ -128,13 +124,8 @@ async def update_prompt_bindings(
 ):
     """Update bindings in datahub.data_bindings table"""
     try:
-        print(f"🔄 POST /prompts/{prompt_id}/bindings endpoint reached!")
-        print(f"👤 Current user: {current_user.user.email}")
-        print(f" Bindings data: {bindings_data}")
-        
-        # Validate bindings data
+        # Validate the bindings data
         bindings = TestBindings(**bindings_data)
-        print(f" Bindings validation successful: {len(bindings.bindings)} bindings")
         
         # Get or create a project ID for this user
         project_query = """
@@ -149,10 +140,10 @@ async def update_prompt_bindings(
                 INSERT INTO core.projects (id, name, description, created_at)
                 VALUES ($1, $2, $3, NOW())
             """, project_id, 'Default Frontend Project', 'Auto-created project for frontend bindings')
-            print(f" Created project: {project_id}")
+
         else:
             project_id = project_result['id']
-            print(f" Using existing project: {project_id}")
+
         
         # Clear existing bindings for this project and prompt scope
         scope_name = f"prompt_{prompt_id}"
@@ -161,7 +152,7 @@ async def update_prompt_bindings(
             SET is_active = false 
             WHERE project_id = $1 AND (scope = $2 OR scope LIKE 'prompt_%' OR scope = 'shopping_cart')
         """, project_id, scope_name)
-        print(f" Deactivated existing bindings for project {project_id} and scope: {scope_name}")
+
         
         # Insert new bindings
         import time
@@ -222,9 +213,9 @@ async def update_prompt_bindings(
             True
             )
             
-            print(f" Created binding: {binding.name} -> {rule_name}")
+
         
-        print(f"🎉 Successfully saved {len(bindings.bindings)} bindings to datahub.data_bindings")
+
         
         # Verify the save by counting active bindings
         verify_query = """
@@ -235,7 +226,7 @@ async def update_prompt_bindings(
         
         verify_result = await db.execute_one(verify_query, scope_name)
         saved_count = verify_result['count'] if verify_result else 0
-        print(f" Verification: Found {saved_count} active bindings after save")
+
         
         return {
             "success": True,
@@ -246,7 +237,7 @@ async def update_prompt_bindings(
         
     except Exception as e:
         logger.error(f"Failed to update bindings for prompt {prompt_id}: {str(e)}")
-        print(f" Error updating bindings: {str(e)}")
+
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail="Failed to update bindings")
@@ -261,7 +252,7 @@ async def update_prompt_bindings(
         
     except Exception as e:
         logger.error(f"Failed to update bindings for prompt {prompt_id}: {str(e)}")
-        print(f" Error: {str(e)}")
+
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Failed to update bindings: {str(e)}")

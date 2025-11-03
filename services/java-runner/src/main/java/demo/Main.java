@@ -19,17 +19,14 @@ public class Main {
     private static final String RUN_SUMMARY_FILE = "run_summary.json";
     
     public static void main(String[] args) {
-        System.out.println("=== Prompt-Driven Self-Healing Test Framework ===");
-        System.out.println("Milestone M5 - Execution Service & Self-Healing Engine");
-        System.out.println();
-        
+
         // Determine steps file - use argument if provided, otherwise default
         String stepsFile = DEFAULT_STEPS_FILE;
         if (args.length > 0 && !args[0].trim().isEmpty()) {
             stepsFile = args[0].trim();
-            System.out.println("Using custom steps file: " + stepsFile);
+            
         } else {
-            System.out.println("Using default steps file: " + stepsFile);
+            
         }
         
         WebDriver driver = null;
@@ -39,12 +36,9 @@ public class Main {
         
         try {
             // Initialize WebDriver
-            System.out.println("Initializing WebDriver...");
-            System.out.println("Step 1: Setting up ChromeDriver with WebDriverManager...");
+
             WebDriverManager.chromedriver().setup();
-            System.out.println("Step 2: WebDriverManager setup complete");
-            
-            System.out.println("Step 3: Configuring Chrome options...");
+
             ChromeOptions options = new ChromeOptions();
             
             // Detect if running from subprocess or API call (no console/display available)
@@ -59,9 +53,9 @@ public class Main {
                 options.addArguments("--no-gpu");
                 options.addArguments("--disable-gpu-sandbox");
                 options.addArguments("--disable-software-rasterizer");
-                System.out.println("Chrome options configured for headless mode (API/subprocess execution)...");
+                
             } else {
-                System.out.println("Chrome options configured for visible browser...");
+                
             }
             
             // Set page load strategy to EAGER to avoid waiting for all resources
@@ -82,25 +76,19 @@ public class Main {
             if (!isHeadless) {
                 options.addArguments("--start-maximized");
             }
-            
-            System.out.println("Step 4: Creating ChromeDriver instance...");
+
             driver = new ChromeDriver(options);
-            System.out.println("Step 5: ChromeDriver created successfully");
-            
-            System.out.println("Step 6: Setting timeouts...");
+
             // Set aggressive timeouts to prevent hanging
             driver.manage().timeouts().pageLoadTimeout(java.time.Duration.ofSeconds(10)); // Shorter timeout
             driver.manage().timeouts().implicitlyWait(java.time.Duration.ofSeconds(5));
             driver.manage().timeouts().scriptTimeout(java.time.Duration.ofSeconds(10));
-            System.out.println("Step 7: Timeouts configured");
-            
+
             if (!isHeadless) {
-                System.out.println("Step 8: Maximizing window...");
+                
                 driver.manage().window().maximize();
             }
-            
-            System.out.println("Step 9: Chrome browser initialized");
-            System.out.println("Step 10: Waiting 2 seconds for browser stability...");
+
             Thread.sleep(2000); // Reduced wait time
             
             // Load test steps directly from provided file (skip repository initialization for API calls)
@@ -111,10 +99,10 @@ public class Main {
             ExecutionService executionService;
             
             if (isApiCall) {
-                System.out.println("API mode detected - loading steps directly from file: " + stepsFile);
+                
                 try {
                     steps = JsonUtil.readListFromFile(stepsFile, new TypeReference<List<Step>>() {});
-                    System.out.println("✓ Loaded " + steps.size() + " test steps from API file");
+                    
                 } catch (IOException e) {
                     System.err.println("Error loading steps file: " + e.getMessage());
                     return;
@@ -131,9 +119,7 @@ public class Main {
                 ElementRepository elementRepository = new ElementRepository();
                 selfHealing = new SelfHealing(driver, elementRepository);
                 executionService = new ExecutionService(driver, selfHealing);
-                
-                System.out.println("Element repository initialized.");
-                
+
                 // Load test steps - try SQL backend first, then fall back to JSON file
                 SqlTestStepRepository sqlStepRepository = new SqlTestStepRepository();
                 
@@ -183,8 +169,7 @@ public class Main {
                     }
                 }
             }
-            
-            System.out.println();
+
             System.out.println("=== Test Execution Started ===");
             // Execute test steps
             List<StepResult> results = new ArrayList<>();
@@ -242,13 +227,12 @@ public class Main {
             }
             
             if (driver != null) {
-                System.out.println();
+                
                 System.out.println("Closing WebDriver...");
                 driver.quit();
             }
         }
-        
-        System.out.println();
+
         System.out.println("=== Test Execution Completed ===");
     }
     
@@ -289,7 +273,7 @@ public class Main {
     }
     
     private static void printConsoleSummary(RunSummary summary) {
-        System.out.println();
+        
         System.out.println("=== Test Run Summary ===");
         System.out.println("Start Time: " + summary.getStartTime());
         System.out.println("End Time: " + summary.getEndTime());
@@ -311,13 +295,12 @@ public class Main {
     
     private static void printHealingLogSummary(List<SelfHealing.HealingLogEntry> healingLog) {
         if (healingLog.isEmpty()) {
-            System.out.println();
+            
             System.out.println("=== Healing Summary ===");
             System.out.println("No healing attempts were made during this run.");
             return;
         }
-        
-        System.out.println();
+
         System.out.println("=== Healing Summary ===");
         System.out.println("Total healing attempts: " + healingLog.size());
         
@@ -346,7 +329,7 @@ public class Main {
     }
     
     private static void submitHealingForReview(List<SelfHealing.HealingLogEntry> healingLog, RunSummary summary) {
-        System.out.println();
+        
         System.out.println("=== Submitting Healing Data for Review ===");
         
         HealingReviewService reviewService = new HealingReviewService();

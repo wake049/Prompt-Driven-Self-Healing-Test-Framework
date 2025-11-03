@@ -1,8 +1,6 @@
 import { http } from "../../shared/api/http";
 import { PageContext } from "./types";
-
 const BASE_PATH = "/page-context";
-
 export const PageContextAPI = {
   // List all page contexts
   list: async (params?: {
@@ -14,27 +12,22 @@ export const PageContextAPI = {
     if (params?.limit) queryParams.append("limit", params.limit.toString());
     if (params?.category) queryParams.append("category", params.category);
     if (params?.search) queryParams.append("search", params.search);
-    
     const query = queryParams.toString();
     const response = await http<{
       success: boolean;
       data: PageContext[];
       count: number;
     }>(`/api/v1${BASE_PATH}/list${query ? `?${query}` : ""}`);
-    
     return response.data;
   },
-
   // Get a specific page context
   get: async (id: string) => {
     const response = await http<{
       success: boolean;
       data: PageContext;
     }>(`/api/v1${BASE_PATH}/${id}`);
-    
     return response.data;
   },
-
   // Create a new page context
   create: async (data: FormData) => {
     const response = await fetch(`${import.meta.env.VITE_UNIFIED_API_URL || "http://localhost:8000"}/api/v1${BASE_PATH}/upload`, {
@@ -45,15 +38,12 @@ export const PageContextAPI = {
         ...getAuthHeaders(),
       },
     });
-
     if (!response.ok) {
       const error = await response.text();
       throw new Error(`HTTP ${response.status}: ${error}`);
     }
-
     return response.json();
   },
-
   // Update a page context
   update: async (id: string, updates: Partial<PageContext>) => {
     const response = await http<{
@@ -64,10 +54,8 @@ export const PageContextAPI = {
       method: "PUT",
       body: JSON.stringify(updates),
     });
-    
     return response.data;
   },
-
   // Update a page context with file uploads (like screenshots)
   updateWithFiles: async (id: string, data: FormData) => {
     const response = await fetch(`${import.meta.env.VITE_UNIFIED_API_URL || "http://localhost:8000"}/api/v1${BASE_PATH}/${id}/upload`, {
@@ -78,15 +66,12 @@ export const PageContextAPI = {
         ...getAuthHeaders(),
       },
     });
-
     if (!response.ok) {
       const error = await response.text();
       throw new Error(`HTTP ${response.status}: ${error}`);
     }
-
     return response.json();
   },
-
   // Delete a page context
   delete: async (id: string) => {
     const response = await http<{
@@ -95,10 +80,8 @@ export const PageContextAPI = {
     }>(`/api/v1${BASE_PATH}/${id}`, {
       method: "DELETE",
     });
-    
     return response.success;
   },
-
   // Mark a page context as used
   use: async (id: string) => {
     const response = await http<{
@@ -107,16 +90,13 @@ export const PageContextAPI = {
     }>(`/api/v1${BASE_PATH}/${id}/use`, {
       method: "POST",
     });
-    
     return response.success;
   },
-
   // Get user contexts
   getUserContexts: async (userId?: string) => {
     const queryParams = userId ? `?user_id=${userId}` : "";
     return http<PageContext[]>(`/api/v1${BASE_PATH}/user-contexts${queryParams}`);
   },
-
   // Get supported page types
   getSupportedTypes: async () => {
     return http<{
@@ -127,7 +107,6 @@ export const PageContextAPI = {
       }>;
     }>(`/api/v1${BASE_PATH}/supported-types`);
   },
-
   // Get examples
   getExamples: async () => {
     return http<{
@@ -137,7 +116,6 @@ export const PageContextAPI = {
       }>;
     }>(`/api/v1${BASE_PATH}/examples`);
   },
-
   // AI-powered detection
   detect: async (data: {
     page_url?: string;
@@ -150,7 +128,6 @@ export const PageContextAPI = {
       body: JSON.stringify(data),
     });
   },
-
   // Create manual context
   createManual: async (data: {
     page_type: string;
@@ -166,13 +143,11 @@ export const PageContextAPI = {
       body: JSON.stringify(data),
     });
   },
-
   // Get context from URL
   fromUrl: async (url: string) => {
     return http<PageContext>(`/api/v1${BASE_PATH}/from-url?url=${encodeURIComponent(url)}`);
   },
 };
-
 // Helper function to get auth headers
 function getAuthHeaders(): Record<string, string> {
   const token = localStorage.getItem("auth_token");

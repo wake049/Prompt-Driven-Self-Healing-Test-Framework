@@ -1,18 +1,29 @@
 import React, { useState, useCallback } from 'react';
 import styled from 'styled-components';
 import { Upload, Image, FileText, Plus, X, AlertCircle, CheckCircle } from 'lucide-react';
+import { useTheme } from '../../contexts/ThemeContext';
 
 // ================================
 // Styled Components (matching existing app patterns)
 // ================================
 
+const OuterContainer = styled.div`
+  min-height: 100vh;
+  background: ${props => props.theme.colors.background};
+`;
+
+const MainContent = styled.div`
+  background: ${props => props.theme.colors.background};
+  padding: 30px 40px;
+`;
+
 const Container = styled.div`
   max-width: 1000px;
   margin: 0 auto;
-  background: white;
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  border: 1px solid #e9ecef;
+  background: ${props => props.theme.colors.surface};
+  border-radius: 16px;
+  box-shadow: ${props => props.theme.shadows.medium};
+  border: 1px solid ${props => props.theme.colors.border};
   overflow: hidden;
 `;
 
@@ -20,34 +31,39 @@ const Header = styled.div`
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 24px;
+  padding: 32px;
   border-bottom: 1px solid #e9ecef;
-  background: #f8f9fa;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
 `;
 
 const Title = styled.h2`
   margin: 0;
-  color: #2c3e50;
-  font-size: 1.5rem;
+  color: white;
+  font-size: 1.75rem;
   font-weight: 600;
 `;
 
 const CloseButton = styled.button`
-  padding: 8px;
-  background: none;
-  border: none;
-  color: #6c757d;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.2);
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  color: white;
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: 8px;
+  transition: all 0.3s ease;
+  backdrop-filter: blur(10px);
   
   &:hover {
-    background: #e9ecef;
-    color: #495057;
+    background: rgba(255, 255, 255, 0.3);
+    border-color: rgba(255, 255, 255, 0.5);
+    transform: scale(1.05);
   }
 `;
 
 const Form = styled.form`
-  padding: 24px;
+  padding: 32px;
+  background: ${props => props.theme.colors.surface};
 `;
 
 const FormSection = styled.div`
@@ -77,7 +93,7 @@ const Label = styled.label`
   display: block;
   font-size: 0.9rem;
   font-weight: 600;
-  color: #495057;
+  color: ${props => props.theme.colors.text};
   margin-bottom: 6px;
 `;
 
@@ -95,19 +111,21 @@ const HelpText = styled.span`
 const Input = styled.input<{ hasError?: boolean }>`
   width: 100%;
   padding: 10px 14px;
-  border: 1px solid ${props => props.hasError ? '#dc3545' : '#dee2e6'};
+  border: 1px solid ${props => props.hasError ? '#dc3545' : props.theme.colors.border};
   border-radius: 6px;
   font-size: 14px;
   transition: all 0.2s;
+  background: ${props => props.theme.colors.surface};
+  color: ${props => props.theme.colors.text};
   
   &:focus {
     outline: none;
-    border-color: ${props => props.hasError ? '#dc3545' : '#007bff'};
-    box-shadow: 0 0 0 2px ${props => props.hasError ? 'rgba(220, 53, 69, 0.25)' : 'rgba(0, 123, 255, 0.25)'};
+    border-color: ${props => props.hasError ? '#dc3545' : '#667eea'};
+    box-shadow: 0 0 0 2px ${props => props.hasError ? 'rgba(220, 53, 69, 0.25)' : 'rgba(102, 126, 234, 0.25)'};
   }
   
   &::placeholder {
-    color: #6c757d;
+    color: ${props => props.theme.colors.textSecondary};
   }
 `;
 
@@ -118,6 +136,7 @@ const Select = styled.select<{ hasError?: boolean }>`
   border-radius: 6px;
   font-size: 14px;
   background: white;
+  color: #2c3e50;
   cursor: pointer;
   transition: all 0.2s;
   
@@ -125,6 +144,17 @@ const Select = styled.select<{ hasError?: boolean }>`
     outline: none;
     border-color: ${props => props.hasError ? '#dc3545' : '#007bff'};
     box-shadow: 0 0 0 2px ${props => props.hasError ? 'rgba(220, 53, 69, 0.25)' : 'rgba(0, 123, 255, 0.25)'};
+  }
+  
+  /* Dark mode support */
+  @media (prefers-color-scheme: dark) {
+    background: #404040;
+    border-color: ${props => props.hasError ? '#dc3545' : '#555'};
+    color: #ffffff;
+    
+    &:focus {
+      border-color: ${props => props.hasError ? '#dc3545' : '#667eea'};
+    }
   }
 `;
 
@@ -138,6 +168,8 @@ const TextArea = styled.textarea<{ hasError?: boolean }>`
   resize: vertical;
   min-height: 80px;
   transition: all 0.2s;
+  background: white;
+  color: #2c3e50;
   
   &:focus {
     outline: none;
@@ -147,6 +179,21 @@ const TextArea = styled.textarea<{ hasError?: boolean }>`
   
   &::placeholder {
     color: #6c757d;
+  }
+  
+  /* Dark mode support */
+  @media (prefers-color-scheme: dark) {
+    background: #404040;
+    border-color: ${props => props.hasError ? '#dc3545' : '#555'};
+    color: #ffffff;
+    
+    &:focus {
+      border-color: ${props => props.hasError ? '#dc3545' : '#667eea'};
+    }
+    
+    &::placeholder {
+      color: #aaa;
+    }
   }
 `;
 
@@ -387,6 +434,7 @@ const PAGE_TYPES = [
 // ================================
 
 export const PageContextUpload: React.FC<PageContextUploadProps> = ({ onSubmit, onCancel, initialData }) => {
+  const { theme } = useTheme();
   const [formData, setFormData] = useState<PageContextFormData>({
     pageUrl: initialData?.pageUrl || '',
     pageTitle: initialData?.pageTitle || '',
@@ -530,23 +578,26 @@ export const PageContextUpload: React.FC<PageContextUploadProps> = ({ onSubmit, 
   };
 
   return (
-    <Container>
-      <Header>
-        <Title>{initialData ? 'Edit Page Context' : 'Add Page Context'}</Title>
-        <CloseButton onClick={onCancel}>
+    <OuterContainer theme={theme}>
+      <MainContent theme={theme}>
+        <Container theme={theme}>
+      <Header theme={theme}>
+        <Title theme={theme}>{initialData ? 'Edit Page Context' : 'Add Page Context'}</Title>
+        <CloseButton theme={theme} onClick={onCancel}>
           <X size={20} />
         </CloseButton>
       </Header>
 
-      <Form onSubmit={handleSubmit}>
+      <Form theme={theme} onSubmit={handleSubmit}>
         {/* URL and Title */}
-        <FormSection>
-          <FormGrid>
-            <FormField>
-              <Label>
-                Page URL<RequiredIndicator>*</RequiredIndicator>
+        <FormSection theme={theme}>
+          <FormGrid theme={theme}>
+            <FormField theme={theme}>
+              <Label theme={theme}>
+                Page URL<RequiredIndicator theme={theme}>*</RequiredIndicator>
               </Label>
               <Input
+                theme={theme}
                 type="url"
                 value={formData.pageUrl}
                 onChange={handleInputChange('pageUrl')}
@@ -554,18 +605,19 @@ export const PageContextUpload: React.FC<PageContextUploadProps> = ({ onSubmit, 
                 hasError={!!errors.pageUrl}
               />
               {errors.pageUrl && (
-                <ErrorMessage>
+                <ErrorMessage theme={theme}>
                   <AlertCircle size={16} />
                   {errors.pageUrl}
                 </ErrorMessage>
               )}
             </FormField>
 
-            <FormField>
-              <Label>
-                Page Title<RequiredIndicator>*</RequiredIndicator>
+            <FormField theme={theme}>
+              <Label theme={theme}>
+                Page Title<RequiredIndicator theme={theme}>*</RequiredIndicator>
               </Label>
               <Input
+                theme={theme}
                 type="text"
                 value={formData.pageTitle}
                 onChange={handleInputChange('pageTitle')}
@@ -573,7 +625,7 @@ export const PageContextUpload: React.FC<PageContextUploadProps> = ({ onSubmit, 
                 hasError={!!errors.pageTitle}
               />
               {errors.pageTitle && (
-                <ErrorMessage>
+                <ErrorMessage theme={theme}>
                   <AlertCircle size={16} />
                   {errors.pageTitle}
                 </ErrorMessage>
@@ -781,6 +833,8 @@ export const PageContextUpload: React.FC<PageContextUploadProps> = ({ onSubmit, 
           </Button>
         </ActionButtons>
       </Form>
-    </Container>
+        </Container>
+      </MainContent>
+    </OuterContainer>
   );
 };

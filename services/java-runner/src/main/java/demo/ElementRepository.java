@@ -19,7 +19,7 @@ public class ElementRepository {
         try {
             this.elements = JsonUtil.readListFromFile(ELEMENT_REPO_FILE, 
                 new TypeReference<List<ElementAlternative>>() {});
-            System.out.println("Loaded " + elements.size() + " element alternatives from repository");
+            
         } catch (IOException e) {
             System.err.println("Warning: Could not load element repository: " + e.getMessage());
             System.err.println("Creating empty repository...");
@@ -35,11 +35,10 @@ public class ElementRepository {
         
         if (elementAlternative.isPresent()) {
             List<String> alternatives = new ArrayList<>(elementAlternative.get().getAlternatives());
-            System.out.println("Found " + alternatives.size() + " alternatives for element: " + elementId);
+            
             return alternatives;
         }
-        
-        System.out.println("No alternatives found for element: " + elementId + " on page: " + page);
+
         return new ArrayList<>();
     }
 
@@ -53,7 +52,7 @@ public class ElementRepository {
     public void saveRepository() {
         try {
             JsonUtil.writeToFile(ELEMENT_REPO_FILE, elements);
-            System.out.println("Saved element repository with " + elements.size() + " elements");
+            
         } catch (IOException e) {
             System.err.println("Error saving element repository: " + e.getMessage());
         }

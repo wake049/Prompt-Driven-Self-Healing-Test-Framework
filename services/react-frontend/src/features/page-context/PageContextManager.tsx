@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import styled from 'styled-components';
+import { useTheme } from '../../contexts/ThemeContext';
 import { PageContextUpload } from './PageContextUpload';
 import { PageContextList } from './PageContextList';
 import { PageContextView } from './PageContextView';
 import { PageContextAPI } from './api';
 import { PageContext, PageContextFormData } from './types';
+import { PageContextItem } from './';
 
 // ================================
 // Styled Components (matching existing app patterns)
@@ -14,29 +16,33 @@ const Container = styled.div`
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background-color: #ffffff;
+  background-color: ${props => props.theme.colors.background};
 `;
 
 const MainContent = styled.div`
   flex: 1;
   display: flex;
   flex-direction: column;
-  background: #ffffff;
+  background: ${props => props.theme.colors.background};
 `;
 
 const MainHeader = styled.div`
-  padding: 30px 40px;
+  padding: 40px 50px;
   border-bottom: 1px solid #e9ecef;
   display: flex;
   justify-content: space-between;
   align-items: center;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
 `;
 
 const PageTitle = styled.h1`
   margin: 0;
-  color: #2c3e50;
-  font-size: 2rem;
-  font-weight: 600;
+  color: white;
+  font-size: 2.25rem;
+  font-weight: 700;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 `;
 
 const HeaderActions = styled.div`
@@ -46,17 +52,22 @@ const HeaderActions = styled.div`
 `;
 
 const NewButton = styled.button`
-  background: #007bff;
+  background: rgba(255, 255, 255, 0.2);
   color: white;
-  border: none;
-  border-radius: 8px;
-  padding: 12px 24px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 12px;
+  padding: 14px 28px;
   font-weight: 600;
   cursor: pointer;
-  transition: background-color 0.2s;
+  transition: all 0.3s ease;
+  font-size: 15px;
+  backdrop-filter: blur(10px);
   
   &:hover {
-    background: #0056b3;
+    background: rgba(255, 255, 255, 0.3);
+    border-color: rgba(255, 255, 255, 0.5);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
   }
 `;
 
@@ -64,44 +75,50 @@ const ContentArea = styled.div`
   flex: 1;
   padding: 0 40px 40px;
   overflow: auto;
-`;
-
-const BackButton = styled.button`
-  background: none;
-  border: none;
-  color: #007bff;
-  cursor: pointer;
-  padding: 8px 0;
-  margin-bottom: 20px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 500;
   
-  &:hover {
-    text-decoration: underline;
+  /* Dark mode support */
+  @media (prefers-color-scheme: dark) {
+    background: #1a1a1a;
   }
 `;
 
-const ErrorMessage = styled.div`
-  background-color: #f8d7da;
-  color: #721c24;
+const BackButton = styled.button`
+  background: rgba(255, 255, 255, 0.2);
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  color: white;
+  cursor: pointer;
+  padding: 12px 20px;
+  border-radius: 8px;
+  font-weight: 500;
+  transition: all 0.3s ease;
+  backdrop-filter: blur(10px);
+  
+  &:hover {
+    background: rgba(255, 255, 255, 0.3);
+    border-color: rgba(255, 255, 255, 0.5);
+    transform: translateY(-1px);
+  }
+`;
+
+const ErrorMessage = styled.div<{ theme: any }>`
+  background-color: ${props => props.theme.colors.error}20;
+  color: ${props => props.theme.colors.error};
   padding: 16px;
   border-radius: 6px;
   margin-bottom: 20px;
-  border: 1px solid #f5c6cb;
+  border: 1px solid ${props => props.theme.colors.error}40;
 `;
 
-const Breadcrumb = styled.nav`
+const Breadcrumb = styled.nav<{ theme: any }>`
   margin-bottom: 24px;
-  color: #6c757d;
+  color: ${props => props.theme.colors.textSecondary};
   font-size: 14px;
 `;
 
-const BreadcrumbLink = styled.button`
+const BreadcrumbLink = styled.button<{ theme: any }>`
   background: none;
   border: none;
-  color: #007bff;
+  color: ${props => props.theme.colors.primary};
   text-decoration: none;
   cursor: pointer;
   font-size: 14px;
@@ -111,13 +128,13 @@ const BreadcrumbLink = styled.button`
   }
 `;
 
-const BreadcrumbSeparator = styled.span`
+const BreadcrumbSeparator = styled.span<{ theme: any }>`
   margin: 0 8px;
-  color: #6c757d;
+  color: ${props => props.theme.colors.textSecondary};
 `;
 
-const BreadcrumbCurrent = styled.span`
-  color: #2c3e50;
+const BreadcrumbCurrent = styled.span<{ theme: any }>`
+  color: ${props => props.theme.colors.text};
   font-weight: 500;
 `;
 
@@ -132,6 +149,7 @@ type ViewState = 'list' | 'upload' | 'edit' | 'view';
 // ================================
 
 export const PageContextManager: React.FC = () => {
+  const { theme } = useTheme();
   const [currentView, setCurrentView] = useState<ViewState>('list');
   const [selectedContext, setSelectedContext] = useState<PageContext | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -241,12 +259,12 @@ export const PageContextManager: React.FC = () => {
     if (currentView === 'list') return null;
     
     return (
-      <Breadcrumb>
-        <BreadcrumbLink onClick={() => setCurrentView('list')}>
+      <Breadcrumb theme={theme}>
+        <BreadcrumbLink theme={theme} onClick={() => setCurrentView('list')}>
           Page Contexts
         </BreadcrumbLink>
-        <BreadcrumbSeparator>/</BreadcrumbSeparator>
-        <BreadcrumbCurrent>
+        <BreadcrumbSeparator theme={theme}>/</BreadcrumbSeparator>
+        <BreadcrumbCurrent theme={theme}>
           {currentView === 'edit' ? 'Edit Context' : 
            currentView === 'upload' ? 'Add New Context' :
            selectedContext?.pageTitle || 'View Context'}
@@ -290,11 +308,11 @@ export const PageContextManager: React.FC = () => {
         );
 
       case 'view':
-        return selectedContext ? (
+        return selectedContext && selectedContext.id ? (
           <>
             {renderBreadcrumb()}
             <PageContextView
-              context={selectedContext as unknown as PageContext}
+              context={selectedContext as PageContextItem}
               onEdit={() => handleEdit(selectedContext)}
               onClose={() => setCurrentView('list')}
             />
@@ -307,8 +325,8 @@ export const PageContextManager: React.FC = () => {
   };
 
   return (
-    <Container>
-      <MainContent>
+    <Container theme={theme}>
+      <MainContent theme={theme}>
         <MainHeader>
           <div>
             <PageTitle>{renderHeader()}</PageTitle>
@@ -329,7 +347,7 @@ export const PageContextManager: React.FC = () => {
 
         <ContentArea>
           {error && (
-            <ErrorMessage>
+            <ErrorMessage theme={theme}>
               {error}
             </ErrorMessage>
           )}

@@ -1,10 +1,8 @@
 import { useEffect, useState } from "react";
-
 export function useAsync<T>(fn: () => Promise<T>, deps: any[] = []) {
   const [data, setData] = useState<T | undefined>();
   const [error, setError] = useState<unknown>();
   const [loading, setLoading] = useState(false);
-
   useEffect(() => {
     let mounted = true;
     setLoading(true);
@@ -16,6 +14,5 @@ export function useAsync<T>(fn: () => Promise<T>, deps: any[] = []) {
       mounted = false;
     };
   }, deps);
-
   return { data, error, loading };
 }

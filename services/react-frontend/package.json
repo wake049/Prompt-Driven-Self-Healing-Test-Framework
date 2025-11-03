@@ -1,8 +1,8 @@
 {
-  "name": "ai-test-planner-frontend",
-  "version": "0.2.0",
+  "name": "mcp-only-test-planner-frontend",
+  "version": "2.0.0",
   "type": "module",
-  "description": "React TypeScript frontend for AI-powered test automation planning",
+  "description": "MCP-only React TypeScript frontend requiring active MCP server connection - no REST API fallbacks",
   "private": true,
   "dependencies": {
     "@textea/json-viewer": "^3.4.1",

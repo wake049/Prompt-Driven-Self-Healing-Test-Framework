@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MCP-Only Test Runner</title>
+    <style>
+        body {
+            width: 420px;
+            min-height: 600px;
+            margin: 0;
+            padding: 16px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-size: 14px;
+            background: #f8f9fa;
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 20px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid #e9ecef;
+        }
+        
+        .header h1 {
+            margin: 0;
+            font-size: 18px;
+            color: #343a40;
+        }
+
+        .header .mcp-badge {
+            display: inline-block;
+            background: #007bff;
+            color: white;
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 12px;
+            margin-left: 8px;
+            font-weight: 600;
+        }
+        
+        .status {
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 500;
+            margin-bottom: 12px;
+            text-align: center;
+        }
+        
+        .status.success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .status.warning {
+            background-color: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+        
+        .status.error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .fatal-error {
+            background: linear-gradient(135deg, #ff6b6b, #ff8e8e);
+            color: white;
+            padding: 16px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            text-align: center;
+            border: 2px solid #ff5252;
+        }
+
+        .fatal-error h3 {
+            margin: 0 0 8px 0;
+            font-size: 16px;
+        }
+
+        .fatal-error p {
+            margin: 4px 0;
+            font-size: 13px;
+            opacity: 0.95;
+        }
+        
+        .page-context {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            padding: 12px;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: end;
+            gap: 10px;
+        }
+        
+        .page-context .form-group {
+            margin-bottom: 0;
+            flex: 1;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 4px;
+            font-weight: 500;
+            color: #495057;
+            font-size: 12px;
+        }
+        
+        .form-control {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            font-size: 13px;
+            box-sizing: border-box;
+        }
+        
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        
+        .btn-primary {
+            background-color: #007bff;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background-color: #0056b3;
+        }
+        
+        .btn-secondary {
+            background-color: #6c757d;
+            color: white;
+        }
+        
+        .btn-secondary:hover {
+            background-color: #545b62;
+        }
+        
+        .btn:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        
+        .recording {
+            background-color: #dc3545 !important;
+        }
+        
+        .section {
+            background: white;
+            border-radius: 6px;
+            border: 1px solid #dee2e6;
+            padding: 12px;
+            margin-bottom: 16px;
+        }
+        
+        .section-title {
+            font-weight: 600;
+            margin-bottom: 12px;
+            color: #495057;
+            font-size: 14px;
+        }
+        
+        .recorder-controls {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        
+        .recorder-controls .btn {
+            width: 100%;
+        }
+        
+        .mcp-tools {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+        
+        .mcp-tools .btn {
+            font-size: 11px;
+            padding: 6px 8px;
+        }
+        
+        .tools-list {
+            max-height: 120px;
+            overflow-y: auto;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            background: #f8f9fa;
+        }
+        
+        .tool-item {
+            padding: 6px 8px;
+            border-bottom: 1px solid #e9ecef;
+            font-size: 11px;
+        }
+        
+        .tool-item:last-child {
+            border-bottom: none;
+        }
+        
+        .tool-item strong {
+            color: #495057;
+            font-size: 12px;
+        }
+        
+        .tool-item p {
+            margin: 2px 0 0 0;
+            color: #6c757d;
+            font-size: 10px;
+        }
+        
+        .resource-display {
+            max-height: 100px;
+            overflow-y: auto;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            background: #f8f9fa;
+            font-size: 11px;
+        }
+        
+        .element-item {
+            padding: 4px 8px;
+            border-bottom: 1px solid #e9ecef;
+        }
+        
+        .element-item:last-child {
+            border-bottom: none;
+        }
+        
+        .element-item strong {
+            color: #495057;
+            font-size: 11px;
+        }
+        
+        .element-item small {
+            color: #6c757d;
+            display: block;
+            font-size: 10px;
+        }
+        
+        .instructions-panel {
+            background: #e7f3ff;
+            border: 1px solid #bee5eb;
+            border-radius: 6px;
+            padding: 12px;
+            margin-bottom: 16px;
+        }
+        
+        .instructions-title {
+            font-weight: 600;
+            color: #dc3545;
+            margin-bottom: 8px;
+            font-size: 13px;
+        }
+        
+        .instructions-list {
+            margin: 8px 0;
+            padding-left: 16px;
+            font-size: 12px;
+            color: #495057;
+        }
+        
+        .instructions-list li {
+            margin-bottom: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🛠️ MCP-Only Test Runner <span class="mcp-badge">MCP REQUIRED</span></h1>
+    </div>
+    
+    <div id="status-message" class="status">Initializing MCP client...</div>
+    
+    <div class="page-context">
+        <div class="form-group">
+            <label for="page-context">Current Page:</label>
+            <input type="text" id="page-context" class="form-control" placeholder="e.g., login, dashboard">
+        </div>
+        <button id="declare-page-btn" class="btn btn-primary">Declare</button>
+    </div>
+    
+    <div class="section">
+        <div class="section-title">📹 Recording Controls</div>
+        <div class="recorder-controls">
+            <button id="record-btn" class="btn btn-secondary">📍 Start Recording</button>
+            <button id="stop-record-btn" class="btn btn-secondary" disabled>⏹️ Stop Recording</button>
+        </div>
+    </div>
+    
+    <div id="recording-instructions" class="instructions-panel" style="display: none;">
+        <div class="instructions-title">🔴 Recording Mode Active</div>
+        <ul class="instructions-list">
+            <li>🟦 Blue highlight = hovering over element</li>
+            <li>🟢 Green highlight = element recorded</li>
+            <li>Click any element to capture it</li>
+        </ul>
+    </div>
+    
+    <div class="section">
+        <div class="section-title">🧪 MCP Tool Testing</div>
+        <div class="mcp-tools">
+            <button id="test-elements-btn" class="btn btn-primary">Test Elements</button>
+            <button id="test-action-btn" class="btn btn-primary">Test Action</button>
+            <button id="test-verify-btn" class="btn btn-primary">Test Verify</button>
+            <button id="view-repo-btn" class="btn btn-secondary">View Repo</button>
+            <button id="view-stats-btn" class="btn btn-secondary">View Stats</button>
+        </div>
+    </div>
+    
+    <div class="section">
+        <div class="section-title">🔧 Available MCP Tools</div>
+        <div id="tools-list" class="tools-list">
+            <div class="tool-item">Loading tools...</div>
+        </div>
+    </div>
+    
+    <div class="section">
+        <div class="section-title">📦 Element Repository</div>
+        <div id="repo-display" class="resource-display">
+            <div class="element-item">Click "View Repo" to load elements</div>
+        </div>
+    </div>
+
+    <script src="popup-mcp.js"></script>
+</body>
+</html>

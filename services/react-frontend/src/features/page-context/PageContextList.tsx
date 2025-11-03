@@ -1,51 +1,85 @@
 import React, { useState, useEffect, useRef } from 'react';
 import styled from 'styled-components';
 import { Search, Filter, Eye, Edit, Trash2, Plus, Image, Globe, Calendar } from 'lucide-react';
+import { useTheme } from '../../contexts/ThemeContext';
 import { PageContextAPI } from './api';
 
 // ================================
 // Styled Components (matching existing app patterns)
 // ================================
 
+const ContentArea = styled.div`
+  padding: 30px 40px;
+`;
+
 const FilterBar = styled.div`
   display: flex;
-  gap: 16px;
+  gap: 20px;
   align-items: center;
-  padding: 20px 0;
-  background: #f8f9fa;
-  border-bottom: 1px solid #e9ecef;
-  margin-bottom: 24px;
-  border-radius: 8px;
-  padding: 20px;
+  padding: 28px 32px;
+  background: ${props => props.theme.colors.surface};
+  border-radius: 16px;
+  box-shadow: ${props => props.theme.shadows.medium};
+  border: 1px solid ${props => props.theme.colors.border};
+  margin-bottom: 32px;
+  position: relative;
+  
+  &::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 16px 16px 0 0;
+  }
 `;
 
 const SearchInput = styled.input`
   flex: 1;
-  padding: 10px 14px;
-  border: 1px solid #ddd;
-  border-radius: 6px;
-  font-size: 14px;
+  padding: 14px 20px;
+  border: 2px solid ${props => props.theme.colors.border};
+  border-radius: 12px;
+  font-size: 15px;
+  transition: all 0.3s ease;
+  background: ${props => props.theme.colors.surface};
+  color: ${props => props.theme.colors.text};
   
   &:focus {
     outline: none;
-    border-color: #007bff;
-    box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+    transform: translateY(-1px);
+  }
+  
+  &::placeholder {
+    color: ${props => props.theme.colors.textSecondary};
+    font-weight: 500;
   }
 `;
 
 const FilterSelect = styled.select`
-  padding: 10px 14px;
-  border: 1px solid #ddd;
-  border-radius: 6px;
-  font-size: 14px;
-  background: white;
-  min-width: 150px;
+  padding: 14px 20px;
+  border: 2px solid ${props => props.theme.colors.border};
+  border-radius: 12px;
+  font-size: 15px;
+  background: ${props => props.theme.colors.surface};
+  color: ${props => props.theme.colors.text};
+  min-width: 200px;
   cursor: pointer;
+  transition: all 0.3s ease;
+  font-weight: 500;
   
   &:focus {
     outline: none;
-    border-color: #007bff;
-    box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+    transform: translateY(-1px);
+  }
+  
+  &:hover {
+    border-color: #667eea;
   }
 `;
 
@@ -53,40 +87,47 @@ const FilterSummary = styled.div`
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 12px 0;
-  font-size: 14px;
-  color: #6c757d;
-  margin-bottom: 20px;
+  padding: 20px 32px;
+  font-size: 15px;
+  color: ${props => props.theme.colors.textSecondary};
+  margin-bottom: 32px;
+  background: ${props => props.theme.colors.surface};
+  border-radius: 16px;
+  box-shadow: ${props => props.theme.shadows.small};
+  border: 1px solid ${props => props.theme.colors.border};
+  font-weight: 500;
 `;
 
 const FilterCount = styled.span`
-  font-weight: 600;
-  color: #007bff;
+  font-weight: 700;
+  color: #667eea;
+  font-size: 16px;
 `;
 
 const ContextGrid = styled.div`
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
-  gap: 24px;
+  gap: 32px;
 `;
 
 const ContextCard = styled.div`
-  background: white;
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  transition: transform 0.2s, box-shadow 0.2s;
-  border: 1px solid #e9ecef;
+  background: ${props => props.theme.colors.surface};
+  border-radius: 16px;
+  box-shadow: ${props => props.theme.shadows.medium};
+  transition: all 0.3s ease;
+  border: 1px solid ${props => props.theme.colors.border};
   overflow: hidden;
   
   &:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+    transform: translateY(-4px);
+    box-shadow: ${props => props.theme.shadows.large};
+    border-color: #667eea;
   }
 `;
 
 const ScreenshotContainer = styled.div`
   aspect-ratio: 16/9;
-  background: #f8f9fa;
+  background: ${props => props.theme.colors.border};
   position: relative;
   overflow: hidden;
   display: flex;
@@ -105,7 +146,7 @@ const ScreenshotPlaceholder = styled.div`
   align-items: center;
   justify-content: center;
   height: 100%;
-  color: #6c757d;
+  color: ${props => props.theme.colors.textSecondary};
 `;
 
 const TypeBadge = styled.span<{ pageType: string }>`
@@ -152,7 +193,7 @@ const CardContent = styled.div`
 
 const CardTitle = styled.h3`
   margin: 0 0 8px 0;
-  color: #2c3e50;
+  color: ${props => props.theme.colors.text};
   font-size: 1.1rem;
   font-weight: 600;
   overflow: hidden;
@@ -161,7 +202,7 @@ const CardTitle = styled.h3`
 `;
 
 const CardDescription = styled.p`
-  color: #6c757d;
+  color: ${props => props.theme.colors.textSecondary};
   font-size: 0.9rem;
   margin: 0 0 12px 0;
   line-height: 1.4;
@@ -377,6 +418,7 @@ export const PageContextList: React.FC<PageContextListProps> = ({
   onDelete,
   onCreateNew
 }) => {
+  const { theme } = useTheme();
   const [contexts, setContexts] = useState<PageContextItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -514,10 +556,11 @@ export const PageContextList: React.FC<PageContextListProps> = ({
   }
 
   return (
-    <>
+    <ContentArea>
       {/* Search and Filters */}
-      <FilterBar>
+      <FilterBar theme={theme}>
         <SearchInput
+          theme={theme}
           type="text"
           placeholder="Search by title, description, or URL..."
           value={searchQuery}
@@ -525,6 +568,7 @@ export const PageContextList: React.FC<PageContextListProps> = ({
         />
         
         <FilterSelect
+          theme={theme}
           value={filterType}
           onChange={(e) => setFilterType(e.target.value)}
         >
@@ -535,6 +579,7 @@ export const PageContextList: React.FC<PageContextListProps> = ({
         </FilterSelect>
 
         <FilterSelect
+          theme={theme}
           value={sortBy}
           onChange={(e) => setSortBy(e.target.value as any)}
         >
@@ -544,7 +589,7 @@ export const PageContextList: React.FC<PageContextListProps> = ({
         </FilterSelect>
       </FilterBar>
 
-      <FilterSummary>
+      <FilterSummary theme={theme}>
         <div>
           Showing <FilterCount>{filteredAndSortedContexts.length}</FilterCount> of <FilterCount>{contexts.length}</FilterCount> page contexts
           {searchQuery && <span> • Filter: "{searchQuery}"</span>}
@@ -589,16 +634,16 @@ export const PageContextList: React.FC<PageContextListProps> = ({
       ) : (
         <ContextGrid>
           {filteredAndSortedContexts.map((context) => (
-            <ContextCard key={context.id}>
+            <ContextCard key={context.id} theme={theme}>
               {/* Screenshot or Placeholder */}
-              <ScreenshotContainer>
+              <ScreenshotContainer theme={theme}>
                 {context.screenshotUrl ? (
                   <ScreenshotImage
                     src={context.screenshotUrl}
                     alt={context.pageTitle}
                   />
                 ) : (
-                  <ScreenshotPlaceholder>
+                  <ScreenshotPlaceholder theme={theme}>
                     <Image size={32} />
                   </ScreenshotPlaceholder>
                 )}
@@ -611,11 +656,11 @@ export const PageContextList: React.FC<PageContextListProps> = ({
 
               {/* Content */}
               <CardContent>
-                <CardTitle title={context.pageTitle}>
+                <CardTitle theme={theme} title={context.pageTitle}>
                   {context.pageTitle}
                 </CardTitle>
                 
-                <CardDescription>
+                <CardDescription theme={theme}>
                   {context.pageDescription}
                 </CardDescription>
 
@@ -677,6 +722,6 @@ export const PageContextList: React.FC<PageContextListProps> = ({
           ))}
         </ContextGrid>
       )}
-    </>
+    </ContentArea>
   );
 };

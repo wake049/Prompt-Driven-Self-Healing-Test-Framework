@@ -310,10 +310,18 @@ class AuthenticationManager:
                 u.created_at, u.updated_at,
                 t.id as tenant_id, t.name as tenant_name, t.slug as tenant_slug,
                 p.id as project_id, p.name as project_name, p.slug as project_slug,
-                p.description as project_description
+                p.description as project_description,
+                CASE WHEN admin_roles.admin_count > 0 THEN true ELSE false END as is_admin
             FROM core.users u
             LEFT JOIN core.tenants t ON t.is_active = true
             LEFT JOIN core.projects p ON p.tenant_id = t.id AND p.is_active = true
+            LEFT JOIN (
+                SELECT utr.user_id, COUNT(*) as admin_count
+                FROM core.user_tenant_roles utr
+                JOIN core.roles r ON utr.role_id = r.id
+                WHERE r.name = 'Admin'
+                GROUP BY utr.user_id
+            ) admin_roles ON u.id = admin_roles.user_id
             WHERE u.id = $1 AND u.is_active = true
             LIMIT 1
             """,
@@ -329,6 +337,7 @@ class AuthenticationManager:
             email=result["email"],
             full_name=result["full_name"],
             is_active=result["is_active"],
+            is_admin=result.get("is_admin", False),
             created_at=result["created_at"],
             updated_at=result["updated_at"]
         )

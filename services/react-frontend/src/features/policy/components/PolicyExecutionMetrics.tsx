@@ -11,7 +11,6 @@ import {
   ScatterChart, Scatter, BarChart, Bar
 } from 'recharts';
 import { Clock, TrendingUp, CheckCircle, AlertTriangle } from 'lucide-react';
-
 interface ExecutionLog {
   id: string;
   run_id: string;
@@ -25,30 +24,24 @@ interface ExecutionLog {
     evaluation_time_ms: number;
   };
 }
-
 interface PolicyExecutionMetricsProps {
   executionLogs: ExecutionLog[];
 }
-
 export const PolicyExecutionMetrics: React.FC<PolicyExecutionMetricsProps> = ({
   executionLogs
 }) => {
   const metrics = useMemo(() => {
     if (!executionLogs.length) return null;
-
     const totalExecutions = executionLogs.length;
     const successfulMatches = executionLogs.filter(log => 
       log.evaluation_result?.matched
     ).length;
-    
     const avgConfidence = executionLogs.reduce((sum, log) => 
       sum + (log.evaluation_result?.confidence_score || 0), 0
     ) / totalExecutions;
-
     const avgEvaluationTime = executionLogs.reduce((sum, log) => 
       sum + (log.evaluation_result?.evaluation_time_ms || 0), 0
     ) / totalExecutions;
-
     // Group by policy ID
     const policyPerformance = executionLogs.reduce((acc, log) => {
       if (!acc[log.policy_id]) {
@@ -60,15 +53,12 @@ export const PolicyExecutionMetrics: React.FC<PolicyExecutionMetricsProps> = ({
           totalTime: 0
         };
       }
-      
       acc[log.policy_id].executions++;
       if (log.evaluation_result?.matched) acc[log.policy_id].matches++;
       acc[log.policy_id].totalConfidence += log.evaluation_result?.confidence_score || 0;
       acc[log.policy_id].totalTime += log.evaluation_result?.evaluation_time_ms || 0;
-      
       return acc;
     }, {} as Record<string, any>);
-
     const policyStats = Object.values(policyPerformance).map((policy: any) => ({
       policy_id: policy.policy_id.substring(0, 12) + '...',
       full_policy_id: policy.policy_id,
@@ -77,7 +67,6 @@ export const PolicyExecutionMetrics: React.FC<PolicyExecutionMetricsProps> = ({
       avg_confidence: policy.totalConfidence / policy.executions,
       avg_time: policy.totalTime / policy.executions
     }));
-
     // Time series data for last 50 executions
     const timeSeriesData = executionLogs.slice(-50).map((log, index) => ({
       execution: index + 1,
@@ -86,7 +75,6 @@ export const PolicyExecutionMetrics: React.FC<PolicyExecutionMetricsProps> = ({
       matched: log.evaluation_result?.matched ? 1 : 0,
       timestamp: new Date(log.created_at).getTime()
     }));
-
     return {
       totalExecutions,
       successfulMatches,
@@ -97,7 +85,6 @@ export const PolicyExecutionMetrics: React.FC<PolicyExecutionMetricsProps> = ({
       timeSeriesData
     };
   }, [executionLogs]);
-
   if (!metrics) {
     return (
       <Card>
@@ -107,7 +94,6 @@ export const PolicyExecutionMetrics: React.FC<PolicyExecutionMetricsProps> = ({
       </Card>
     );
   }
-
   return (
     <div className="space-y-6">
       {/* Summary Cards */}
@@ -123,7 +109,6 @@ export const PolicyExecutionMetrics: React.FC<PolicyExecutionMetricsProps> = ({
             </div>
           </CardContent>
         </Card>
-
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center gap-2">
@@ -136,7 +121,6 @@ export const PolicyExecutionMetrics: React.FC<PolicyExecutionMetricsProps> = ({
             </div>
           </CardContent>
         </Card>
-
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center gap-2">
@@ -149,7 +133,6 @@ export const PolicyExecutionMetrics: React.FC<PolicyExecutionMetricsProps> = ({
             </div>
           </CardContent>
         </Card>
-
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center gap-2">
@@ -162,7 +145,6 @@ export const PolicyExecutionMetrics: React.FC<PolicyExecutionMetricsProps> = ({
           </CardContent>
         </Card>
       </div>
-
       {/* Execution Timeline */}
       <Card>
         <CardHeader>
@@ -205,7 +187,6 @@ export const PolicyExecutionMetrics: React.FC<PolicyExecutionMetricsProps> = ({
           </ResponsiveContainer>
         </CardContent>
       </Card>
-
       {/* Policy Performance Comparison */}
       <Card>
         <CardHeader>
@@ -229,7 +210,6 @@ export const PolicyExecutionMetrics: React.FC<PolicyExecutionMetricsProps> = ({
                     </Badge>
                   </div>
                 </div>
-                
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <p className="text-sm text-gray-600 mb-1">Match Rate</p>
@@ -245,7 +225,6 @@ export const PolicyExecutionMetrics: React.FC<PolicyExecutionMetricsProps> = ({
           </div>
         </CardContent>
       </Card>
-
       {/* Performance Distribution */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card>
@@ -273,7 +252,6 @@ export const PolicyExecutionMetrics: React.FC<PolicyExecutionMetricsProps> = ({
             </ResponsiveContainer>
           </CardContent>
         </Card>
-
         <Card>
           <CardHeader>
             <CardTitle>Policy Execution Distribution</CardTitle>

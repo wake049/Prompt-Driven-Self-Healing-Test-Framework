@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mcp-server"
+version = "1.0.0"
+description = "MCP-compliant server for Self-Healing Test Framework"
+authors = [
+    {name = "Self-Healing Test Framework Team", email = "team@example.com"}
+]
+license = {text = "MIT"}
+requires-python = ">=3.8"
+dependencies = [
+    "mcp>=1.20.0",
+    "httpx>=0.27.1", 
+    "pydantic>=2.11.0",
+    "uvicorn>=0.31.1",
+    "python-dotenv>=1.0.0",
+    "jsonschema>=4.20.0",
+    "websockets>=12.0"
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.20.0",
+    "pytest-httpx>=0.21.0",
+    "pytest-mock>=3.10.0"
+]
+dev = [
+    "black>=22.0.0",
+    "isort>=5.10.0",
+    "mypy>=1.0.0",
+    "pre-commit>=2.20.0"
+]
+
+[project.scripts]
+mcp-server = "mcp_server.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["mcp_server*"]
+
+[tool.black]
+line-length = 100
+target-version = ['py38']
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.mypy]
+python_version = "3.8"
+strict = true
+ignore_missing_imports = true

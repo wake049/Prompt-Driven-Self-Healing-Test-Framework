@@ -2,16 +2,13 @@
  * Unified API Client for React Frontend
  * Consolidates all MCP services into a single client
  */
-
 const UNIFIED_API_BASE_URL = import.meta.env.VITE_UNIFIED_API_URL || 'http://localhost:8000';
-
 interface ApiResponse<T = any> {
   success: boolean;
   data?: T;
   error?: string;
   message?: string;
 }
-
 // Policy Engine Types
 interface Policy {
   id: string;
@@ -24,13 +21,11 @@ interface Policy {
   created_at: string;
   updated_at: string;
 }
-
 interface PolicyRule {
   condition_expression: string;
   action_mapping: Record<string, any>;
   confidence_threshold: number;
 }
-
 interface PolicyStats {
   total_policies: number;
   active_policies: number;
@@ -41,7 +36,6 @@ interface PolicyStats {
   cache_size: number;
   uptime_seconds: number;
 }
-
 // AI Service Types
 interface ElementSuggestion {
   elementId: string;
@@ -54,7 +48,6 @@ interface ElementSuggestion {
   confidence: number;
   usageExamples: string[];
 }
-
 interface DOMElement {
   tag: string;
   id?: string;
@@ -64,7 +57,6 @@ interface DOMElement {
   isVisible: boolean;
   isInteractive: boolean;
 }
-
 interface TestPlan {
   actions: Array<{
     name: string;
@@ -72,7 +64,6 @@ interface TestPlan {
   }>;
   meta: Record<string, any>;
 }
-
 // Healing API Types
 interface HealingAttempt {
   timestamp: string;
@@ -84,7 +75,6 @@ interface HealingAttempt {
   result: string;
   error?: string;
 }
-
 // SQL Backend Types
 interface RecordedElement {
   id: string;
@@ -98,7 +88,6 @@ interface RecordedElement {
   logical_key?: string;
   timestamp_recorded: string;
 }
-
 interface ReviewQueueItem {
   id: string;
   page: string;
@@ -112,7 +101,6 @@ interface ReviewQueueItem {
   created_at: string;
   updated_at: string;
 }
-
 // Test Execution Types
 interface TestExecution {
   execution_id: string;
@@ -126,7 +114,6 @@ interface TestExecution {
   results?: any;
   metadata?: any;
 }
-
 interface ExecutionResult {
   success: boolean;
   execution_id: string;
@@ -134,31 +121,20 @@ interface ExecutionResult {
   steps_count: number;
   prompt_text: string;
 }
-
 class UnifiedApiClient {
   private baseUrl: string;
-
   constructor(baseUrl: string = UNIFIED_API_BASE_URL) {
     this.baseUrl = baseUrl;
   }
-
   private getAuthHeaders(): Record<string, string> {
     const token = localStorage.getItem('auth_token');
     const headers = {
       'Content-Type': 'application/json',
       ...(token && { 'Authorization': `Bearer ${token}` }),
     };
-    
     // Debug auth headers
-    console.log('🔑 Auth Headers:', {
-      hasToken: !!token,
-      tokenPreview: token ? `${token.substring(0, 20)}...` : 'No token',
-      headers: Object.keys(headers)
-    });
-    
     return headers;
   }
-
   private async request<T = any>(endpoint: string, options: RequestInit = {}): Promise<T> {
     const url = `${this.baseUrl}${endpoint}`;
     const config: RequestInit = {
@@ -168,72 +144,55 @@ class UnifiedApiClient {
       },
       ...options,
     };
-
     try {
-      console.log(`Unified API Request: ${config.method || 'GET'} ${url}`);
       const response = await fetch(url, config);
-
       if (!response.ok) {
         if (response.status === 401 || response.status === 403) {
           // For long work sessions, don't automatically logout
           // Instead, show a more user-friendly error message
-          console.warn('Authentication error - please check your login status');
           throw new Error('Authentication error - please refresh the page or login again if needed');
         }
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
-
       const data = await response.json();
-      console.log(`Unified API Response:`, data);
       return data;
-    } catch (error) {
-      console.error(`Unified API Error for ${endpoint}:`, error);
-      throw error;
+    } catch (error) {throw error;
     }
   }
-
   // Health Check
   async healthCheck(): Promise<{ status: string; services: Record<string, string> }> {
     return this.request('/health');
   }
-
   // Policy Engine Methods
   async getPolicyStats(): Promise<PolicyStats> {
     return this.request('/api/v1/policy/dashboard/stats');
   }
-
   async getPolicies(): Promise<Policy[]> {
     return this.request('/api/v1/policy/dashboard/policies');
   }
-
   async getPolicy(policyId: string): Promise<Policy> {
     return this.request(`/api/v1/policy/policies/${policyId}`);
   }
-
   async createPolicy(policy: Partial<Policy>): Promise<{ success: boolean; policy_id: string }> {
     return this.request('/api/v1/policy/policies', {
       method: 'POST',
       body: JSON.stringify(policy),
     });
   }
-
   async updatePolicy(policyId: string, policy: Partial<Policy>): Promise<{ success: boolean }> {
     return this.request(`/api/v1/policy/policies/${policyId}`, {
       method: 'PUT',
       body: JSON.stringify(policy),
     });
   }
-
   async deletePolicy(policyId: string): Promise<{ success: boolean }> {
     return this.request(`/api/v1/policy/policies/${policyId}`, {
       method: 'DELETE',
     });
   }
-
   // AI Service Methods
   // Note: Element suggestion functionality has been integrated into the 
   // enterprise /v1/plan endpoint via intelligent element ranking
-
   async generateTestSteps(prompt: string, options?: {
     baseUrl?: string;
     includeScreenshots?: boolean;
@@ -275,13 +234,11 @@ class UnifiedApiClient {
       timeout_ms: 30000,
       request_source: "react-frontend"
     };
-
     // Call the new enterprise endpoint
     const response = await this.request('/api/v1/ai/v1/plan', {
       method: 'POST',
       body: JSON.stringify(promptEnvelope),
     });
-
     // Transform enterprise response back to legacy format for compatibility
     return {
       success: true,
@@ -316,7 +273,6 @@ class UnifiedApiClient {
       }
     };
   }
-
   async validateDOMStructure(domData: any): Promise<{
     success: boolean;
     validation: Record<string, any>;
@@ -326,14 +282,12 @@ class UnifiedApiClient {
       body: JSON.stringify({ domData }),
     });
   }
-
   async getAIModels(): Promise<{
     success: boolean;
     models: Record<string, any>;
   }> {
     return this.request('/api/v1/ai/models');
   }
-
   // Healing API Methods
   async submitHealingData(healingAttempts: HealingAttempt[], sessionId?: string): Promise<{
     success: boolean;
@@ -348,7 +302,6 @@ class UnifiedApiClient {
       }),
     });
   }
-
   async getHealingStats(): Promise<{
     total_files: number;
     files: string[];
@@ -356,7 +309,6 @@ class UnifiedApiClient {
   }> {
     return this.request('/api/v1/healing/stats');
   }
-
   async getHealingData(limit: number = 100, sessionId?: string): Promise<{
     healing_attempts: any[];
     total: number;
@@ -364,10 +316,8 @@ class UnifiedApiClient {
   }> {
     const params = new URLSearchParams({ limit: limit.toString() });
     if (sessionId) params.append('session_id', sessionId);
-    
     return this.request(`/api/v1/healing/data?${params}`);
   }
-
   // SQL Backend Methods
   async recordElement(elementData: any, sessionInfo?: any): Promise<{
     success: boolean;
@@ -379,7 +329,6 @@ class UnifiedApiClient {
       body: JSON.stringify({ element_data: elementData, session_info: sessionInfo }),
     });
   }
-
   async recordExecution(executionData: any, sessionId: string): Promise<{
     success: boolean;
     data: any;
@@ -389,14 +338,12 @@ class UnifiedApiClient {
       body: JSON.stringify({ execution_data: executionData, session_id: sessionId }),
     });
   }
-
   async getAllData(): Promise<{
     success: boolean;
     data: { sessions: any[] };
   }> {
     return this.request('/api/v1/sql/all-data');
   }
-
   async getReviewQueue(status: string = 'pending', page?: string): Promise<{
     success: boolean;
     data: ReviewQueueItem[];
@@ -404,121 +351,170 @@ class UnifiedApiClient {
   }> {
     const params = new URLSearchParams({ status });
     if (page) params.append('page', page);
-    
     return this.request(`/api/v1/sql/review-queue?${params}`);
   }
-
   async getPendingReviews(): Promise<ReviewQueueItem[]> {
     return this.request('/api/v1/sql/review/pending');
   }
-
   async updateReviewStatus(reviewId: string, status: string, notes?: string): Promise<ReviewQueueItem> {
     return this.request(`/api/v1/sql/review/${reviewId}`, {
       method: 'PATCH',
       body: JSON.stringify({ status, reviewer_notes: notes }),
     });
   }
-
   // Utility Methods
   formatTimestamp(timestamp: string): string {
     const date = new Date(timestamp);
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
     const diffMins = Math.floor(diffMs / (1000 * 60));
-    
     if (diffMins < 1) return 'Just now';
     if (diffMins < 60) return `${diffMins} minute${diffMins === 1 ? '' : 's'} ago`;
     const diffHours = Math.floor(diffMins / 60);
     if (diffHours < 24) return `${diffHours} hour${diffHours === 1 ? '' : 's'} ago`;
     return date.toLocaleDateString();
   }
-
   // Backward compatibility methods (delegates to new endpoints)
   async getDashboardStats(): Promise<PolicyStats> {
     return this.getPolicyStats();
   }
-
   async getDashboardPolicies(): Promise<Policy[]> {
     return this.getPolicies();
   }
-
   async getDashboardExecutionLogs(limit: number = 50): Promise<any[]> {
     return this.request(`/api/v1/policy/dashboard/execution-logs?limit=${limit}`);
   }
-
   async getDashboardOutcomeStatistics(): Promise<any> {
     return this.request('/api/v1/policy/dashboard/outcome-statistics');
   }
-
   // Bindings API methods
   async getBindings(): Promise<any[]> {
     return this.request('/api/v1/bindings');
   }
-
   async createBinding(binding: any): Promise<any> {
     return this.request('/api/v1/bindings', {
       method: 'POST',
       body: JSON.stringify(binding),
     });
   }
-
   async getBindingTemplates(): Promise<any> {
     return this.request('/api/v1/bindings/templates');
   }
-
   async applyBindingTemplate(templateName: string, context: any): Promise<any> {
     return this.request(`/api/v1/bindings/templates/${templateName}/apply`, {
       method: 'POST',
       body: JSON.stringify(context),
     });
   }
-
   async testBinding(binding: any): Promise<any> {
     return this.request('/api/v1/bindings/test', {
       method: 'POST',
       body: JSON.stringify(binding),
     });
   }
-
   // Test Execution API methods
   async executePrompt(promptId: string): Promise<any> {
     return this.request(`/api/v1/execution/execute-prompt/${promptId}`, {
       method: 'POST'
     });
   }
-
+  async executeDebugSteps(requestData: any): Promise<any> {
+    return this.request('/api/v1/execution/execute-debug-steps', {
+      method: 'POST',
+      body: JSON.stringify(requestData)
+    });
+  }
   async getExecutionStatus(executionId: string): Promise<any> {
     return this.request(`/api/v1/execution/execution/${executionId}`);
   }
-
   async getRecentExecutions(limit: number = 10): Promise<any> {
     return this.request(`/api/v1/execution/executions?limit=${limit}`);
   }
-
+  // Test Failure Analysis & Minimal Reproduction API methods
+  // Get recent failed executions for failure analysis  
+  async getRecentFailedExecutions(promptId?: string, limit: number = 10): Promise<any> {
+    const params = new URLSearchParams();
+    params.append('limit', limit.toString());
+    params.append('status', 'failed');  // Filter for failed executions only
+    if (promptId) {
+      params.append('prompt_id', promptId);  // Filter by prompt to get failures for this specific prompt
+    }
+    return this.request(`/api/execution-dashboard/recent?${params}`);
+  }
+  // Get recent failed executions filtered by element (legacy method)
+  async getRecentFailedExecutionsByElement(elementId: string, limit: number = 5): Promise<any> {
+    const params = new URLSearchParams();
+    params.append('elementId', elementId);
+    params.append('limit', limit.toString());
+    params.append('status', 'failed');
+    return this.request(`/api/execution-dashboard/recent?${params}`);
+  }
+  async generateMinimalReproSteps(executionId: string, failedSteps: any[]): Promise<{
+    success: boolean;
+    minimalSteps: any[];
+    originalStepsCount: number;
+    reducedStepsCount: number;
+    reproductionGuarantee: number;
+    analysisReport: {
+      criticalPath: string[];
+      removedSteps: string[];
+      reasoning: string;
+    };
+  }> {
+    return this.request('/api/v1/ai/generate-minimal-repro', {
+      method: 'POST',
+      body: JSON.stringify({
+        execution_id: executionId,
+        failed_steps: failedSteps,
+        optimization_level: 'moderate', // 'aggressive' | 'moderate' | 'conservative'
+        preserve_context: true
+      }),
+    });
+  }
+  async analyzeFailurePatterns(elementId: string, days: number = 30): Promise<{
+    elementId: string;
+    failureAnalysis: {
+      totalFailures: number;
+      commonErrors: Array<{
+        error: string;
+        count: number;
+        firstSeen: string;
+        lastSeen: string;
+      }>;
+      failureTrends: Array<{
+        date: string;
+        failures: number;
+      }>;
+      affectedActions: Array<{
+        action: string;
+        failureRate: number;
+        avgStepPosition: number;
+      }>;
+    };
+    recommendations: string[];
+  }> {
+    return this.request(`/api/v1/ai/analyze-element-failures/${elementId}?days=${days}`);
+  }
   // Bindings API methods
   async getPromptBindings(promptId: string): Promise<any> {
     return this.request(`/api/v1/prompts/${promptId}/bindings`);
   }
-
   async updatePromptBindings(promptId: string, bindings: any): Promise<any> {
     return this.request(`/api/v1/prompts/${promptId}/bindings`, {
       method: 'POST',
       body: JSON.stringify(bindings),
     });
   }
-
   async testBindings(bindings: any, domData?: any): Promise<any> {
     return this.request('/api/v1/bindings/test', {
       method: 'POST',
       body: JSON.stringify({ bindings_data: bindings, dom_data: domData }),
     });
   }
-
   // Generic HTTP methods for convenience
   async get(endpoint: string): Promise<any> {
     return this.request(endpoint);
   }
-
   async post(endpoint: string, data?: any): Promise<any> {
     return this.request(endpoint, {
       method: 'POST',
@@ -529,10 +525,8 @@ class UnifiedApiClient {
     });
   }
 }
-
 // Create singleton instance
 const unifiedApiClient = new UnifiedApiClient();
-
 export default unifiedApiClient;
 export { UnifiedApiClient };
 export type {

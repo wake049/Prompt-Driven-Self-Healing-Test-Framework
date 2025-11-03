@@ -262,6 +262,7 @@ class PlanStep(BaseModel):
     action: str = Field(..., description="Action name")
     target: Optional[str] = Field(None, description="Target element ID")
     args: Dict[str, Any] = Field(default_factory=dict, description="Action arguments")
+    selector_policy: str = Field(default="css", description="Selector preference: 'css' or 'xpath'")
     
     # Metadata
     confidence: float = Field(default=0.8, ge=0.0, le=1.0, description="Confidence in this step")

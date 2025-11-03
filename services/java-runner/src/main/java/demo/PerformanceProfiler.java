@@ -270,21 +270,18 @@ public class PerformanceProfiler {
     public void printDetailedReport() {
         PerformanceReport report = generateReport();
         if (report == null) return;
-        
-        System.out.println();
+
         System.out.println("=" .repeat(80));
         System.out.println(" PERFORMANCE PROFILER REPORT");
         System.out.println("=" .repeat(80));
         System.out.println("Generated: " + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
-        System.out.println();
-        
+
         // Overview
         System.out.println(" EXECUTION OVERVIEW");
         System.out.println("-".repeat(40));
         System.out.printf("Total Execution Time: %,d ms (%.2f seconds)%n", report.totalExecutionTime, report.totalExecutionTime / 1000.0);
         System.out.printf("Performance Snapshots: %d%n", report.snapshotCount);
-        System.out.println();
-        
+
         // Memory Analysis
         System.out.println(" MEMORY ANALYSIS");
         System.out.println("-".repeat(40));
@@ -292,14 +289,12 @@ public class PerformanceProfiler {
         System.out.printf("Average Heap Usage: %,d MB%n", report.avgHeapUsed / (1024 * 1024));
         System.out.printf("Memory Growth: %,d MB%n", report.memoryGrowth / (1024 * 1024));
         System.out.printf("Memory Growth Rate: %.2f KB/sec%n", report.memoryGrowthRate / 1024);
-        System.out.println();
-        
+
         // Threading Analysis
         System.out.println("🧵 THREADING ANALYSIS");
         System.out.println("-".repeat(40));
         System.out.printf("Peak Thread Count: %d%n", report.maxThreads);
-        System.out.println();
-        
+
         // Garbage Collection Analysis
         System.out.println("🗑️ GARBAGE COLLECTION ANALYSIS");
         System.out.println("-".repeat(40));
@@ -308,8 +303,7 @@ public class PerformanceProfiler {
         if (report.totalGcCollections > 0) {
             System.out.printf("Average GC Time: %.2f ms%n", (double) report.totalGcTime / report.totalGcCollections);
         }
-        System.out.println();
-        
+
         // Performance Issues
         if (!report.performanceIssues.isEmpty()) {
             System.out.println(" PERFORMANCE ISSUES DETECTED");
@@ -317,7 +311,7 @@ public class PerformanceProfiler {
             for (String issue : report.performanceIssues) {
                 System.out.println(issue);
             }
-            System.out.println();
+            
         }
         
         // Step Performance Analysis
@@ -336,7 +330,7 @@ public class PerformanceProfiler {
                 Map.Entry<String, Long> entry = sortedSteps.get(i);
                 System.out.printf("  %d. %s: %,d ms%n", i + 1, entry.getKey(), entry.getValue());
             }
-            System.out.println();
+            
         }
         
         // Memory Usage by Step
@@ -354,7 +348,7 @@ public class PerformanceProfiler {
                 Map.Entry<String, Long> entry = sortedMemorySteps.get(i);
                 System.out.printf("  %d. %s: %,d MB%n", i + 1, entry.getKey(), entry.getValue() / (1024 * 1024));
             }
-            System.out.println();
+            
         }
         
         // Recommendations

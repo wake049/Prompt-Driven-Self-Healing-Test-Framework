@@ -36,7 +36,7 @@ build/
 *.ipr
 *.iws
 
-# Java Test Framework specific files
+# Java Test Runner specific files
 services/java-runner/healing_log.json
 services/java-runner/run_summary.json
 services/java-runner/element_repository.json
@@ -60,8 +60,10 @@ package-lock.json
 *.tsbuildinfo
 .tsbuildinfo
 
-# React
-.eslintcache
+# React Frontend
+services/react-frontend/build/
+services/react-frontend/dist/
+services/react-frontend/.eslintcache
 
 # Chrome Extension Build
 chrome-extension/dist/
@@ -72,18 +74,26 @@ chrome-extension/background.js
 chrome-extension/src/*.js
 chrome-extension/src/*.js.map
 
-# React Frontend Build
-services/react-frontend/build/
-services/react-frontend/dist/
+# MCP Server
+services/mcp-server/__pycache__/
+services/mcp-server/.pytest_cache/
+services/mcp-server/storage/
+services/mcp-server/sessions/
+services/mcp-server/logs/
+services/mcp-server/element_storage.json
+services/mcp-server/healing_data/
 
-# SQL Backend
-services/sql-backend/logs/
-services/sql-backend/uploads/
+# Unified API
+services/unified-api/logs/
+services/unified-api/uploads/
+services/unified-api/__pycache__/
+services/unified-api/.pytest_cache/
 
 # Database
 *.sqlite
 *.sqlite3
 *.db
+postgres-data/
 
 # Environment Variables
 .env
@@ -91,14 +101,13 @@ services/sql-backend/uploads/
 .env.development.local
 .env.test.local
 .env.production.local
-services/sql-backend/.env
-services/ai-service/.env
-services/mcp-server/.env
+services/*//.env
 
 # Docker
 .dockerignore
 docker-compose.override.yml
 .docker/
+docker-volumes/
 
 # IDE / Editor
 .vscode/settings.json
@@ -116,36 +125,51 @@ Thumbs.db
 logs/
 services/*/logs/
 
-# Test Results
+# Test Results & Coverage
 coverage/
 test-results/
 *.xml
 actual.json
 *_actual.json
 open_actual.json
+.nyc_output
+*.lcov
 
-# AI/ML Models (if you want to exclude them)
-*.joblib
-*.pkl
-*.pickle
-models/*.joblib
+# Performance & Analytics
+performance_dashboard_*.json
+analytics_cache/
+metrics_storage/
 
-# Chrome Extension Storage
-chrome-extension/storage/
-chrome-extension/cache/
+# WebDriver
+chromedriver*
+geckodriver*
+webdriver/
+selenium-server-*.jar
 
-# Element Repository Storage
-element_storage.json
-services/mcp-server/element_storage.json
-services/mcp-server/healing_data/
+# Test Artifacts
+screenshots/
+test-reports/
+allure-results/
 
-# Temporary files
-*.tmp
-*.temp
-.cache/
-.parcel-cache/
+# Security Files
+*.pem
+*.key
+*.crt
+*.p12
+api-keys.json
+secrets.json
 
-# OS generated files
+# Backup Files (cleaned up old backup files)
+*.bak
+*.backup
+*backup*
+*old*
+*remove*
+*delete*
+*temp*
+*tmp*
+
+# OS Generated Files
 .DS_Store
 .DS_Store?
 ._*
@@ -154,107 +178,34 @@ services/mcp-server/healing_data/
 ehthumbs.db
 Thumbs.db
 
-# MCP Server temporary files
-services/mcp-server/__pycache__/
-services/mcp-server/.pytest_cache/
-services/mcp-server/storage/
-services/mcp-server/sessions/
-
-# AI Service temporary files
-services/ai-service/logs/
-services/ai-service/temp/
-
-# Runtime files
+# Runtime Files
 pid
 *.pid
 *.seed
 *.pid.lock
 
-# Coverage directory used by tools like istanbul
-coverage/
-*.lcov
-
-# nyc test coverage
-.nyc_output
-
-# Dependency directories
+# Dependency Directories
 jspm_packages/
 
-# Optional npm cache directory
+# Optional Caches
 .npm
-
-# Optional eslint cache
 .eslintcache
-
-# Optional REPL history
 .node_repl_history
-
-# Output of 'npm pack'
-*.tgz
-
-# Yarn Integrity file
-.yarn-integrity
-
-# dotenv environment variables file
-.env
-.env.test
-
-# parcel-bundler cache (https://parceljs.org/)
 .cache
 .parcel-cache
 
-# next.js build output
+# Framework Build Outputs
 .next
-
-# nuxt.js build output
 .nuxt
-
-# vuepress build output
 .vuepress/dist
-
-# Serverless directories
 .serverless
-
-# FuseBox cache
 .fusebox/
-
-# DynamoDB Local files
 .dynamodb/
-
-# TernJS port file
 .tern-port
 
-# WebDriver downloads
-chromedriver*
-geckodriver*
-webdriver/
-
-# Selenium grid
-selenium-server-*.jar
-
-# Test artifacts
-screenshots/
-test-reports/
-allure-results/
-
-# Security files
-*.pem
-*.key
-*.crt
-*.p12
-api-keys.json
-secrets.json
-
-# Backup files
-*.bak
-*.backup
-*~
-
-# Maven wrapper
+# Maven & Gradle Wrappers (keep properties, ignore jars)
 .mvn/wrapper/maven-wrapper.jar
 !.mvn/wrapper/maven-wrapper.properties
-
-# Gradle wrapper
 gradle/wrapper/gradle-wrapper.jar
 !gradle/wrapper/gradle-wrapper.properties
 

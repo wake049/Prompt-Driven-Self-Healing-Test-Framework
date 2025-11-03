@@ -25,7 +25,7 @@ public class TestSelfHealing {
             System.out.println("✓ Username locator has been intentionally broken!");
             System.out.println("✓ Now run the framework again to see self-healing in action:");
             System.out.println("  mvn exec:java \"-Dexec.mainClass=demo.Main\"");
-            System.out.println();
+            
             System.out.println("Expected behavior:");
             System.out.println("  1. Framework will try css=#BROKEN-LOCATOR (will fail)");
             System.out.println("  2. Self-healing will try alternatives from 'selectors' field");

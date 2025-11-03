@@ -61,23 +61,22 @@ public class ExecutionService {
         try {
             Alert alert = driver.switchTo().alert();
             String alertText = alert.getText();
-            System.out.println("🔔 Alert detected: " + alertText);
-            
+
             // Auto-dismiss common alerts like password change prompts
             if (alertText.toLowerCase().contains("password") || 
                 alertText.toLowerCase().contains("change") ||
                 alertText.toLowerCase().contains("update") ||
                 alertText.toLowerCase().contains("security")) {
-                System.out.println("🔀 Auto-dismissing password/security alert");
+                
                 alert.dismiss(); // or alert.accept() depending on your needs
             } else {
-                System.out.println("🔀 Auto-accepting alert");
+                
                 alert.accept();
             }
         } catch (NoAlertPresentException e) {
             // No alert present, continue normally
         } catch (Exception e) {
-            System.out.println("⚠ Warning: Could not handle alert: " + e.getMessage());
+            
         }
     }
 
@@ -92,13 +91,11 @@ public class ExecutionService {
         try {
             // Handle any alerts before executing the step
             handleAnyAlert();
-            
-            System.out.printf("[%02d] %s %s", stepIndex + 1, step.getAction(), step.getLocator());
+
             if (step.getData() != null && !step.getData().isEmpty()) {
-                System.out.print(" (" + step.getData() + ")");
+                
             }
-            System.out.print(" => ");
-            
+
             boolean success = false;
             String actualLocator = step.getLocator();
             
@@ -106,7 +103,7 @@ public class ExecutionService {
                 case "open":
                 case "open_url":
                     String urlToOpen = step.getData() != null ? step.getData() : step.getLocator();
-                    System.out.println("  DEBUG: step.getData()='" + step.getData() + "', step.getLocator()='" + step.getLocator() + "', urlToOpen='" + urlToOpen + "'");
+                    
                     success = performOpen(urlToOpen);
                     break;
                     
@@ -180,12 +177,12 @@ public class ExecutionService {
             
             if (success) {
                 result.setStatus(result.isHealed() ? "HEALED" : "PASS");
-                System.out.printf("%s (%d ms)%n", result.getStatus(), duration);
+                
             } else {
                 result.setStatus("FAIL");
-                System.out.printf("FAIL (%d ms)%n", duration);
+                
                 if (result.getError() != null) {
-                    System.out.println("    Error: " + result.getError());
+                    
                 }
                 
                 // Capture screenshot on failure
@@ -198,9 +195,7 @@ public class ExecutionService {
             result.setDuration(duration);
             result.setStatus("FAIL");
             result.setError(e.getMessage());
-            System.out.printf("FAIL (%d ms)%n", duration);
-            System.out.println("    Error: " + e.getMessage());
-            
+
             // Capture performance snapshot even on failure
             PerformanceProfiler.PerformanceSnapshot errorSnapshot = profiler.captureSnapshot(stepLabel + "_Error");
             profiler.recordStepExecution(stepLabel + "_ERROR", duration, errorSnapshot.heapMemoryUsed);
@@ -215,23 +210,22 @@ public class ExecutionService {
 
     private boolean performOpen(String url) {
         try {
-            System.out.println("  Attempting to navigate to: " + url);
+            
             driver.get(url);
             String currentUrl = driver.getCurrentUrl();
-            System.out.println("  Successfully navigated to: " + currentUrl);
-            
+
             // Handle any alerts that might appear after page load
             Thread.sleep(1000); // Give page time to load and trigger any alerts
             handleAnyAlert();
             
             return true;
         } catch (org.openqa.selenium.TimeoutException te) {
-            System.out.println("  Page load timed out; proceeding with DOM. " + te.getMessage());
+            
             // Still check for alerts even on timeout
             handleAnyAlert();
             return true; // Continue with available DOM content
         } catch (Exception e) {
-            System.out.println("  Navigation failed: " + e.getMessage());
+            
             return false;
         }
     }
@@ -288,13 +282,10 @@ public class ExecutionService {
                 
                 // Log what we're verifying
                 if (!originalExpectedText.equals(expectedText)) {
-                    System.out.println("  Verifying text: '" + originalExpectedText + "' -> '" + expectedText + "' against actual: '" + actualText + "'");
                 } else {
-                    System.out.println("  Verifying text: '" + expectedText + "' against actual: '" + actualText + "'");
                 }
                 
                 if (actualText.contains(expectedText)) {
-                    System.out.println("   Text verification passed");
                     return true;
                 } else {
                     result.setError("Text verification failed. Expected: '" + expectedText + 
@@ -330,10 +321,8 @@ public class ExecutionService {
             // If no data provided (like from wait_for action), use default wait time
             if (data == null || data.trim().isEmpty()) {
                 milliseconds = 5000; // Default 5 second wait for wait_for actions
-                System.out.println("  Using default wait time: 5000ms");
             } else {
                 milliseconds = Integer.parseInt(data);
-                System.out.println("  Using specified wait time: " + milliseconds + "ms");
             }
             
             Thread.sleep(milliseconds);
@@ -361,13 +350,14 @@ public class ExecutionService {
         Integer elementIndex = null;
         
         // Debug: Print the step data for debugging
-        System.out.println("  DEBUG: step.getData() = '" + step.getData() + "'");
         
-        // Try to parse element_index from the data field or other sources
-        if (step.getData() != null && step.getData().contains("element_index")) {
+        // Try to parse element_index or index from the data field
+        if (step.getData() != null && (step.getData().contains("element_index") || step.getData().contains("\"index\":"))) {
             try {
-                // Simple parsing for element_index parameter
+                // Simple parsing for element_index or index parameter
                 String data = step.getData();
+                
+                // Try element_index first
                 if (data.contains("\"element_index\":")) {
                     int start = data.indexOf("\"element_index\":") + "\"element_index\":".length();
                     int end = data.indexOf(",", start);
@@ -378,8 +368,20 @@ public class ExecutionService {
                     elementIndex = Integer.parseInt(indexStr);
                     System.out.println("  DEBUG: Parsed element_index = " + elementIndex);
                 }
+                // Try index field as fallback
+                else if (data.contains("\"index\":")) {
+                    int start = data.indexOf("\"index\":") + "\"index\":".length();
+                    int end = data.indexOf(",", start);
+                    if (end == -1) end = data.indexOf("}", start);
+                    if (end == -1) end = data.length();
+                    
+                    String indexStr = data.substring(start, end).trim().replace("\"", "");
+                    elementIndex = Integer.parseInt(indexStr);
+                    System.out.println("  DEBUG: Parsed index = " + elementIndex);
+                }
             } catch (Exception e) {
-                System.out.println("  Warning: Could not parse element_index from data: " + step.getData());
+                System.out.println("  Warning: Could not parse element_index/index from data: " + step.getData());
+                e.printStackTrace();
             }
         }
         
@@ -396,7 +398,6 @@ public class ExecutionService {
                         // Wait for the specific indexed element to be clickable
                         wait.until(ExpectedConditions.elementToBeClickable(element));
                     }
-                    System.out.println("  Found element by index " + elementIndex + " from " + elements.size() + " matching elements");
                     return element;
                 } else {
                     throw new NoSuchElementException("Element index " + elementIndex + " not found (found " + elements.size() + " elements)");
@@ -537,7 +538,6 @@ public class ExecutionService {
                 // Store the extracted value
                 extractedVariables.put(variableName, extractedValue);
                 
-                System.out.println("  Extracted data: " + variableName + " = '" + extractedValue + "' (from '" + extractedText + "')");
                 return true;
             } catch (Exception e) {
                 result.setError("Failed to extract data: " + e.getMessage());
@@ -562,7 +562,7 @@ public class ExecutionService {
      * Generate and print comprehensive performance report
      */
     public void printPerformanceReport() {
-        System.out.println();
+        
         System.out.println(" Generating Performance Report...");
         profiler.printDetailedReport();
     }
@@ -613,7 +613,6 @@ public class ExecutionService {
                 // Replace ${itemTotal} with calculated total
                 String totalStr = String.format("%.2f", total);
                 expression = expression.replace("${itemTotal}", totalStr);
-                System.out.println("  Calculated itemTotal: " + totalStr + " (from " + extractedVariables.size() + " price variables)");
             }
             
             return expression;

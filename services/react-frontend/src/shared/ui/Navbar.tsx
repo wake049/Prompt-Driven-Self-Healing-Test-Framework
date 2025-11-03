@@ -1,14 +1,11 @@
 import { Link, useLocation } from 'react-router-dom';
-
 const Navbar = () => {
   const location = useLocation();
-
   const navItems = [
     { path: '/', label: 'Elements', icon: '' },
     { path: '/policy', label: 'Policy Dashboard', icon: '🚦' },
     { path: '/prompts', label: 'Prompts', icon: '📝' }
   ];
-
   const navbarStyle: React.CSSProperties = {
     background: 'var(--primary-gradient)',
     color: 'white',
@@ -16,7 +13,6 @@ const Navbar = () => {
     padding: '0',
     margin: '0'
   };
-
   const containerStyle: React.CSSProperties = {
     maxWidth: '1200px',
     margin: '0 auto',
@@ -26,19 +22,16 @@ const Navbar = () => {
     alignItems: 'center',
     height: '64px'
   };
-
   const titleStyle: React.CSSProperties = {
     fontSize: '1.25rem',
     fontWeight: 'bold',
     margin: '0'
   };
-
   const navLinksStyle: React.CSSProperties = {
     display: 'flex',
     alignItems: 'center',
     gap: '1rem'
   };
-
   const linkStyle = (isActive: boolean): React.CSSProperties => ({
     padding: '0.5rem 1rem',
     borderRadius: 'var(--border-radius-sm)',
@@ -52,14 +45,12 @@ const Navbar = () => {
     alignItems: 'center',
     gap: '0.5rem'
   });
-
   return (
     <nav style={navbarStyle}>
       <div style={containerStyle}>
         <div>
           <h1 style={titleStyle}>Self-Healing Test Framework</h1>
         </div>
-        
         <div style={navLinksStyle}>
           {navItems.map((item) => (
             <Link
@@ -86,5 +77,4 @@ const Navbar = () => {
     </nav>
   );
 };
-
 export default Navbar;

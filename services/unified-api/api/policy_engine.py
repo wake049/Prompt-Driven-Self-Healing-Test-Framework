@@ -867,29 +867,7 @@ async def update_policy_configurations(configurations: Dict[str, Any] = Body(...
         else:
             project_id = project_result["id"]
         
-        # Check if config already exists in policy_decisions table
-        check_query = """
-        SELECT id FROM policy.policy_decisions WHERE context->>'config_type' = $1
-        """
-        result = await db.execute_one(check_query, config_id)
-        
-        if result:
-            # Update existing config in policy_decisions
-            update_query = """
-            UPDATE policy.policy_decisions 
-            SET context = $1, created_at = NOW()
-            WHERE context->>'config_type' = $2
-            """
-            context_data = {"config_type": config_id, "configurations": configurations}
-            await db.execute_command(update_query, json.dumps(context_data), config_id)
-        else:
-            # Insert new config into policy_decisions
-            insert_query = """
-            INSERT INTO policy.policy_decisions (id, project_id, environment_id, pack_id, policy_rule_id, decision, confidence, context, decided_by, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
-            """
-            context_data = {"config_type": config_id, "configurations": configurations}
-        # Check for existing system user or create one
+        # Check for existing system user or create one first
         user_query = """
         SELECT id FROM core.users WHERE email = $1 LIMIT 1
         """
@@ -905,6 +883,29 @@ async def update_policy_configurations(configurations: Dict[str, Any] = Body(...
             await db.execute_command(create_user_query, system_user_id, "system@dashboard.local", "Dashboard System", True)
         else:
             system_user_id = user_result["id"]
+
+        # Check if config already exists in policy_decisions table
+        check_query = """
+        SELECT id FROM policy.policy_decisions WHERE context->>'config_type' = $1
+        """
+        result = await db.execute_one(check_query, config_id)
+        
+        context_data = {"config_type": config_id, "configurations": configurations}
+        
+        if result:
+            # Update existing config in policy_decisions
+            update_query = """
+            UPDATE policy.policy_decisions 
+            SET context = $1, created_at = NOW()
+            WHERE context->>'config_type' = $2
+            """
+            await db.execute_command(update_query, json.dumps(context_data), config_id)
+        else:
+            # Insert new config into policy_decisions
+            insert_query = """
+            INSERT INTO policy.policy_decisions (id, project_id, environment_id, pack_id, policy_rule_id, decision, confidence, context, decided_by, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+            """
             await db.execute_command(insert_query, 
                                    str(uuid.uuid4()),  # id
                                    project_id,  # project_id (now required)

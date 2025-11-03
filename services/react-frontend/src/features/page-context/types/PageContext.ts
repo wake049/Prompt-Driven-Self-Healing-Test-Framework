@@ -14,7 +14,6 @@ export interface PageContext {
   usageCount: number;
   userUploaded: boolean;
 }
-
 export interface PageContextFormData {
   pageUrl: string;
   pageTitle: string;

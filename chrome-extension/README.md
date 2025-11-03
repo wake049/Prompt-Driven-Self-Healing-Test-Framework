@@ -1,33 +1,50 @@
-# MCP Test Runner Chrome Extension
+# MCP-Only Test Runner Chrome Extension
 
-A Chrome Extension (Manifest V3) that provides a frontend-only test runner for web applications using MCP-style tools.
+A Chrome Extension (Manifest V3) that requires an active MCP server connection to function. This extension provides no fallback modes and operates exclusively through proper MCP protocol communication.
+
+## ⚠️ Requirements
+
+**MCP Server Required**: This extension requires an active MCP server connection to function. Without the MCP server running, the extension will be disabled with no fallback functionality.
 
 ## Features
 
-### Core MCP Tools
-- **run_action**: Execute UI actions (click, type) on page elements
-- **verify.section**: Run verification checks from stored presets
-- **context.put/get/expectEqual**: Manage test context and assertions
-- **elements.add/get**: Element repository for selector management
+### MCP Protocol Integration
+- **Pure MCP Communication**: All functionality provided through MCP server
+- **WebSocket Transport**: Real-time communication with MCP server
+- **No Fallback Modes**: Extension disabled without MCP connection
+- **Proper JSON-RPC 2.0**: Compliant MCP protocol implementation
 
-### Self-Healing Capabilities
-- Priority-based selector fallback system
-- Automatic element location recovery
-- Intelligent selector generation
+### Core MCP Tools (via Server)
+- **run_action**: Execute UI actions through MCP server
+- **verify.section**: Run verification checks via MCP server
+- **context.put/get/expectEqual**: Manage test context through MCP
+- **elements.add/get**: Element repository via MCP server
+- **fetch_test_data**: Test data access through MCP
+- **bulk_generate_locators**: AI-powered locator generation via MCP
 
-### Recording & Element Discovery
-- Visual element picker
-- Automatic selector generation
-- Element ID suggestions
-- Node data capture (tag, text, attributes)
+### MCP Resources Access
+- **Element Repository**: Access element data via MCP resources
+- **Execution History**: View test executions through MCP
+- **Statistics**: Repository and healing stats via MCP
 
 ## Quick Start
 
-### 1. Installation
+### 1. Start MCP Server (Required)
+```bash
+cd services/mcp-server
+python main.py --ws  # Start MCP server with WebSocket transport
+```
+
+### 2. Install Extension
 1. Clone the repository
 2. Run `npm install` in the chrome-extension directory
 3. Run `npm run build` to compile TypeScript
 4. Load the `dist` folder as an unpacked extension in Chrome
+
+### 3. Verify Connection
+- Open the extension popup
+- Verify "✅ MCP client connected" status
+- If connection fails, extension functionality will be disabled
 
 ### 2. Basic Usage
 
