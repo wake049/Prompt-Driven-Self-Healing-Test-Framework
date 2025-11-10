@@ -1,0 +1,129 @@
+version: '3.8'
+
+services:
+  unified-api:
+    build:
+      context: services/unified-api
+      dockerfile: Dockerfile
+    container_name: unified-api
+    ports:
+      - "8000:8000"
+    environment:
+      - DB_HOST=prompt-qa.choawqiq4n3x.us-east-2.rds.amazonaws.com
+      - DB_PORT=5432
+      - DB_NAME=prompt_qa_db
+      - DB_USER=prompt_qa
+      - DB_PASSWORD=St70698!2#4
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - AI_SERVICE_URL=http://localhost:8000
+      - ENVIRONMENT=production
+      - LOG_LEVEL=INFO
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: awslogs
+      options:
+        awslogs-group: /aws/ecs/self-healing-test-framework
+        awslogs-region: us-east-1
+        awslogs-stream-prefix: unified-api
+
+  mcp-server:
+    build:
+      context: services/mcp-server
+      dockerfile: Dockerfile
+    container_name: mcp-server
+    ports:
+      - "8001:8001"
+    environment:
+      - MCP_HOST=0.0.0.0
+      - MCP_PORT=8001
+      - MCP_AUTH_REQUIRED=true
+      - MCP_DEBUG=false
+      - ENVIRONMENT=production
+      - MCP_API_KEY=${MCP_API_KEY}
+      - UNIFIED_API_URL=https://testhelix.com/api
+      - DB_HOST=prompt-qa.choawqiq4n3x.us-east-2.rds.amazonaws.com
+      - DB_PORT=5432
+      - DB_NAME=prompt_qa_db
+      - DB_USER=prompt_qa
+      - DB_PASSWORD=St70698!2#4
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: awslogs
+      options:
+        awslogs-group: /aws/ecs/self-healing-test-framework
+        awslogs-region: us-east-1
+        awslogs-stream-prefix: mcp-server
+
+  react-frontend:
+    build:
+      context: services/react-frontend
+      dockerfile: Dockerfile
+    container_name: react-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_BASE_URL=https://testhelix.com/api
+      - REACT_APP_MCP_SERVER_URL=wss://testhelix.com/mcp
+      - NODE_ENV=production
+      - FRONTEND_DOMAIN=testhelix.com
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: awslogs
+      options:
+        awslogs-group: /aws/ecs/self-healing-test-framework
+        awslogs-region: us-east-1
+        awslogs-stream-prefix: react-frontend
+
+  java-runner:
+    build:
+      context: services/java-runner
+      dockerfile: Dockerfile
+    container_name: java-runner
+    ports:
+      - "8080:8080"
+    environment:
+      - API_BASE_URL=https://testhelix.com/api
+      - SELENIUM_HEADLESS=true
+      - DISPLAY=:99
+      - ENVIRONMENT=production
+    restart: unless-stopped
+    volumes:
+      - screenshots-volume:/app/screenshots
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: awslogs
+      options:
+        awslogs-group: /aws/ecs/self-healing-test-framework
+        awslogs-region: us-east-1
+        awslogs-stream-prefix: java-runner
+
+volumes:
+  screenshots-volume:
+    driver: local
+
+networks:
+  default:
+    driver: bridge
