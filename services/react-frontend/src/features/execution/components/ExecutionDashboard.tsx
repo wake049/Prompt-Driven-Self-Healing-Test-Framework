@@ -1,264 +1,596 @@
 import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
-import unifiedApiClient from '../../../shared/utils/unifiedApiClient';
-import ExecutionStepsModal from './ExecutionStepsModal';
-import { executionApiService } from '../api';
+import { useNavigate } from 'react-router-dom';
+import { executionApiService } from '../../../services/executionApiService';
+import { MCPStatus } from '../../../components/MCPStatus';
 import { useAuth } from '../../../contexts/AuthContext';
-<<<<<<< Updated upstream
-=======
 import { useTheme } from '../../../contexts/ThemeContext';
 import { DashboardSkeleton, StatGridSkeleton, ExecutionListSkeleton } from '../../../shared/ui/SkeletonLoader';
 import { ProgressRing, SimpleBarChart } from '../../../shared/ui/Charts';
-import EnhancedStatusBadge from '../../../shared/ui/EnhancedStatusBadge';
-import { RefreshCw, TrendingUp, TrendingDown, Clock, CheckCircle, XCircle, Activity, PieChart, MessageSquare, Sparkles, Link, Database, AlertTriangle, Wrench } from 'lucide-react';
->>>>>>> Stashed changes
+import { RefreshCw, TrendingUp, TrendingDown, Clock, CheckCircle, XCircle, Activity, PieChart, MessageSquare, Sparkles, Link, Database } from 'lucide-react';
 
+// Types
+interface ExecutionSummaryResponse {
+  execution_id: string;
+  summary_text: string; // Changed from summary to match API
+  generated_at: string;
+  model_used: string;
+  key_insights: Array<{
+    type: string;
+    message: string;
+    severity: string;
+  }>;
+  recommendations: string[];
+  performance_metrics: {
+    avg_step_time: number;
+    slowest_step: string;
+    fastest_step: string;
+  };
+}
 const DashboardContainer = styled.div`
-  padding: 24px;
-  max-width: 1200px;
+  padding: 32px 64px;
+  max-width: 1800px;
   margin: 0 auto;
+  background: ${props => props.theme.colors.background};
+  min-height: 100vh;
+  width: 100%;
+  @media (max-width: 768px) {
+    padding: 16px;
+    max-width: 100%;
+  }
 `;
-
 const DashboardHeader = styled.div`
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 32px;
+  margin-bottom: 48px;
+  background: ${props => props.theme.colors.surface};
+  padding: 32px 40px;
+  border-radius: 16px;
+  box-shadow: ${props => props.theme.shadows.medium};
+  @media (max-width: 768px) {
+    flex-direction: column;
+    gap: 16px;
+    padding: 20px;
+    margin-bottom: 24px;
+  }
 `;
-
 const DashboardTitle = styled.h1`
-  font-size: 28px;
+  font-size: 32px;
   font-weight: 700;
-  color: #212529;
+  color: ${props => props.theme.colors.text};
   margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
 `;
-
 const RefreshButton = styled.button`
-  background: #0066cc;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
   border: none;
-  padding: 8px 16px;
-  border-radius: 6px;
-  font-weight: 500;
+  padding: 12px 24px;
+  border-radius: 12px;
+  font-weight: 600;
   cursor: pointer;
-  transition: background 0.2s ease;
-
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
   &:hover {
-    background: #0052a3;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
   }
-
   &:disabled {
-    background: #6c757d;
+    background: #a0aec0;
     cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
   }
 `;
-
 const StatsGrid = styled.div`
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-  gap: 20px;
-  margin-bottom: 32px;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 32px;
+  margin-bottom: 48px;
+  @media (max-width: 768px) {
+    grid-template-columns: 1fr;
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+  @media (min-width: 1600px) {
+    grid-template-columns: repeat(4, 1fr);
+  }
 `;
-
-const StatCard = styled.div`
-  background: white;
-  border: 1px solid #e9ecef;
-  border-radius: 8px;
-  padding: 24px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+const ChartSection = styled.div`
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  gap: 32px;
+  margin-bottom: 48px;
+  @media (max-width: 1024px) {
+    grid-template-columns: 1fr;
+  }
+  @media (max-width: 768px) {
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+  @media (min-width: 1600px) {
+    grid-template-columns: 1.2fr 2.8fr;
+    gap: 40px;
+  }
 `;
-
+const ChartCard = styled.div`
+  background: ${props => props.theme.colors.surface};
+  border-radius: 16px;
+  padding: 32px;
+  box-shadow: ${props => props.theme.shadows.medium};
+`;
+const ChartTitle = styled.h3`
+  font-size: 18px;
+  font-weight: 600;
+  color: ${props => props.theme.colors.text};
+  margin: 0 0 24px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+`;
+const StatCard = styled.div<{ $variant?: 'success' | 'danger' | 'warning' | 'info' }>`
+  background: ${props => props.theme.colors.surface};
+  border-radius: 16px;
+  padding: 32px;
+  box-shadow: ${props => props.theme.shadows.medium};
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+  &:before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: ${props => {
+      switch (props.$variant) {
+        case 'success': return `linear-gradient(90deg, ${props.theme.colors.success}, ${props.theme.colors.success}dd)`;
+        case 'danger': return `linear-gradient(90deg, ${props.theme.colors.error}, ${props.theme.colors.error}dd)`;
+        case 'warning': return `linear-gradient(90deg, ${props.theme.colors.warning}, ${props.theme.colors.warning}dd)`;
+        case 'info': return `linear-gradient(90deg, ${props.theme.colors.primary}, ${props.theme.colors.primary}dd)`;
+        default: return `linear-gradient(90deg, ${props.theme.colors.primary}, ${props.theme.colors.secondary})`;
+      }
+    }};
+  }
+  &:hover {
+    transform: translateY(-4px);
+    box-shadow: ${props => props.theme.shadows.large};
+  }
+`;
 const StatTitle = styled.h3`
   font-size: 14px;
   font-weight: 600;
-  color: #6c757d;
-  margin: 0 0 8px 0;
+  color: ${props => props.theme.colors.textSecondary};
+  margin: 0 0 16px 0;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
-`;
-
-const StatValue = styled.div`
-  font-size: 32px;
-  font-weight: 700;
-  color: #212529;
-  margin-bottom: 4px;
-`;
-
-const StatChange = styled.div<{ positive?: boolean }>`
-  font-size: 14px;
-  color: ${props => props.positive ? '#28a745' : '#dc3545'};
-  font-weight: 500;
-`;
-
-const ExecutionList = styled.div`
-  background: white;
-  border: 1px solid #e9ecef;
-  border-radius: 8px;
-  overflow: hidden;
-`;
-
-const ExecutionListHeader = styled.div`
-  background: #f8f9fa;
-  padding: 16px 24px;
-  border-bottom: 1px solid #e9ecef;
-  font-weight: 600;
-  color: #495057;
-`;
-
-const ExecutionItem = styled.div<{ clickable?: boolean }>`
-  display: grid;
-  grid-template-columns: 2fr 1fr 1fr 1fr 120px;
+  letter-spacing: 1px;
+  display: flex;
   align-items: center;
-  padding: 16px 24px;
-  border-bottom: 1px solid #f8f9fa;
-  transition: background 0.2s ease;
-  cursor: ${props => props.clickable ? 'pointer' : 'default'};
-
+  gap: 8px;
+`;
+const StatValue = styled.div`
+  font-size: 36px;
+  font-weight: 800;
+  color: ${props => props.theme.colors.text};
+  margin-bottom: 8px;
+  line-height: 1;
+`;
+const StatChange = styled.div<{ $positive?: boolean }>`
+  font-size: 14px;
+  color: ${props => props.$positive ? props.theme.colors.success : props.theme.colors.error};
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+`;
+const ExecutionList = styled.div`
+  background: ${props => props.theme.colors.surface};
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: ${props => props.theme.shadows.medium};
+`;
+const ExecutionListHeader = styled.div`
+  background: linear-gradient(135deg, ${props => props.theme.colors.primary} 0%, ${props => props.theme.colors.secondary} 100%);
+  padding: 24px 32px;
+  color: white;
+  font-weight: 700;
+  font-size: 20px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+`;
+const ExecutionItem = styled.div<{ $clickable?: boolean }>`
+  display: grid;
+  grid-template-columns: 140px 3fr 140px 120px 100px 100px 100px 140px 140px;
+  align-items: flex-start;
+  padding: 20px 32px;
+  border-bottom: 1px solid ${props => props.theme.colors.border};
+  transition: all 0.2s ease;
+  cursor: ${props => props.$clickable ? 'pointer' : 'default'};
+  gap: 24px;
+  position: relative;
+  min-height: 60px;
   &:hover {
-    background: ${props => props.clickable ? '#e3f2fd' : '#f8f9fa'};
+    background: ${props => props.$clickable ? 'rgba(99, 102, 241, 0.05)' : 'rgba(0, 0, 0, 0.02)'};
+    transform: ${props => props.$clickable ? 'translateY(-1px)' : 'none'};
+    box-shadow: ${props => props.$clickable ? '0 2px 8px rgba(0, 0, 0, 0.1)' : 'none'};
   }
-
   &:last-child {
     border-bottom: none;
   }
+  @media (max-width: 1200px) {
+    grid-template-columns: 1fr 2fr 100px 80px 100px;
+    gap: 16px;
+    /* Hide some columns on smaller screens */
+    > div:nth-child(4), /* Steps */
+    > div:nth-child(5), /* Passed */
+    > div:nth-child(6), /* Failed */
+    > div:nth-child(9)  /* Actions */ {
+      display: none;
+    }
+  }
+  @media (max-width: 768px) {
+    grid-template-columns: 1fr;
+    gap: 8px;
+    padding: 16px;
+    text-align: left;
+  }
 `;
-
-const StatusBadge = styled.span<{ status: string }>`
-  padding: 4px 8px;
-  border-radius: 12px;
-  font-size: 12px;
-  font-weight: 600;
+const StatusBadge = styled.span<{ $status: string }>`
+  padding: 8px 16px;
+  border-radius: 24px;
+  font-size: 13px;
+  font-weight: 700;
   text-transform: uppercase;
+  letter-spacing: 0.5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   background: ${props => {
-    switch (props.status) {
-      case 'success': return '#d4edda';
-      case 'completed': return '#d4edda';
-      case 'running': return '#fff3cd';
-      case 'failed': return '#f8d7da';
-      case 'error': return '#f8d7da';
-      default: return '#e2e3e5';
+    switch (props.$status) {
+      case 'success': return 'linear-gradient(135deg, #68d391, #38a169)';
+      case 'completed': return 'linear-gradient(135deg, #68d391, #38a169)';
+      case 'running': return 'linear-gradient(135deg, #fbd38d, #ed8936)';
+      case 'failed': return 'linear-gradient(135deg, #fc8181, #e53e3e)';
+      case 'error': return 'linear-gradient(135deg, #fc8181, #e53e3e)';
+      default: return 'linear-gradient(135deg, #cbd5e0, #a0aec0)';
     }
   }};
+  color: white;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  min-width: 80px;
+  justify-content: center;
+`;
+const ActionButton = styled.button`
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+  &:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+  }
+`;
+const ExecutionId = styled.div`
+  font-family: 'Monaco', 'Consolas', monospace;
+  font-weight: 700;
+  color: ${props => props.theme.colors.primary};
+  font-size: 14px;
+  background: rgba(102, 126, 234, 0.1);
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(102, 126, 234, 0.2);
+`;
+const ExecutionDescription = styled.div`
+  font-weight: 600;
+  color: ${props => props.theme.colors.text};
+  font-size: 15px;
+  line-height: 1.4;
+  small {
+    color: ${props => props.theme.colors.textSecondary};
+    font-weight: 400;
+    font-size: 13px;
+    display: block;
+    margin-top: 4px;
+  }
+`;
+const MetricValue = styled.div<{ type?: 'success' | 'error' | 'neutral' }>`
+  font-weight: 700;
+  font-size: 16px;
   color: ${props => {
-    switch (props.status) {
-      case 'success': return '#155724';
-      case 'completed': return '#155724';
-      case 'running': return '#856404';
-      case 'failed': return '#721c24';
-      case 'error': return '#721c24';
-      default: return '#383d41';
+    switch (props.type) {
+      case 'success': return props.theme.colors.success;
+      case 'error': return props.theme.colors.error;
+      default: return props.theme.colors.text;
     }
   }};
 `;
-
+const DateValue = styled.div`
+  color: ${props => props.theme.colors.textSecondary};
+  font-weight: 500;
+  font-size: 14px;
+`;
+const StatusColumn = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+  min-width: 140px;
+`;
+const FailureReason = styled.div`
+  background: rgba(229, 62, 62, 0.1);
+  border: 1px solid rgba(229, 62, 62, 0.2);
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin-top: 4px;
+  font-size: 12px;
+  color: ${props => props.theme.colors.error};
+  max-width: 300px;
+  line-height: 1.4;
+  word-wrap: break-word;
+  white-space: normal;
+`;
 const LoadingSpinner = styled.div`
   display: flex;
   justify-content: center;
   align-items: center;
   padding: 40px;
   font-size: 16px;
-  color: #6c757d;
+  color: ${props => props.theme.colors.textSecondary};
 `;
-
 const ErrorMessage = styled.div`
-  background: #f8d7da;
-  color: #721c24;
+  background: ${props => props.theme.colors.error}20;
+  color: ${props => props.theme.colors.error};
   padding: 16px;
   border-radius: 6px;
   margin-bottom: 20px;
+  border: 1px solid ${props => props.theme.colors.error}40;
 `;
-
+const SummaryButton = styled.button<{ $isGenerating?: boolean }>`
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  color: white;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+  margin-left: 8px;
+  &:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+  }
+  &:disabled {
+    background: #a0aec0;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+  }
+  ${props => props.$isGenerating && `
+    background: linear-gradient(45deg, #667eea, #764ba2, #667eea);
+    background-size: 200% 200%;
+    animation: gradient 2s ease infinite;
+  `}
+  @keyframes gradient {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+  }
+`;
+const SummaryCard = styled.div<{ isExpanded?: boolean }>`
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.05), rgba(118, 75, 162, 0.05));
+  border: 1px solid rgba(102, 126, 234, 0.2);
+  border-radius: 8px;
+  padding: 12px;
+  margin-top: 8px;
+  transition: all 0.3s ease;
+  ${props => props.isExpanded && `
+    box-shadow: 0 4px 16px rgba(102, 126, 234, 0.15);
+    border-color: rgba(102, 126, 234, 0.4);
+  `}
+`;
+const SummaryText = styled.div`
+  color: ${props => props.theme.colors.text};
+  font-size: 13px;
+  line-height: 1.5;
+  margin-bottom: 8px;
+`;
+const InsightsList = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+`;
+const InsightTag = styled.span`
+  background: rgba(102, 126, 234, 0.1);
+  color: ${props => props.theme.colors.primary};
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 500;
+  border: 1px solid rgba(102, 126, 234, 0.2);
+`;
+const BindingCard = styled.div<{ isExpanded?: boolean }>`
+  background: linear-gradient(135deg, rgba(76, 175, 80, 0.05), rgba(139, 195, 74, 0.05));
+  border: 1px solid rgba(76, 175, 80, 0.2);
+  border-radius: 8px;
+  padding: 12px;
+  margin-top: 8px;
+  transition: all 0.3s ease;
+  ${props => props.isExpanded && `
+    box-shadow: 0 4px 16px rgba(76, 175, 80, 0.15);
+    border-color: rgba(76, 175, 80, 0.4);
+  `}
+`;
+const BindingHeader = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+`;
+const BindingTitle = styled.h4`
+  color: ${props => props.theme.colors.text};
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+`;
+const BindingCount = styled.span`
+  background: rgba(76, 175, 80, 0.2);
+  color: ${props => props.theme.colors.text};
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+`;
+const BindingList = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+`;
+const BindingItem = styled.div`
+  background: rgba(255, 255, 255, 0.5);
+  padding: 8px 12px;
+  border-radius: 6px;
+  border-left: 3px solid rgba(76, 175, 80, 0.6);
+`;
+const BindingName = styled.div`
+  font-weight: 600;
+  color: ${props => props.theme.colors.text};
+  font-size: 13px;
+`;
+const BindingDetails = styled.div`
+  font-size: 11px;
+  color: ${props => props.theme.colors.textSecondary};
+  margin-top: 2px;
+`;
+const BindingButton = styled.button<{ $isLoading?: boolean }>`
+  background: linear-gradient(135deg, #4caf50, #8bc34a);
+  color: white;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: 0 2px 8px rgba(76, 175, 80, 0.3);
+  margin-left: 8px;
+  &:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(76, 175, 80, 0.4);
+  }
+  &:disabled {
+    background: #a0aec0;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+  }
+  ${props => props.$isLoading && `
+    background: linear-gradient(45deg, #4caf50, #8bc34a, #4caf50);
+    background-size: 200% 200%;
+    animation: gradient 2s ease infinite;
+  `}
+`;
 interface ExecutionStats {
   total_executions: number;
   successful_executions: number;
   failed_executions: number;
-  pending_review_executions: number; // NEW: Count of executions needing review
   success_rate: number;
   recent_executions_24h: number;
   avg_execution_time: number;
-  healing_rate?: number; // NEW: Percentage of executions that required healing
 }
-
 interface ExecutionRecord {
   execution_id: string;
+  prompt_id?: string;
   test_name: string;
-<<<<<<< Updated upstream
-  status: string;
-=======
   prompt_description?: string;
-  status: 'pass' | 'pending_review' | 'failed' | 'completed' | 'running'; // UPDATED: New status types
->>>>>>> Stashed changes
+  status: string;
   success_rate: number;
   start_time: string;
   duration?: number;
   steps_completed?: number;
   total_steps?: number;
-  pending_review_steps?: number; // NEW: Steps that passed but required healing
-  healed_steps?: number; // NEW: Total healed steps count
 }
-
 const ExecutionDashboard: React.FC = () => {
+  const { theme } = useTheme();
+  const navigate = useNavigate();
   const [stats, setStats] = useState<ExecutionStats | null>(null);
   const [executions, setExecutions] = useState<ExecutionRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selectedExecutionId, setSelectedExecutionId] = useState<string | null>(null);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-
+  
+  // M7: LLM Summary state
+  const [summaries, setSummaries] = useState<Record<string, ExecutionSummaryResponse>>({});
+  const [generatingSummaries, setGeneratingSummaries] = useState<Set<string>>(new Set());
+  const [expandedSummaries, setExpandedSummaries] = useState<Set<string>>(new Set());
+  
+  // M7: Data Resolver Traceability state
+  const [bindingUsages, setBindingUsages] = useState<Record<string, any>>({});
+  const [loadingBindings, setLoadingBindings] = useState<Set<string>>(new Set());
+  const [expandedBindings, setExpandedBindings] = useState<Set<string>>(new Set());
   const fetchDashboardData = async () => {
     try {
       setLoading(true);
       setError(null);
-<<<<<<< Updated upstream
-
+      
       // Fetch real execution statistics from authenticated API
-      const statsData = await executionApiService.getExecutionStats();
-      const realStats: ExecutionStats = {
-        total_executions: statsData.total_executions || 0,
-        successful_executions: statsData.successful_executions || 0,
-        failed_executions: statsData.failed_executions || 0,
-        success_rate: (statsData.success_rate || 0) / 100, // API sends percentages, convert to decimal for internal use
-        recent_executions_24h: statsData.recent_executions_24h || 0,
-        avg_execution_time: statsData.avg_execution_time || 0
-      };
-      setStats(realStats);
-
-      // Fetch real execution logs from authenticated API
-      const executionsData = await executionApiService.getRecentExecutions({ limit: 20 });
-      const realExecutions: ExecutionRecord[] = executionsData.map((exec: any) => ({
-        execution_id: exec.id || 'unknown',
-        test_name: exec.test_name || 'Unknown Test',
-        status: exec.status || 'unknown',
-        success_rate: (exec.success_rate || 0) / 100, // API now sends percentages, convert to decimal for internal use
-        start_time: exec.started_at || new Date().toISOString(),
-        duration: exec.duration_seconds || 0,
-        steps_completed: exec.passed_steps || 0,
-        total_steps: exec.total_steps || 0
-      }));
-=======
+      console.log('🐛 Starting getExecutionStats call...');
       try {
         const statsData = await executionApiService.getExecutionStats();
+        console.log('🐛 Raw stats response:', statsData);
         
         // Extract the actual stats data from the MCP response
-        const statsValues = statsData.data || statsData;
+        const statsValues = statsData?.data || statsData || {}; // Handle both nested and direct response formats
+        console.log('🐛 Stats values:', statsValues);
         
         const realStats: ExecutionStats = {
           total_executions: statsValues.total_executions || 0,
           successful_executions: statsValues.successful_executions || 0,
           failed_executions: statsValues.failed_executions || 0,
-          pending_review_executions: statsValues.pending_review_executions || 0, // NEW: Support new status
           success_rate: (statsValues.success_rate || 0) / 100, // API sends percentages, convert to decimal for internal use
           recent_executions_24h: statsValues.recent_executions_24h || 0,
-          avg_execution_time: statsValues.avg_execution_time || 0,
-          healing_rate: statsValues.healing_rate ? (statsValues.healing_rate / 100) : undefined // NEW: Healing rate
+          avg_execution_time: statsValues.avg_execution_time || 0
         };
+        console.log('Mapped stats:', realStats);
         setStats(realStats);
       } catch (statsError) {
+        console.error('Error in getExecutionStats:', statsError);
+        console.error('Stats error details:', {
+          message: statsError instanceof Error ? statsError.message : String(statsError),
+          stack: statsError instanceof Error ? statsError.stack : undefined,
+          name: statsError instanceof Error ? statsError.name : 'Unknown'
+        });
       }
       // Fetch real execution logs from authenticated API
       const executionsResponse = await executionApiService.getRecentExecutions({ limit: 20 });
+      console.log('Raw executions response:', executionsResponse);
       
-      let executionsData = [];
+      let executionsData: any[] = [];
       
       // Handle different MCP response formats
       if (Array.isArray(executionsResponse)) {
@@ -273,6 +605,7 @@ const ExecutionDashboard: React.FC = () => {
             const parsed = JSON.parse(content.text);
             executionsData = Array.isArray(parsed) ? parsed : (parsed?.data || []);
           } catch (e) {
+            console.error('Failed to parse MCP content:', e);
             executionsData = [];
           }
         }
@@ -281,7 +614,11 @@ const ExecutionDashboard: React.FC = () => {
                         (executionsResponse.result?.data || []);
       }
       
+      console.log('🐛 Raw executions response:', executionsResponse);
+      console.log('🐛 Raw executionsData before mapping:', executionsData);
+      
       const realExecutions: ExecutionRecord[] = executionsData.map((exec: any, index: number) => {
+        console.log(`🐛 Processing execution ${index}:`, exec);
         return {
           execution_id: exec.id || exec.execution_id || 'unknown',
           prompt_id: exec.prompt_id || '',
@@ -295,39 +632,18 @@ const ExecutionDashboard: React.FC = () => {
           total_steps: exec.total_steps || 0
         };
       });
->>>>>>> Stashed changes
+      console.log('🐛 Final mapped executions:', realExecutions);
       setExecutions(realExecutions);
-
     } catch (err) {
-<<<<<<< Updated upstream
-      console.error('Error fetching real dashboard data:', err);
-      
-      // Fallback to mock data if API fails
-      console.log('Falling back to mock data...');
-      const mockStats: ExecutionStats = {
-        total_executions: 0,
-        successful_executions: 0,
-        failed_executions: 0,
-        success_rate: 0,
-        recent_executions_24h: 0,
-        avg_execution_time: 0
-      };
-      setStats(mockStats);
-      setExecutions([]);
-      
-      setError('Could not connect to execution database. Showing empty dashboard.');
-=======
+      console.error(err);
       setError('Failed to load execution data. Please check your connection and try again.');
->>>>>>> Stashed changes
     } finally {
       setLoading(false);
     }
   };
-
   useEffect(() => {
     fetchDashboardData();
   }, []);
-
   const formatDuration = (seconds?: number) => {
     if (!seconds) return 'N/A';
     if (seconds < 60) return `${seconds}s`;
@@ -335,7 +651,6 @@ const ExecutionDashboard: React.FC = () => {
     const remainingSeconds = seconds % 60;
     return `${minutes}m ${remainingSeconds}s`;
   };
-
   const formatDateTime = (dateString: string) => {
     try {
       return new Date(dateString).toLocaleString();
@@ -343,44 +658,40 @@ const ExecutionDashboard: React.FC = () => {
       return dateString;
     }
   };
-
   const handleExecutionClick = (executionId: string) => {
-    setSelectedExecutionId(executionId);
-    setIsModalOpen(true);
+    navigate(`/execution/${executionId}`);
   };
-<<<<<<< Updated upstream
-
-  const handleCloseModal = () => {
-    setIsModalOpen(false);
-    setSelectedExecutionId(null);
-=======
   // M7: LLM Summary Functions
   const generateSummary = async (executionId: string, style: "brief" | "detailed" = "brief") => {
     if (generatingSummaries.has(executionId)) return;
     setGeneratingSummaries(prev => new Set(prev).add(executionId));
+    
     try {
       const summaryResponse = await executionApiService.generateExecutionSummary(executionId);
+      const summary: ExecutionSummaryResponse = {
+        execution_id: summaryResponse.execution_id || executionId,
+        summary_text: summaryResponse.summary_text || "Summary generated successfully",
+        generated_at: summaryResponse.generated_at || new Date().toISOString(),
+        model_used: summaryResponse.model_used || "gpt-4",
+        key_insights: (summaryResponse as any).key_insights || [], // Will be populated from API if available
+        recommendations: (summaryResponse as any).recommendations || [], // Will be populated from API if available
+        performance_metrics: (summaryResponse as any).performance_metrics || {
+          avg_step_time: 0,
+          slowest_step: '',
+          fastest_step: ''
+        }
+      };
+      
       setSummaries(prev => ({
         ...prev,
-        [executionId]: {
-          execution_id: summaryResponse.execution_id,
-          summary_text: summaryResponse.summary_text,
-          generated_at: summaryResponse.generated_at,
-          model_used: summaryResponse.model_used,
-          key_insights: [], // Will be populated from API if available
-          recommendations: [], // Will be populated from API if available
-          performance_metrics: {
-            avg_step_time: 0,
-            slowest_step: '',
-            fastest_step: ''
-          }
-        }
+        [executionId]: summary
       }));
       // Auto-expand for detailed summaries
       if (style === "detailed") {
         setExpandedSummaries(prev => new Set(prev).add(executionId));
       }
     } catch (err) {
+      console.error(err);
       setError('Failed to generate summary. Please try again.');
     } finally {
       setGeneratingSummaries(prev => {
@@ -423,6 +734,7 @@ const ExecutionDashboard: React.FC = () => {
         [executionId]: bindingData
       }));
     } catch (err) {
+      console.error(err);
       // Set empty result to avoid repeated attempts
       setBindingUsages(prev => ({
         ...prev,
@@ -450,64 +762,41 @@ const ExecutionDashboard: React.FC = () => {
       }
       return newSet;
     });
->>>>>>> Stashed changes
   };
-
   if (loading) {
     return (
       <DashboardContainer>
-        <LoadingSpinner>Loading execution dashboard...</LoadingSpinner>
+        <DashboardHeader>
+          <DashboardTitle>
+            <Activity size={32} />
+            Execution Dashboard
+          </DashboardTitle>
+          <RefreshButton disabled>
+            <RefreshCw size={16} />
+            Loading...
+          </RefreshButton>
+        </DashboardHeader>
+        <DashboardSkeleton />
       </DashboardContainer>
     );
   }
-
   return (
-    <DashboardContainer>
-      <DashboardHeader>
-        <DashboardTitle> Execution Dashboard</DashboardTitle>
+    <DashboardContainer theme={theme}>
+      <DashboardHeader theme={theme}>
+        <div>
+          <DashboardTitle theme={theme}>
+            <Activity size={32} />
+            Execution Dashboard
+          </DashboardTitle>
+          <MCPStatus compact={true} />
+        </div>
         <RefreshButton onClick={fetchDashboardData} disabled={loading}>
+          <RefreshCw size={16} />
           {loading ? 'Refreshing...' : 'Refresh'}
         </RefreshButton>
       </DashboardHeader>
-
-      {error && <ErrorMessage>{error}</ErrorMessage>}
-
+      {error && <ErrorMessage theme={theme}>{error}</ErrorMessage>}
       {stats && (
-<<<<<<< Updated upstream
-        <StatsGrid>
-          <StatCard>
-            <StatTitle>Total Executions</StatTitle>
-            <StatValue>{stats.total_executions}</StatValue>
-            <StatChange positive={stats.recent_executions_24h > 0}>
-              {stats.recent_executions_24h} in last 24h
-            </StatChange>
-          </StatCard>
-
-          <StatCard>
-            <StatTitle>Success Rate</StatTitle>
-            <StatValue>{(stats.success_rate * 100).toFixed(1)}%</StatValue>
-            <StatChange positive={stats.success_rate > 0.7}>
-              {stats.successful_executions}/{stats.total_executions} successful
-            </StatChange>
-          </StatCard>
-
-          <StatCard>
-            <StatTitle>Failed Executions</StatTitle>
-            <StatValue>{stats.failed_executions}</StatValue>
-            <StatChange positive={false}>
-              {((stats.failed_executions / stats.total_executions) * 100).toFixed(1)}% failure rate
-            </StatChange>
-          </StatCard>
-
-          <StatCard>
-            <StatTitle>Avg Duration</StatTitle>
-            <StatValue>{formatDuration(stats.avg_execution_time)}</StatValue>
-            <StatChange>
-              Average execution time
-            </StatChange>
-          </StatCard>
-        </StatsGrid>
-=======
         <>
           <StatsGrid theme={theme}>
             <StatCard $variant="info">
@@ -524,26 +813,12 @@ const ExecutionDashboard: React.FC = () => {
             <StatCard $variant="success">
               <StatTitle>
                 <CheckCircle size={16} />
-                Passed (No Healing)
+                Success Rate
               </StatTitle>
-              <StatValue>{stats.successful_executions}</StatValue>
+              <StatValue>{(stats.success_rate * 100).toFixed(1)}%</StatValue>
               <StatChange $positive={stats.success_rate > 0.7}>
                 <TrendingUp size={14} />
-                {((stats.successful_executions / stats.total_executions) * 100).toFixed(1)}% clean passes
-              </StatChange>
-            </StatCard>
-            <StatCard $variant="warning">
-              <StatTitle>
-                <AlertTriangle size={16} />
-                Needs Review
-              </StatTitle>
-              <StatValue>{stats.pending_review_executions || 0}</StatValue>
-              <StatChange $positive={false}>
-                <Wrench size={14} />
-                {stats.pending_review_executions > 0 ? 
-                  `${((stats.pending_review_executions / stats.total_executions) * 100).toFixed(1)}% required healing` :
-                  'No healing needed'
-                }
+                {stats.successful_executions}/{stats.total_executions} successful
               </StatChange>
             </StatCard>
             <StatCard $variant="danger">
@@ -557,24 +832,30 @@ const ExecutionDashboard: React.FC = () => {
                 {((stats.failed_executions / stats.total_executions) * 100).toFixed(1)}% failure rate
               </StatChange>
             </StatCard>
+            <StatCard $variant="warning">
+              <StatTitle>
+                <Clock size={16} />
+                Avg Duration
+              </StatTitle>
+              <StatValue>{formatDuration(stats.avg_execution_time)}</StatValue>
+              <StatChange>
+                Average execution time
+              </StatChange>
+            </StatCard>
           </StatsGrid>
         </>
->>>>>>> Stashed changes
       )}
-
-      <ExecutionList>
-        <ExecutionListHeader>
-          Recent Test Executions
+      <ExecutionList theme={theme}>
+        <ExecutionListHeader theme={theme}>
+          <Activity size={20} />
+          Execution History
         </ExecutionListHeader>
-        
         {executions.length === 0 ? (
           <LoadingSpinner>No execution records found</LoadingSpinner>
+        ) : loading ? (
+          <ExecutionListSkeleton count={5} />
         ) : (
           <>
-<<<<<<< Updated upstream
-            <ExecutionItem style={{ background: '#f8f9fa', fontWeight: 600 }}>
-              <div>Test Name</div>
-=======
             <ExecutionItem style={{ 
               background: theme.colors.surface, 
               fontWeight: 600,
@@ -587,47 +868,10 @@ const ExecutionDashboard: React.FC = () => {
               <div>Duration</div>
               <div>Steps</div>
               <div>Passed</div>
-              <div>Healed</div>
->>>>>>> Stashed changes
+              <div>Failed</div>
               <div>Status</div>
-              <div>Success Rate</div>
-              <div>Duration</div>
-              <div>Started</div>
+              <div>Actions</div>
             </ExecutionItem>
-<<<<<<< Updated upstream
-            
-            {executions.map((execution) => (
-              <ExecutionItem 
-                key={execution.execution_id}
-                clickable={true}
-                onClick={() => handleExecutionClick(execution.execution_id)}
-              >
-                <div>
-                  <strong>{execution.test_name || 'Test Execution'}</strong>
-                  <br />
-                  <small style={{ color: '#6c757d' }}>
-                    ID: {execution.execution_id ? execution.execution_id.substring(0, 8) + '...' : 'N/A'}
-                  </small>
-                </div>
-                <div>
-                  <StatusBadge status={execution.status}>
-                    {execution.status}
-                  </StatusBadge>
-                </div>
-                <div>
-                  {execution.success_rate ? `${(execution.success_rate * 100).toFixed(1)}%` : 'N/A'}
-                  {execution.steps_completed && execution.total_steps && (
-                    <div>
-                      <small style={{ color: '#6c757d' }}>
-                        {execution.steps_completed}/{execution.total_steps} steps
-                      </small>
-                    </div>
-                  )}
-                </div>
-                <div>{formatDuration(execution.duration)}</div>
-                <div>{formatDateTime(execution.start_time)}</div>
-              </ExecutionItem>
-=======
             {executions.map((execution, index) => (
               <React.Fragment key={execution.execution_id}>
                 <ExecutionItem 
@@ -657,20 +901,18 @@ const ExecutionDashboard: React.FC = () => {
                   <MetricValue type="success">
                     {execution.steps_completed || execution.total_steps || 27}
                   </MetricValue>
-                  <MetricValue type="neutral">
-                    {execution.healed_steps || execution.pending_review_steps || 0}
-                    {(execution.healed_steps || execution.pending_review_steps) ? (
-                      <small style={{ display: 'block', fontSize: '11px', opacity: 0.7, color: '#ff8c00' }}>
-                        {execution.status === 'pending_review' ? 'Needs Review' : 'Healed'}
-                      </small>
-                    ) : null}
+                  <MetricValue type="error">
+                    {((execution.total_steps || 0) - (execution.steps_completed || execution.total_steps || 0))}
                   </MetricValue>
                   <div>
-                    <EnhancedStatusBadge 
-                      status={execution.status === 'completed' ? 'pass' : execution.status}
-                      healedSteps={execution.healed_steps || execution.pending_review_steps || 0}
-                      size="medium"
-                    />
+                    <StatusBadge $status={execution.status}>
+                      {execution.status === 'completed' && <CheckCircle size={12} />}
+                      {execution.status === 'failed' && <XCircle size={12} />}
+                      {execution.status === 'running' && <Clock size={12} />}
+                      {execution.status === 'completed' ? 'Passed' : 
+                       execution.status === 'failed' ? 'Failed' : 
+                       execution.status}
+                    </StatusBadge>
                   </div>
                   <div>
                     <ActionButton onClick={(e) => {
@@ -793,22 +1035,11 @@ const ExecutionDashboard: React.FC = () => {
                   </ExecutionItem>
                 )}
               </React.Fragment>
->>>>>>> Stashed changes
             ))}
           </>
         )}
       </ExecutionList>
-
-      {/* Modal for execution step details */}
-      {selectedExecutionId && (
-        <ExecutionStepsModal
-          executionId={selectedExecutionId}
-          isOpen={isModalOpen}
-          onClose={handleCloseModal}
-        />
-      )}
     </DashboardContainer>
   );
 };
-
 export default ExecutionDashboard;

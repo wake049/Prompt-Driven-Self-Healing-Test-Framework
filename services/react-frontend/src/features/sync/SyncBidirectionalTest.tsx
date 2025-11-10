@@ -11,12 +11,12 @@ import {
   usePromptSelectorSync, 
   useSyncEventMonitor,
   useSyncServiceStatus
-} from '../../../shared/hooks/useSyncHooks';
+} from '../../shared/hooks/useSyncHooks';
 import { 
   SyncIndicator, 
   SyncNotification, 
   SyncStatusDisplay 
-} from '../../../shared/components/SyncVisualIndicators';
+} from '../../shared/components/SyncVisualIndicators';
 import { RefreshCw, TestTube, CheckCircle, XCircle } from 'lucide-react';
 const TestContainer = styled.div`
   max-width: 1200px;

@@ -11,6 +11,8 @@ interface ThemeColors {
   warning: string;
   error: string;
   info: string;
+  hover: string;
+  activeBackground: string;
 }
 interface Theme {
   colors: ThemeColors;
@@ -24,6 +26,7 @@ interface Theme {
     medium: string;
     large: string;
   };
+  mode: 'light' | 'dark';
 }
 const lightTheme: Theme = {
   colors: {
@@ -38,6 +41,8 @@ const lightTheme: Theme = {
     warning: '#ed8936',
     error: '#e53e3e',
     info: '#3182ce',
+    hover: '#f7fafc',
+    activeBackground: '#edf2f7',
   },
   shadows: {
     small: '0 2px 8px rgba(0, 0, 0, 0.1)',
@@ -49,6 +54,7 @@ const lightTheme: Theme = {
     medium: '12px',
     large: '16px',
   },
+  mode: 'light',
 };
 const darkTheme: Theme = {
   colors: {
@@ -63,6 +69,8 @@ const darkTheme: Theme = {
     warning: '#fbd38d',
     error: '#fc8181',
     info: '#63b3ed',
+    hover: '#4a5568',
+    activeBackground: '#1a202c',
   },
   shadows: {
     small: '0 2px 8px rgba(0, 0, 0, 0.3)',
@@ -74,6 +82,7 @@ const darkTheme: Theme = {
     medium: '12px',
     large: '16px',
   },
+  mode: 'dark',
 };
 interface ThemeContextType {
   theme: Theme;

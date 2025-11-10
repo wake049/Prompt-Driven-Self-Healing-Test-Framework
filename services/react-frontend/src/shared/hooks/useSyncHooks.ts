@@ -1,9 +1,3 @@
-/**
- * React hooks for Element-Prompt Synchronization
- * 
- * These hooks provide easy-to-use interfaces for components to handle
- * bidirectional synchronization between elements and prompts.
- */
 import { useState, useEffect, useCallback, useRef } from 'react';
 import elementPromptSyncService, { 
   SyncEvent, 
@@ -57,7 +51,6 @@ export function useElementSelectorSync(elementId: string) {
       setRelationships(updatedRel);
       return true;
     } catch (error) {
-      
       throw error;
     } finally {
       setIsUpdating(false);
@@ -97,7 +90,6 @@ export function usePromptSelectorSync(promptId: string) {
   // Load all relationships on mount
   useEffect(() => {
     const loadRelationships = async () => {
-      try {
         const allRels = await elementPromptSyncService.getRelationships();
         const filteredRels = new Map();
         for (const [elementId, relationship] of allRels) {
@@ -107,9 +99,6 @@ export function usePromptSelectorSync(promptId: string) {
           }
         }
         setElementRelationships(filteredRels);
-      } catch (error) {
-        
-      }
     };
     loadRelationships();
     // Subscribe to sync events for this prompt
@@ -153,7 +142,6 @@ export function usePromptSelectorSync(promptId: string) {
       setElementRelationships(filteredRels);
       return true;
     } catch (error) {
-      
       throw error;
     } finally {
       setIsUpdating(false);
@@ -271,7 +259,6 @@ export function useSyncServiceStatus() {
         setRelationshipCount(relationships.size);
         setIsInitialized(true);
       } catch (error) {
-        
         setError('Failed to check service status');
       }
     };
@@ -291,7 +278,6 @@ export function useSyncServiceStatus() {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       setError(errorMessage);
-      
     } finally {
       setIsRefreshing(false);
     }
@@ -306,7 +292,6 @@ export function useSyncServiceStatus() {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       setError(errorMessage);
-      
     } finally {
       setIsRefreshing(false);
     }

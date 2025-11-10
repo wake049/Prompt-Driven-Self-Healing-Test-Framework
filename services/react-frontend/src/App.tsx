@@ -2,6 +2,7 @@ import React from 'react';
 import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ThemeProvider } from './contexts/ThemeContext';
+import { MCPProvider } from './contexts/MCPContext';
 import ProtectedRoute from './components/auth/ProtectedRoute';
 import Login from './components/auth/Login';
 import Register from './components/auth/Register';
@@ -53,20 +54,22 @@ const AuthenticatedApp: React.FC = () => {
 export default function App() {
   return (
     <ThemeProvider>
-      <AuthProvider>
-        <Routes>
-          {/* Public routes */}
-          <Route path="/login" element={<Login />} />
-          <Route path="/register" element={<Register />} />
-          
-          {/* Protected routes - all under one protected wrapper */}
-          <Route path="/*" element={
-            <ProtectedRoute>
-              <AuthenticatedApp />
-            </ProtectedRoute>
-          } />
-        </Routes>
-      </AuthProvider>
+      <MCPProvider>
+        <AuthProvider>
+          <Routes>
+            {/* Public routes */}
+            <Route path="/login" element={<Login />} />
+            <Route path="/register" element={<Register />} />
+            
+            {/* Protected routes - all under one protected wrapper */}
+            <Route path="/*" element={
+              <ProtectedRoute>
+                <AuthenticatedApp />
+              </ProtectedRoute>
+            } />
+          </Routes>
+        </AuthProvider>
+      </MCPProvider>
     </ThemeProvider>
   );
 }

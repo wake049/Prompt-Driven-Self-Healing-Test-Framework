@@ -9,6 +9,7 @@ from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, HTTPException
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
 # Add the current directory to path for imports
@@ -46,6 +47,15 @@ async def lifespan(app: FastAPI):
         print(f"⚠️ Error during shutdown: {e}")
 
 app = FastAPI(title="MCP Server HTTP Wrapper", lifespan=lifespan)
+
+# Add CORS middleware to handle cross-origin requests
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # In production, specify exact origins
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.get("/mcp/health")
 async def mcp_health_check():
@@ -213,22 +223,43 @@ async def mcp_root():
 @app.websocket("/mcp/ws")
 async def mcp_websocket_endpoint(websocket: WebSocket):
     """MCP WebSocket endpoint matching frontend URL pattern"""
-    await websocket.accept()
+    print(f"New WebSocket connection attempt to /mcp/ws from {websocket.client}")
+    print(f"Headers: {websocket.headers}")
     
     try:
+        await websocket.accept()
+        print(f"WebSocket connection accepted for /mcp/ws")
+        
         while True:
             # Receive message from client
             message = await websocket.receive_text()
+            print(f"Received message: {message[:100]}...")
             
             # Process through MCP server
+            if mcp_server is None:
+                error_response = {
+                    "jsonrpc": "2.0", 
+                    "id": None, 
+                    "error": {"code": -32000, "message": "MCP server not initialized"}
+                }
+                await websocket.send_text(json.dumps(error_response))
+                continue
+                
             response = await mcp_server.handle_message(message)
+            print(f"Sending response: {response[:100]}...")
             
             # Send response back
             await websocket.send_text(response)
     except Exception as e:
-        print(f"WebSocket error: {e}")
+        print(f"WebSocket error in /mcp/ws: {e}")
+        import traceback
+        traceback.print_exc()
     finally:
-        await websocket.close()
+        print(f"WebSocket connection closed for /mcp/ws")
+        try:
+            await websocket.close()
+        except:
+            pass
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):

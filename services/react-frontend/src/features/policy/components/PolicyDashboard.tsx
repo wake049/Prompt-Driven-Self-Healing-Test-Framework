@@ -710,10 +710,6 @@ export const PolicyDashboard: React.FC = () => {
       console.log(' Real-time policy data updated successfully from MCP server');
       
     } catch (err: any) {
-<<<<<<< Updated upstream
-      console.error(' Error fetching real-time policy data:', err);
-=======
->>>>>>> Stashed changes
       setError(err.message);
       
       // Set empty states when no data is available
@@ -814,8 +810,7 @@ export const PolicyDashboard: React.FC = () => {
   }
 
   return (
-    <ThemeProvider theme={theme}>
-      <Container>
+    <Container>
       <MainContent>
         <Header>
           <PageTitle>Policy Dashboard</PageTitle>
@@ -1064,6 +1059,5 @@ export const PolicyDashboard: React.FC = () => {
         </ContentArea>
       </MainContent>
     </Container>
-    </ThemeProvider>
   );
 };

@@ -3,7 +3,7 @@ import styled from 'styled-components';
 import { useParams, useNavigate } from 'react-router-dom';
 import { CheckCircle, XCircle, ArrowLeft, Clock, Calendar } from 'lucide-react';
 import { useTheme } from '../../../contexts/ThemeContext';
-import { executionApiService } from '../api';
+import { executionApiService } from '../../../services/executionApiService';
 import StepDetailsModal from '../../../shared/ui/StepDetailsModal';
 interface ExecutionStep {
   step_number: number;
@@ -18,7 +18,7 @@ interface ExecutionStep {
 }
 interface ExecutionDetails {
   execution_id: string;
-  prompt_id: string;
+  test_case_id: string;
   prompt_description: string;
   execution_date: string;
   duration_ms: number;
@@ -243,7 +243,25 @@ const RunDetails: React.FC = () => {
       try {
         setLoading(true);
         const response = await executionApiService.getExecutionDetails(executionId);
-        setExecutionDetails(response);
+        
+        // Transform response to match ExecutionDetails interface
+        const executionDetails: ExecutionDetails = {
+          execution_id: response.execution.id || executionId,
+          test_case_id: response.execution.test_case_id || '',
+          prompt_description: response.execution.test_case_id || 'Test execution details',
+          execution_date: response.execution.started_at || new Date().toISOString(),
+          duration_ms: (response.execution.duration_seconds || 0) * 1000,
+          status: response.execution.status === 'completed' ? 'PASS' : (response.execution.status === 'failed' ? 'FAIL' : 'PASS'),
+          steps: response.steps.map((step: any, index: number) => ({
+            step_number: step.step_order || index + 1,
+            step_description: `${step.action} ${step.target}`,
+            result: step.status === 'passed' ? 'PASS' : 'FAIL',
+            details: step.error_message || undefined,
+            duration_ms: undefined // API doesn't provide this yet
+          }))
+        };
+        
+        setExecutionDetails(executionDetails);
       } catch (err) {
         setError('Failed to load execution details');
       } finally {

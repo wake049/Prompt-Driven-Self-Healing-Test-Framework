@@ -126,6 +126,15 @@ class MCPExecutionApiService {
     return result.execution || result;
   }
 
+  async getExecutionDetails(executionId: string): Promise<any> {
+    const client = await this.getMCPClient();
+    const result = await client.callTool("fetch_test_data", {
+      data_type: "execution_details",
+      filters: { execution_id: executionId }
+    });
+    return result.data || result;
+  }
+
   async deleteExecution(executionId: string): Promise<{success: boolean}> {
     const client = await this.getMCPClient();
     const result = await client.callTool("run_action", {

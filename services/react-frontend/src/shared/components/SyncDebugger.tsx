@@ -6,10 +6,8 @@
  */
 import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
-import { SqlApiClient } from '../utils/sqlApiClient';
+import { sqlApiClient } from '../utils/sqlApiClient';
 import elementPromptSyncService from '../services/elementPromptSyncService';
-
-const sqlApiClient = new SqlApiClient();
 const Card = styled.div`
   border: 1px solid #ddd;
   border-radius: 8px;

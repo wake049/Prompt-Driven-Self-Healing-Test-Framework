@@ -3,13 +3,9 @@ import styled from 'styled-components';
 import unifiedApiClient from '../../../shared/utils/unifiedApiClient';
 import ExecutionStepsModal from './ExecutionStepsModal';
 import { executionApiService } from '../api';
-<<<<<<< Updated upstream
-
-=======
 import { useTheme } from '../../../contexts/ThemeContext';
 import EnhancedStatusBadge from '../../../shared/ui/EnhancedStatusBadge';
 import { RefreshCw, TrendingUp, TrendingDown, Clock, CheckCircle, XCircle, Activity, AlertTriangle, Wrench } from 'lucide-react';
->>>>>>> Stashed changes
 const HistoryContainer = styled.div`
   padding: 16px 0;
 `;
@@ -247,10 +243,6 @@ const TestCaseExecutionHistory: React.FC<TestCaseExecutionHistoryProps> = ({
       setStats(statsResponse);
       setExecutions(executionsResponse);
     } catch (err: any) {
-<<<<<<< Updated upstream
-      console.error('Error fetching execution data:', err);
-=======
->>>>>>> Stashed changes
       setError('Failed to load execution history');
     } finally {
       setLoading(false);
@@ -311,13 +303,6 @@ const TestCaseExecutionHistory: React.FC<TestCaseExecutionHistoryProps> = ({
             <StatLabel>Total Runs</StatLabel>
             <StatSubtext>{stats.recent_executions_24h} in last 24h</StatSubtext>
           </StatCard>
-<<<<<<< Updated upstream
-          
-          <StatCard>
-            <StatValue>{stats.success_rate}%</StatValue>
-            <StatLabel>Success Rate</StatLabel>
-            <StatSubtext>{stats.successful_executions}/{stats.total_executions} successful</StatSubtext>
-=======
           <StatCard variant="success">
             <StatTitle>
               <CheckCircle size={16} />
@@ -342,7 +327,6 @@ const TestCaseExecutionHistory: React.FC<TestCaseExecutionHistoryProps> = ({
                 'No healing needed'
               }
             </StatChange>
->>>>>>> Stashed changes
           </StatCard>
           
           <StatCard>
@@ -350,17 +334,7 @@ const TestCaseExecutionHistory: React.FC<TestCaseExecutionHistoryProps> = ({
             <StatLabel>Failed Runs</StatLabel>
             <StatSubtext>{stats.failed_executions > 0 ? ((stats.failed_executions / stats.total_executions) * 100).toFixed(1) : '0.0'}% failure rate</StatSubtext>
           </StatCard>
-<<<<<<< Updated upstream
-          
-          <StatCard>
-            <StatValue>{formatDuration(stats.avg_execution_time)}</StatValue>
-            <StatLabel>Avg Duration</StatLabel>
-            <StatSubtext>Average execution time</StatSubtext>
-          </StatCard>
-        </StatsRow>
-=======
         </StatsGrid>
->>>>>>> Stashed changes
       )}
 
       <ExecutionsTable>
@@ -380,30 +354,6 @@ const TestCaseExecutionHistory: React.FC<TestCaseExecutionHistoryProps> = ({
             <p>No test executions have been run for this test case yet.</p>
           </EmptyState>
         ) : (
-<<<<<<< Updated upstream
-          executions.map((execution) => (
-            <TableRow 
-              key={execution.id} 
-              clickable={true}
-              onClick={() => handleExecutionClick(execution.id)}
-            >
-              <div>
-                <TestName>{execution.test_name}</TestName>
-                <TestId>ID: {execution.id.substring(0, 8)}...</TestId>
-              </div>
-              <div>
-                <StatusBadge status={execution.status}>
-                  {execution.status}
-                </StatusBadge>
-              </div>
-              <div>
-                {execution.success_rate > 0 ? `${execution.success_rate}%` : 'N/A'}
-              </div>
-              <div>{formatDuration(execution.duration_seconds)}</div>
-              <div>{formatDateTime(execution.started_at)}</div>
-            </TableRow>
-          ))
-=======
           <>
             <ExecutionItem style={{ 
               background: theme.colors.surface, 
@@ -476,7 +426,6 @@ const TestCaseExecutionHistory: React.FC<TestCaseExecutionHistoryProps> = ({
               </ExecutionItem>
             ))}
           </>
->>>>>>> Stashed changes
         )}
       </ExecutionsTable>
 

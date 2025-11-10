@@ -14,7 +14,7 @@ import { PageContextManager } from "../features/page-context";
 import { ExecutionDashboard } from "../features/execution";
 import { DashboardAnalytics } from "../components/DashboardAnalytics";
 import RunDetails from "../features/execution/components/RunDetails";
-import SyncBidirectionalTest from "../features/sync/components/SyncBidirectionalTest";
+import SyncBidirectionalTest from "../features/sync/SyncBidirectionalTest"
 import SyncDebugger from "../shared/components/SyncDebugger";
 import ChromeExtensionPage from "../features/extension/components/ChromeExtensionPage";
 export function AppRoutes() {

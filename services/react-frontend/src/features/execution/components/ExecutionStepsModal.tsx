@@ -252,10 +252,6 @@ const ExecutionStepsModal: React.FC<ExecutionStepsModalProps> = ({
       const stepData = await executionApiService.getExecutionSteps(executionId);
       setData(stepData);
     } catch (err: any) {
-<<<<<<< Updated upstream
-      console.error('Error fetching step details:', err);
-=======
->>>>>>> Stashed changes
       setError('Failed to load step details');
     } finally {
       setLoading(false);

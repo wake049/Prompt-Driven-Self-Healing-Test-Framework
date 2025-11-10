@@ -1,19 +1,14 @@
-/**
- * Prompt Detail View Component
- * Shows detailed view of a specific prompt with actions and tabs
- */
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import styled from 'styled-components';
+import { useTheme } from '../../../contexts/ThemeContext';
 import { config } from '../../../app/config';
 import unifiedApiClient from '../../../shared/utils/unifiedApiClient';
 import { TestCaseExecutionHistory } from '../../execution';
 import { promptsApiService } from '../api';
 import { useAuth } from '../../../contexts/AuthContext';
 import { BindingsManager } from '../../bindings';
-<<<<<<< Updated upstream
-=======
 import { usePromptSelectorSync, useSyncNotifications } from '../../../shared/hooks/useSyncHooks';
-import { stepElementRelationshipService } from '../../../shared/services/stepElementRelationshipService';
 import { SyncIndicator, SyncNotification as SyncNotificationDisplay } from '../../../shared/components/SyncVisualIndicators';
 import { 
   RefreshCw, 
@@ -460,7 +455,6 @@ const ErrorMessage = styled.div`
   justify-content: space-between;
   box-shadow: 0 4px 12px rgba(248, 113, 113, 0.2);
 `;
->>>>>>> Stashed changes
 
 interface PromptData {
   id: string;  // Changed from number to string for UUID
@@ -481,32 +475,44 @@ interface PromptData {
   updated_at?: string;
 }
 
-// Step editing components
+// Step editing components  
 const StepEditForm: React.FC<{
   step: any;
-<<<<<<< Updated upstream
-  onSave: (updatedStep: any) => void;
-=======
   stepIndex: number;
   promptId: string;
-  onSave: (updatedStep: any) => Promise<void>;
->>>>>>> Stashed changes
+  onSave: (updatedStep: any) => void;
   onCancel: () => void;
-}> = ({ step, onSave, onCancel }) => {
+  onSyncUpdate?: (stepIndex: number, paramKey: string, newValue: string) => Promise<void>;
+}> = ({ step, stepIndex, promptId, onSave, onCancel, onSyncUpdate }) => {
   const [editedStep, setEditedStep] = useState({ ...step });
   const [newParamKey, setNewParamKey] = useState('');
   const [newParamValue, setNewParamValue] = useState('');
-<<<<<<< Updated upstream
-=======
   const [isSyncing, setIsSyncing] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
->>>>>>> Stashed changes
 
-  const updateParam = (key: string, value: string) => {
+  const updateParam = async (key: string, value: string) => {
+    // Check if this is a selector parameter that might need syncing
+    const selectorKeys = ['selector', 'elementId', 'target', 'locator'];
+    const isSelector = selectorKeys.includes(key);
+    const oldValue = editedStep.params?.[key];
+    
+    // Update local state
     setEditedStep({
       ...editedStep,
       params: { ...editedStep.params, [key]: value }
     });
+
+    // If this is a selector change and we have sync functionality, trigger sync
+    if (isSelector && value !== oldValue && onSyncUpdate && value.trim()) {
+      try {
+        setIsSyncing(true);
+        await onSyncUpdate(stepIndex, key, value);
+      } catch (error) {
+        console.error('Failed to sync selector change:', error);
+        // Optionally show a warning but don't revert the change
+      } finally {
+        setIsSyncing(false);
+      }
+    }
   };
 
   const addParam = () => {
@@ -520,19 +526,6 @@ const StepEditForm: React.FC<{
   const removeParam = (key: string) => {
     const { [key]: removed, ...rest } = editedStep.params;
     setEditedStep({ ...editedStep, params: rest });
-  };
-
-  const handleSave = async () => {
-    if (isSaving) return;
-    
-    try {
-      setIsSaving(true);
-      await onSave(editedStep);
-    } catch (error) {
-      alert(`Failed to save step: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    } finally {
-      setIsSaving(false);
-    }
   };
 
   return (
@@ -564,55 +557,63 @@ const StepEditForm: React.FC<{
         <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', marginBottom: '8px' }}>
           Parameters:
         </label>
-        {Object.entries(editedStep.params || {}).map(([key, value]) => (
-          <div key={key} style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
-            <input
-              type="text"
-              value={key}
-              onChange={(e) => {
-                const newKey = e.target.value;
-                const { [key]: oldValue, ...rest } = editedStep.params;
-                setEditedStep({
-                  ...editedStep,
-                  params: { ...rest, [newKey]: oldValue }
-                });
-              }}
-              style={{
-                flex: '0 0 120px',
-                padding: '6px',
-                border: '1px solid #d1d5db',
-                borderRadius: '4px',
-                fontSize: '12px'
-              }}
-            />
-            <input
-              type="text"
-              value={typeof value === 'string' ? value : JSON.stringify(value)}
-              onChange={(e) => updateParam(key, e.target.value)}
-              style={{
-                flex: 1,
-                padding: '6px',
-                border: '1px solid #d1d5db',
-                borderRadius: '4px',
-                fontSize: '12px'
-              }}
-            />
-            <button
-              onClick={() => removeParam(key)}
-              style={{
-                padding: '6px 10px',
-                backgroundColor: '#ef4444',
-                color: '#ffffff',
-                border: 'none',
-                borderRadius: '4px',
-                fontSize: '12px',
-                cursor: 'pointer'
-              }}
-            >
-              ✕
-            </button>
-          </div>
-        ))}
+        {Object.entries(editedStep.params || {}).map(([key, value]) => {
+          const isSelector = ['selector', 'elementId', 'target', 'locator'].includes(key);
+          return (
+            <div key={key} style={{ display: 'flex', gap: '8px', marginBottom: '8px', alignItems: 'center' }}>
+              <input
+                type="text"
+                value={key}
+                onChange={(e) => {
+                  const newKey = e.target.value;
+                  const { [key]: oldValue, ...rest } = editedStep.params;
+                  setEditedStep({
+                    ...editedStep,
+                    params: { ...rest, [newKey]: oldValue }
+                  });
+                }}
+                style={{
+                  flex: '0 0 120px',
+                  padding: '6px',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '4px',
+                  fontSize: '12px'
+                }}
+              />
+              <input
+                type="text"
+                value={typeof value === 'string' ? value : JSON.stringify(value)}
+                onChange={(e) => updateParam(key, e.target.value)}
+                style={{
+                  flex: 1,
+                  padding: '6px',
+                  border: `1px solid ${isSelector ? '#10b981' : '#d1d5db'}`,
+                  borderRadius: '4px',
+                  fontSize: '12px',
+                  backgroundColor: isSelector ? '#f0fdf4' : 'white'
+                }}
+                disabled={isSyncing}
+              />
+              {isSelector && (
+                <SyncIndicator status="linked" size="small" />
+              )}
+              <button
+                onClick={() => removeParam(key)}
+                style={{
+                  padding: '6px 10px',
+                  backgroundColor: '#ef4444',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: '4px',
+                  fontSize: '12px',
+                  cursor: 'pointer'
+                }}
+              >
+                ✕
+              </button>
+            </div>
+          );
+        })}
         
         <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
           <input
@@ -660,21 +661,19 @@ const StepEditForm: React.FC<{
 
       <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
         <button
-          onClick={handleSave}
-          disabled={isSaving}
+          onClick={() => onSave(editedStep)}
           style={{
             padding: '8px 16px',
-            backgroundColor: isSaving ? '#9ca3af' : '#10b981',
+            backgroundColor: '#10b981',
             color: '#ffffff',
             border: 'none',
             borderRadius: '4px',
             fontSize: '12px',
             fontWeight: '500',
-            cursor: isSaving ? 'not-allowed' : 'pointer',
-            opacity: isSaving ? 0.7 : 1
+            cursor: 'pointer'
           }}
         >
-           {isSaving ? 'Saving...' : 'Save'}
+           Save
         </button>
         <button
           onClick={onCancel}
@@ -891,6 +890,434 @@ const AddStepForm: React.FC<{
     </div>
   );
 };
+
+// Modern Steps Section Components
+const StepsSection = styled.div`
+  padding: 24px;
+  background: ${props => props.theme.colors.background};
+`;
+
+const StepsSectionTitle = styled.h2`
+  font-size: 24px;
+  font-weight: 700;
+  background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin: 0 0 24px 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+
+  &::before {
+    content: '';
+    width: 4px;
+    height: 24px;
+    background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
+    border-radius: 2px;
+  }
+`;
+
+const StepsErrorAlert = styled.div`
+  background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
+  border: 1px solid #fca5a5;
+  border-left: 4px solid #dc2626;
+  color: #dc2626;
+  padding: 16px 20px;
+  border-radius: 12px;
+  margin-bottom: 24px;
+  font-size: 14px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  box-shadow: 0 4px 6px -1px rgba(220, 38, 38, 0.1);
+
+  &::before {
+    content: '⚠️';
+    font-size: 18px;
+  }
+`;
+
+const StepsEmptyState = styled.div`
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+  border: 2px dashed #cbd5e1;
+  border-radius: 16px;
+  padding: 48px 32px;
+  text-align: center;
+  margin-bottom: 24px;
+  transition: all 0.3s ease;
+
+  &:hover {
+    border-color: #3b82f6;
+    background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+  }
+`;
+
+const EmptyStateIcon = styled.div`
+  font-size: 48px;
+  margin-bottom: 16px;
+  opacity: 0.6;
+`;
+
+const EmptyStateText = styled.p`
+  color: #64748b;
+  font-size: 16px;
+  font-weight: 500;
+  margin: 0 0 8px 0;
+`;
+
+const EmptyStateSubtext = styled.p`
+  color: #94a3b8;
+  font-size: 14px;
+  margin: 0;
+`;
+
+const StepsMetadataCard = styled.div`
+  background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+  border: 1px solid #0ea5e9;
+  border-left: 4px solid #0ea5e9;
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 24px;
+  font-size: 14px;
+  color: #0c4a6e;
+  line-height: 1.6;
+  box-shadow: 0 4px 6px -1px rgba(14, 165, 233, 0.1);
+
+  strong {
+    font-weight: 600;
+    color: #0369a1;
+  }
+`;
+
+const StepsActionButtonsContainer = styled.div`
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+
+  @media (max-width: 768px) {
+    flex-direction: column;
+    align-items: stretch;
+  }
+`;
+
+const StepsSaveButton = styled.button<{ loading?: boolean }>`
+  background: linear-gradient(135deg, #059669 0%, #10b981 100%);
+  color: white;
+  border: none;
+  padding: 12px 24px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: ${props => props.loading ? 'not-allowed' : 'pointer'};
+  opacity: ${props => props.loading ? 0.6 : 1};
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 4px 6px -1px rgba(16, 185, 129, 0.2);
+
+  &:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 15px -3px rgba(16, 185, 129, 0.3);
+  }
+
+  &:active:not(:disabled) {
+    transform: translateY(0);
+  }
+`;
+
+const StepsEditButton = styled.button`
+  background: linear-gradient(135deg, #d97706 0%, #f59e0b 100%);
+  color: white;
+  border: none;
+  padding: 12px 24px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 4px 6px -1px rgba(245, 158, 11, 0.2);
+
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 15px -3px rgba(245, 158, 11, 0.3);
+  }
+
+  &:active {
+    transform: translateY(0);
+  }
+`;
+
+const StepsCancelButton = styled.button`
+  background: linear-gradient(135deg, #6b7280 0%, #9ca3af 100%);
+  color: white;
+  border: none;
+  padding: 12px 24px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 4px 6px -1px rgba(107, 114, 128, 0.2);
+
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 15px -3px rgba(107, 114, 128, 0.3);
+  }
+
+  &:active {
+    transform: translateY(0);
+  }
+`;
+
+const StepsSuccessMessage = styled.span`
+  color: #059669;
+  font-size: 14px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%);
+  border-radius: 8px;
+  border: 1px solid #34d399;
+`;
+
+const ModernStepsContainer = styled.div`
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 24px;
+  margin-bottom: 32px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+`;
+
+const EditingModeAlert = styled.div`
+  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+  border: 1px solid #f59e0b;
+  border-left: 4px solid #f59e0b;
+  border-radius: 12px;
+  padding: 16px 20px;
+  margin-bottom: 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  box-shadow: 0 4px 6px -1px rgba(245, 158, 11, 0.1);
+`;
+
+const EditingModeText = styled.span`
+  font-size: 14px;
+  font-weight: 600;
+  color: #92400e;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+`;
+
+const AddStepButton = styled.button`
+  background: linear-gradient(135deg, #059669 0%, #10b981 100%);
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: 0 2px 4px rgba(16, 185, 129, 0.2);
+
+  &:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(16, 185, 129, 0.3);
+  }
+
+  &:active {
+    transform: translateY(0);
+  }
+`;
+
+// Modern Step Display Components
+const StepCard = styled.div<{ isEditing?: boolean }>`
+  background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+  border: 1px solid #e2e8f0;
+  border-left: 4px solid #3b82f6;
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 16px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  transition: all 0.3s ease;
+  ${props => props.isEditing ? 
+    'border: 2px dashed #3b82f6; background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);' : ''
+  }
+
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  }
+`;
+
+const StepHeader = styled.div`
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 12px;
+`;
+
+const StepNumber = styled.div`
+  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+  color: white;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 700;
+  flex-shrink: 0;
+  box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3);
+`;
+
+const StepContent = styled.div`
+  flex: 1;
+`;
+
+const StepTitle = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+`;
+
+const StepDescription = styled.h3`
+  font-size: 16px;
+  font-weight: 600;
+  color: #1f2937;
+  margin: 0;
+  line-height: 1.4;
+  flex: 1;
+`;
+
+const ActionTypeBadge = styled.span<{ actionType?: string }>`
+  background: ${props => {
+    switch(props.actionType) {
+      case 'open_url': return 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)';
+      case 'click_css': 
+      case 'click': return 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)';
+      case 'type_css': 
+      case 'type': return 'linear-gradient(135deg, #10b981 0%, #059669 100%)';
+      case 'wait_for_css': 
+      case 'wait_for': return 'linear-gradient(135deg, #6b7280 0%, #4b5563 100%)';
+      case 'assert_text_css': 
+      case 'assert_text': 
+      case 'assert_title_contains': return 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)';
+      case 'calculate': 
+      case 'math': 
+      case 'computation': return 'linear-gradient(135deg, #06b6d4 0%, #0891b2 100%)';
+      case 'scroll': return 'linear-gradient(135deg, #84cc16 0%, #65a30d 100%)';
+      case 'hover': return 'linear-gradient(135deg, #f97316 0%, #ea580c 100%)';
+      case 'select': 
+      case 'select_option': return 'linear-gradient(135deg, #a855f7 0%, #9333ea 100%)';
+      case 'extract_data':
+      case 'extract':
+      case 'get_data': return 'linear-gradient(135deg, #0d9488 0%, #0f766e 100%)';
+      case 'screenshot': return 'linear-gradient(135deg, #64748b 0%, #475569 100%)';
+      default: return 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)';
+    }
+  }};
+  color: white;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+`;
+
+const StepActions = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 6px;
+`;
+
+const StepActionButton = styled.button<{ variant?: 'edit' | 'up' | 'down' | 'delete' }>`
+  background: ${props => {
+    switch(props.variant) {
+      case 'edit': return 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)';
+      case 'up': 
+      case 'down': return 'linear-gradient(135deg, #6b7280 0%, #4b5563 100%)';
+      case 'delete': return 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)';
+      default: return 'linear-gradient(135deg, #6b7280 0%, #4b5563 100%)';
+    }
+  }};
+  color: white;
+  border: none;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  &:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+`;
+
+const StepDetails = styled.div`
+  margin-top: 12px;
+`;
+
+const StepDetailRow = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.02);
+  border-radius: 8px;
+  font-size: 14px;
+`;
+
+const StepDetailLabel = styled.span`
+  font-weight: 600;
+  color: #4b5563;
+  min-width: 80px;
+  font-size: 13px;
+`;
+
+const StepDetailValue = styled.span`
+  color: #1f2937;
+  font-family: 'Monaco', 'Cascadia Code', 'Roboto Mono', monospace;
+  background: rgba(59, 130, 246, 0.05);
+  padding: 4px 8px;
+  border-radius: 4px;
+  flex: 1;
+  word-break: break-all;
+`;
 
 const detailStyles = {
   container: {
@@ -1236,7 +1663,375 @@ const detailStyles = {
   }
 };
 
+// Sync-related styled components
+const SyncStatusIndicator = styled.div<{ hasRelated: boolean; isUpdating: boolean; theme: any }>`
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  transition: all 0.3s ease;
+  
+  ${props => props.hasRelated ? `
+    background: linear-gradient(135deg, #48bb78 0%, #38b2ac 100%);
+    color: white;
+    box-shadow: 0 1px 4px rgba(72, 187, 120, 0.3);
+  ` : `
+    background: ${props.theme.colors.surface === '#2d3748' ? 'rgba(74, 85, 104, 0.4)' : 'rgba(226, 232, 240, 0.6)'};
+    color: ${props.theme.colors.textSecondary};
+  `}
+  
+  ${props => props.isUpdating && `
+    animation: pulse 2s infinite;
+  `}
+  
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+  }
+`;
+
+const SyncNotificationComponent = styled.div<{ type: 'success' | 'error' | 'info' }>`
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 1000;
+  padding: 12px 20px;
+  border-radius: 8px;
+  color: white;
+  font-weight: 500;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  animation: slideIn 0.3s ease-out;
+  max-width: 400px;
+  
+  background: ${props => {
+    switch (props.type) {
+      case 'success': return 'linear-gradient(135deg, #48bb78 0%, #38b2ac 100%)';
+      case 'error': return 'linear-gradient(135deg, #f56565 0%, #e53e3e 100%)';
+      case 'info': return 'linear-gradient(135deg, #4299e1 0%, #3182ce 100%)';
+      default: return 'linear-gradient(135deg, #4299e1 0%, #3182ce 100%)';
+    }
+  }};
+  
+  @keyframes slideIn {
+    from {
+      transform: translateX(100%);
+      opacity: 0;
+    }
+    to {
+      transform: translateX(0);
+      opacity: 1;
+    }
+  }
+`;
+
+const ElementSyncIndicator = styled.span<{ hasSync: boolean; theme: any }>`
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+  padding: 2px 6px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 600;
+  
+  ${props => props.hasSync ? `
+    background: linear-gradient(135deg, #48bb78 0%, #38b2ac 100%);
+    color: white;
+  ` : `
+    background: ${props.theme.colors.surface === '#2d3748' ? 'rgba(74, 85, 104, 0.4)' : 'rgba(156, 163, 175, 0.3)'};
+    color: ${props.theme.colors.textSecondary};
+  `}
+`;
+
+const SyncCodeElement = styled.code<{ theme: any }>`
+  background: ${props => props.theme.colors.surface === '#2d3748' ? '#0d1117' : '#f3f4f6'};
+  color: ${props => props.theme.colors.surface === '#2d3748' ? '#f0f6fc' : props.theme.colors.text};
+  border: ${props => props.theme.colors.surface === '#2d3748' ? '1px solid #30363d' : 'none'};
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  margin-left: 6px;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-weight: 500;
+`;
+
+const SyncDescriptionText = styled.div<{ theme: any }>`
+  margin-bottom: 12px;
+  font-size: 14px;
+  color: ${props => props.theme.colors.textSecondary};
+`;
+
+const SyncElementCode = styled.code<{ theme: any }>`
+  background: ${props => props.theme.colors.surface === '#2d3748' ? '#0d1117' : '#f8f9fa'};
+  color: ${props => props.theme.colors.surface === '#2d3748' ? '#f0f6fc' : props.theme.colors.text};
+  border: ${props => props.theme.colors.surface === '#2d3748' ? '1px solid #30363d' : 'none'};
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-weight: 500;
+`;
+
+const SyncEmptyStateText = styled.div<{ theme: any }>`
+  text-align: center;
+  color: ${props => props.theme.colors.textSecondary};
+  padding: 20px;
+  
+  .icon {
+    font-size: 24px;
+    margin-bottom: 8px;
+  }
+  
+  .description {
+    font-size: 13px;
+    margin-top: 6px;
+  }
+`;
+
+// Failure Analysis Styled Components
+const FailureAnalysisSection = styled.div<{ theme: any }>`
+  padding: 20px;
+`;
+
+const FailureAnalysisHeader = styled.div<{ theme: any }>`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  padding-bottom: 15px;
+  border-bottom: 1px solid ${props => props.theme.colors.border};
+`;
+
+const FailureAnalysisTitle = styled.h3<{ theme: any }>`
+  color: ${props => props.theme.colors.text};
+  font-size: 18px;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+`;
+
+const RefreshButton = styled.button<{ theme: any }>`
+  background: ${props => props.theme.colors.primary};
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.2s ease;
+  
+  &:hover {
+    opacity: 0.8;
+  }
+  
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+`;
+
+const FailureCard = styled.div<{ theme: any }>`
+  background: ${props => props.theme.colors.surface};
+  border: 1px solid ${props => props.theme.colors.border};
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 16px;
+  transition: all 0.2s ease;
+  
+  &:hover {
+    box-shadow: ${props => props.theme.shadows.medium};
+  }
+`;
+
+const FailureHeader = styled.div<{ theme: any }>`
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 12px;
+`;
+
+const FailureInfo = styled.div<{ theme: any }>`
+  flex: 1;
+`;
+
+const FailureTitle = styled.h4<{ theme: any }>`
+  color: ${props => props.theme.colors.text};
+  font-size: 16px;
+  margin: 0 0 8px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+`;
+
+const FailureDate = styled.div<{ theme: any }>`
+  color: ${props => props.theme.colors.textSecondary};
+  font-size: 14px;
+`;
+
+const GenerateButton = styled.button<{ theme: any }>`
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  padding: 10px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.2s ease;
+  
+  &:hover {
+    transform: translateY(-1px);
+    box-shadow: ${props => props.theme.shadows.medium};
+  }
+  
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+  }
+`;
+
+const FailedStepsContainer = styled.div<{ theme: any }>`
+  margin-top: 16px;
+`;
+
+const FailedStepsTitle = styled.div<{ theme: any }>`
+  color: ${props => props.theme.colors.text};
+  font-weight: 600;
+  margin-bottom: 8px;
+  font-size: 14px;
+`;
+
+const FailureStepCard = styled.div<{ theme: any }>`
+  background: ${props => props.theme.colors.surface === '#2d3748' ? '#1a202c' : '#f7fafc'};
+  border: 1px solid ${props => props.theme.colors.border};
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 8px;
+`;
+
+const StepAction = styled.div<{ theme: any }>`
+  color: ${props => props.theme.colors.text};
+  font-weight: 500;
+  margin-bottom: 4px;
+`;
+
+const StepError = styled.div<{ theme: any }>`
+  color: #e53e3e;
+  font-size: 13px;
+  background: ${props => props.theme.colors.surface === '#2d3748' ? 'rgba(229, 62, 62, 0.1)' : 'rgba(229, 62, 62, 0.05)'};
+  padding: 8px;
+  border-radius: 4px;
+  border-left: 3px solid #e53e3e;
+`;
+
+const MinimalReproSection = styled.div<{ theme: any }>`
+  margin-top: 24px;
+  padding: 20px;
+  background: ${props => props.theme.colors.surface === '#2d3748' ? '#2d3748' : '#f8f9fa'};
+  border: 1px solid ${props => props.theme.colors.border};
+  border-radius: 12px;
+`;
+
+const MinimalReproTitle = styled.h4<{ theme: any }>`
+  color: ${props => props.theme.colors.text};
+  font-size: 16px;
+  margin: 0 0 16px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+`;
+
+const MinimalStepsList = styled.div<{ theme: any }>`
+  margin-top: 12px;
+`;
+
+const MinimalStep = styled.div<{ theme: any }>`
+  background: ${props => props.theme.colors.surface};
+  border: 1px solid ${props => props.theme.colors.border};
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+`;
+
+const MinimalStepNumber = styled.div<{ theme: any }>`
+  background: ${props => props.theme.colors.primary};
+  color: white;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  flex-shrink: 0;
+`;
+
+const MinimalStepContent = styled.div<{ theme: any }>`
+  flex: 1;
+`;
+
+const MinimalStepDescription = styled.div<{ theme: any }>`
+  color: ${props => props.theme.colors.text};
+  font-weight: 500;
+  margin-bottom: 4px;
+`;
+
+const MinimalStepDetails = styled.div<{ theme: any }>`
+  color: ${props => props.theme.colors.textSecondary};
+  font-size: 13px;
+`;
+
+const LoadingMessage = styled.div<{ theme: any }>`
+  text-align: center;
+  color: ${props => props.theme.colors.textSecondary};
+  padding: 40px;
+  font-size: 14px;
+`;
+
+const FailureErrorMessage = styled.div<{ theme: any }>`
+  background: rgba(229, 62, 62, 0.1);
+  color: #e53e3e;
+  padding: 16px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  border-left: 4px solid #e53e3e;
+`;
+
+const EmptyState = styled.div<{ theme: any }>`
+  text-align: center;
+  color: ${props => props.theme.colors.textSecondary};
+  padding: 40px;
+  
+  .icon {
+    font-size: 48px;
+    margin-bottom: 16px;
+  }
+  
+  .title {
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: ${props => props.theme.colors.text};
+  }
+  
+  .description {
+    font-size: 14px;
+    max-width: 400px;
+    margin: 0 auto;
+    line-height: 1.5;
+  }
+`;
+
 export const PromptDetailView: React.FC = () => {
+  const { theme } = useTheme();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [prompt, setPrompt] = useState<PromptData | null>(null);
@@ -1254,11 +2049,38 @@ export const PromptDetailView: React.FC = () => {
   const [editedDescription, setEditedDescription] = useState('');
   const [editedStartingUrl, setEditedStartingUrl] = useState('');
   
+  // Failure analysis state
+  const [failureAnalysisData, setFailureAnalysisData] = useState<any>(null);
+  const [loadingFailures, setLoadingFailures] = useState(false);
+  const [failuresError, setFailuresError] = useState<string | null>(null);
+  const [minimalReproSteps, setMinimalReproSteps] = useState<any>(null);
+  const [generatingMinimalSteps, setGeneratingMinimalSteps] = useState(false);
+  const [minimalStepsError, setMinimalStepsError] = useState<string | null>(null);
+  const [selectedExecution, setSelectedExecution] = useState<any>(null);
+  
+  // AI Debug Steps execution state
+  const [runningDebugSteps, setRunningDebugSteps] = useState(false);
+  const [debugStepsResults, setDebugStepsResults] = useState<any>(null);
+  const [debugStepsError, setDebugStepsError] = useState<string | null>(null);
+  
   // Test step editing state
   const [isEditingSteps, setIsEditingSteps] = useState(false);
   const [editedSteps, setEditedSteps] = useState<any[]>([]);
   const [editingStepIndex, setEditingStepIndex] = useState<number | null>(null);
   const [showAddStepForm, setShowAddStepForm] = useState(false);
+
+  // Sync functionality
+  const {
+    updateStepSelector,
+    isUpdating: isSyncUpdating,
+    elementRelationships,
+    relatedElements,
+    relatedElementsCount,
+    hasRelatedElements,
+    getStepsWithElements
+  } = usePromptSelectorSync(id || '');
+  
+  const { notification, clearNotification } = useSyncNotifications();
 
   useEffect(() => {
     if (id && isValidUuid(id)) {
@@ -1304,7 +2126,6 @@ export const PromptDetailView: React.FC = () => {
       
       setPrompt(mappedPrompt);
     } catch (err) {
-      console.error('Error fetching prompt:', err);
       setError(err instanceof Error ? err.message : 'Failed to load prompt');
     } finally {
       setLoading(false);
@@ -1314,13 +2135,8 @@ export const PromptDetailView: React.FC = () => {
   const loadExistingTestPlan = async (promptId: string) => {
     try {
       if (!isValidUuid(promptId)) {
-        console.warn('Invalid UUID format for prompt ID:', promptId);
         return;
-      }
-      
-      console.log(' Loading existing test plan for prompt:', promptId);
-      
-      const token = localStorage.getItem('auth_token');
+      }const token = localStorage.getItem('auth_token');
       const response = await fetch(`${config.apiBaseUrl}/generated-test-plans/by-prompt/${promptId}`, {
         method: 'GET',
         headers: {
@@ -1330,30 +2146,17 @@ export const PromptDetailView: React.FC = () => {
       });
 
       if (response.ok) {
-        const testPlansData = await response.json();
-        console.log(' Found test plans data:', testPlansData);
-        
-        // Get the first test plan if any exist
+        const testPlansData = await response.json();// Get the first test plan if any exist
         const existingPlan = testPlansData.test_plans && testPlansData.test_plans.length > 0 
           ? testPlansData.test_plans[0] 
           : null;
           
-        if (existingPlan) {
-          console.log(' Test plan data structure:', existingPlan.steps);
-          console.log(' Test plan data type:', typeof existingPlan.steps);
-          
-          // Use the steps from the test plan
+        if (existingPlan) {// Use the steps from the test plan
           let planData = existingPlan.steps;
           if (typeof planData === 'string') {
             try {
-<<<<<<< Updated upstream
-              planData = JSON.parse(planData);
-            console.log('📝 Parsed test plan data:', planData);
-          } catch (e) {
-            console.error(' Failed to parse test plan data:', e);
-=======
               planData = JSON.parse(planData);} catch (e) {
->>>>>>> Stashed changes
+            console.error(' Failed to parse test plan data:', e);
             return;
           }
         }
@@ -1391,21 +2194,10 @@ export const PromptDetailView: React.FC = () => {
             originalStepCount: existingPlan.original_step_count
           }
         });
-<<<<<<< Updated upstream
-        setTestPlanSaved(true);
-        console.log(' Loaded test plan with', formattedPlan?.actions?.length || 0, 'steps');
-        } else {
-          console.log('ℹ️ No existing test plan found for this prompt');
-        }
-      } else if (response.status === 404) {
-        console.log('ℹ️ No existing test plan found for this prompt');
-        // This is normal - not all prompts have saved test plans
-      } else {
-        console.warn(' Failed to load test plan:', response.statusText);
-=======
         setTestPlanSaved(true);} else {}
       } else if (response.status === 404) {// This is normal - not all prompts have saved test plans
->>>>>>> Stashed changes
+      } else {
+        console.warn(' Failed to load test plan:', response.statusText);
       }
     } catch (error) {
       console.error(' Error loading existing test plan:', error);
@@ -1417,9 +2209,7 @@ export const PromptDetailView: React.FC = () => {
     navigate('/prompts');
   };
 
-  const handleEdit = () => {
-    console.log('Edit prompt:', id);
-    setEditedDescription(prompt?.description || '');
+  const handleEdit = () => {setEditedDescription(prompt?.description || '');
     setEditedContent(prompt?.content || '');
     setEditedStartingUrl(prompt?.starting_url || '');
     setIsEditing(true);
@@ -1438,10 +2228,7 @@ export const PromptDetailView: React.FC = () => {
         category: prompt.category
       };
       
-      const savedPrompt = await promptsApiService.updatePrompt(prompt.id, updateData);
-      console.log(' Prompt saved successfully:', savedPrompt);
-
-      // Update the local state with the saved data from the backend response
+      const savedPrompt = await promptsApiService.updatePrompt(prompt.id, updateData);// Update the local state with the saved data from the backend response
       const updatedPrompt: PromptData = {
         ...prompt,
         description: savedPrompt.description || '',
@@ -1472,10 +2259,7 @@ export const PromptDetailView: React.FC = () => {
     setEditedStartingUrl('');
   };
 
-  const handleRun = async () => {
-    console.log('Run prompt:', id);
-    
-    if (!id) {
+  const handleRun = async () => {if (!id) {
       alert('No prompt selected');
       return;
     }
@@ -1497,6 +2281,7 @@ export const PromptDetailView: React.FC = () => {
       }
       
     } catch (error: any) {
+      console.error('Error starting test execution:', error);
       alert(`Error starting test execution: ${error.message || 'Unknown error'}`);
     } finally {
       setIsRunning(false);
@@ -1544,6 +2329,7 @@ export const PromptDetailView: React.FC = () => {
         }
 
       } catch (error) {
+        console.error('Error polling execution status:', error);
         setRunningExecutionId(null);
       }
     };
@@ -1731,7 +2517,6 @@ export const PromptDetailView: React.FC = () => {
     try {
       setGeneratingSteps(true);
       setStepsError(null);
-      console.log('Generating steps for prompt:', prompt.title);
       
       // Analyze prompt to determine what types of elements we need
       const promptText = `${prompt.title} ${prompt.description} ${prompt.content || ''}`.toLowerCase();
@@ -1739,25 +2524,14 @@ export const PromptDetailView: React.FC = () => {
       
       // Smart element prioritization - balance relevance with diversity
       // This works for any application/company while respecting AI token limits
-      console.log('Using intelligent element selection for optimal AI performance');
       
       // Extract key terms from prompt for relevance scoring
       const promptWords = promptText.toLowerCase().split(/\s+/)
         .filter(word => word.length > 2)
-        .filter(word => !['the', 'and', 'but', 'for', 'are', 'with', 'this', 'that'].includes(word));
-      
-      console.log('Key prompt terms for relevance scoring:', promptWords);
-      
-      // Phase 1: Get available elements for step generation
+        .filter(word => !['the', 'and', 'but', 'for', 'are', 'with', 'this', 'that'].includes(word));// Phase 1: Get available elements for step generation
       let availableElements: any[] = [];
-<<<<<<< Updated upstream
       
-      try {
-        console.log('Getting available elements...');
-        
-        // First, get available elements using authenticated request
-=======
->>>>>>> Stashed changes
+      try {// First, get available elements using authenticated request
         const token = localStorage.getItem('auth_token');
         const elementsResponse = await fetch(`${config.apiBaseUrl}/api/v1/sql/elements?limit=1000`, {
           method: 'GET',
@@ -1780,11 +2554,7 @@ export const PromptDetailView: React.FC = () => {
               }
               acc[pageName].push(element);
               return acc;
-            }, {});
-
-            console.log('Elements grouped by page:', Object.keys(elementsByPage).map(page => `${page} (${elementsByPage[page].length} elements)`));
-
-            // Determine target page based on prompt context
+            }, {});// Determine target page based on prompt context
             let targetPageName = null;
             const startingUrl = prompt.starting_url;
             
@@ -1795,9 +2565,7 @@ export const PromptDetailView: React.FC = () => {
                 if (pageElements.length > 0) {
                   const pageUrl = pageElements[0].attributes?.url || pageElements[0].attributes?.full_url;
                   if (pageUrl && (pageUrl.includes(startingUrl) || startingUrl.includes(pageUrl))) {
-                    targetPageName = pageName;
-                    console.log(`Found target page by URL match: ${targetPageName}`);
-                    break;
+                    targetPageName = pageName;break;
                   }
                 }
               }
@@ -1834,18 +2602,14 @@ export const PromptDetailView: React.FC = () => {
               }
               
               if (bestMatch.page) {
-                targetPageName = bestMatch.page;
-                console.log(`Found target page by content analysis: ${targetPageName} (score: ${bestMatch.score})`);
-              }
+                targetPageName = bestMatch.page;}
             }
 
             // Use the most relevant page, or fallback to the page with most elements
             if (!targetPageName && Object.keys(elementsByPage).length > 0) {
               targetPageName = Object.keys(elementsByPage).reduce((a, b) => 
                 elementsByPage[a].length > elementsByPage[b].length ? a : b
-              );
-              console.log(`Using fallback page with most elements: ${targetPageName}`);
-            }
+              );}
 
             // Filter elements to target page and transform for AI service
             let targetElements: any[];
@@ -1856,22 +2620,15 @@ export const PromptDetailView: React.FC = () => {
               targetElements = elementsByPage[targetPageName];
               
               // If the target page has too few elements (less than 5), include other pages too
-              if (targetElements.length < 5 && Object.keys(elementsByPage).length > 1) {
-                console.log(`Target page ${targetPageName} has only ${targetElements.length} elements, including other pages...`);
-                
-                // Add elements from other pages, prioritizing pages with similar content
+              if (targetElements.length < 5 && Object.keys(elementsByPage).length > 1) {// Add elements from other pages, prioritizing pages with similar content
                 for (const [pageName, pageElements] of Object.entries(elementsByPage)) {
                   if (pageName !== targetPageName) {
                     targetElements = [...targetElements, ...(pageElements as any[])];
                   }
-                }
-                console.log(`Expanded to ${targetElements.length} total elements from ${Object.keys(elementsByPage).length} pages`);
-              }
+                }}
             } else {
               // No clear target page, use all elements
-              targetElements = elementsData.data;
-              console.log(`No clear target page found, using all ${targetElements.length} elements`);
-            }
+              targetElements = elementsData.data;}
             
             availableElements = targetElements.map((element: any) => ({
               elementId: element.id,
@@ -1895,20 +2652,8 @@ export const PromptDetailView: React.FC = () => {
               confidence: calculateElementConfidence(element, promptText)
             }));
 
-            // Page context analysis is now handled by the backend's two-phase AI system
-            
-            console.log(`Using ${availableElements.length} elements from page: ${targetPageName}`);
-            
-            // Log sample elements for debugging
-            if (availableElements.length > 0) {
-              console.log('Sample elements from target page:', availableElements.slice(0, 3).map((el: any) => ({
-                elementId: el.elementId,
-                name: el.name,
-                css_selector: el.css_selector,
-                tag: el.tag,
-                text: el.text
-              })));
-            }
+            // Page context analysis is now handled by the backend's two-phase AI system// Log sample elements for debugging
+            if (availableElements.length > 0) {}
             
             // Intelligent element selection with relevance scoring
             // Score each element based on relevance to prompt while maintaining diversity
@@ -1952,16 +2697,13 @@ export const PromptDetailView: React.FC = () => {
                                      promptText.toLowerCase().includes('page');
             
             const elementLimit = isVerificationTest ? 150 : 75;
-            availableElements = sortedElements.slice(0, elementLimit);
-            
-            console.log(`Selected ${availableElements.length} elements for AI processing (verification test: ${isVerificationTest})`);
-            console.log('Top scored elements:', availableElements.slice(0, 5).map((el: any) => ({
-              name: el.name,
-              css_selector: el.css_selector,
-              score: el.relevanceScore
-            })));
-          }
+            availableElements = sortedElements.slice(0, elementLimit);}
         }
+        
+      } catch (elementsError) {
+        console.warn('Error fetching discovered elements:', elementsError);
+        console.warn('Proceeding with generic selectors');
+      }
       
       // Extract the actual page URL from recorded elements, or fallback to prompt starting_url
       const pageUrl = prompt.starting_url || 
@@ -1971,25 +2713,9 @@ export const PromptDetailView: React.FC = () => {
 
       // Now generate steps using the AI service
       // Use content as primary prompt if it exists and is longer, otherwise use title + description
-      console.log(' Prompt object debug:', {
-        title: prompt.title,
-        description: prompt.description,
-        content: prompt.content,
-        contentLength: prompt.content?.length || 0
-      });
-      
       const primaryPrompt = (prompt.content && prompt.content.length > 20) 
         ? prompt.content 
         : `${prompt.title}: ${prompt.description}`;
-        
-      console.log(' Primary prompt selected:', primaryPrompt);
-        
-      console.log('Sending to AI service:', {
-        prompt: primaryPrompt,
-        baseUrl: pageUrl,
-        availableElementsCount: availableElements.length,
-        sampleElements: availableElements.slice(0, 2)
-      });
       
       // Transform to new enterprise PromptEnvelope format
       const promptEnvelope = {
@@ -2021,6 +2747,8 @@ export const PromptDetailView: React.FC = () => {
           }))
         } : undefined
       };
+
+      const token = localStorage.getItem('auth_token');
       const response = await fetch(`${config.apiBaseUrl}/api/v1/plan`, {
         method: 'POST',
         headers: {
@@ -2070,9 +2798,8 @@ export const PromptDetailView: React.FC = () => {
       };
       
       setGeneratedSteps(legacyResponse);
-      console.log('Generated steps:', data);
-      
     } catch (err) {
+      console.error('Error generating steps:', err);
       setStepsError(err instanceof Error ? err.message : 'Failed to generate steps');
     } finally {
       setGeneratingSteps(false);
@@ -2107,11 +2834,7 @@ export const PromptDetailView: React.FC = () => {
         processing_time_ms: generatedSteps.metadata?.processingTimeMs,
         generation_success: true,
         created_by: 'user'
-      };
-      
-      console.log('Saving test plan:', testPlanData);
-      
-      const token = localStorage.getItem('auth_token');
+      };const token = localStorage.getItem('auth_token');
       const response = await fetch(`${config.apiBaseUrl}/generated-test-plans`, {
         method: 'POST',
         headers: {
@@ -2125,15 +2848,13 @@ export const PromptDetailView: React.FC = () => {
         throw new Error(`Failed to save test plan: ${response.statusText}`);
       }
 
-      const result = await response.json();
-      console.log(' Test plan saved successfully:', result);
-      
-      setTestPlanSaved(true);
+      const result = await response.json();setTestPlanSaved(true);
       
       // Show success message for a few seconds
       setTimeout(() => setTestPlanSaved(false), 3000);
       
     } catch (error) {
+      console.error(' Failed to save test plan:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
       alert(`Failed to save test plan: ${errorMessage}`);
     } finally {
@@ -2207,47 +2928,14 @@ export const PromptDetailView: React.FC = () => {
         throw new Error(`Failed to save edited test plan: ${response.statusText}`);
       }
 
-      const savedPlan = await response.json();
-      const planId = savedPlan.id;
-
-      // 🆕 Extract and save element relationships
-      try {
-        const elementReferences = stepElementRelationshipService.extractElementReferences(editedSteps);
-        
-        if (elementReferences.length > 0) {
-          // Clean up existing relationships first
-          await stepElementRelationshipService.deleteStepElementRelationships(id!);
-          
-          // Save new relationships
-          await stepElementRelationshipService.saveStepElementRelationships(
-            id!, // promptId
-            planId, // planId
-            elementReferences
-          );
-          
-        } else {
-          // No element references found
-        }
-      } catch (relationshipError) {
-        // Don't fail the entire save operation, just log the error
-        setTimeout(() => {
-          alert(`Test plan saved successfully, but failed to save element relationships: ${relationshipError instanceof Error ? relationshipError.message : 'Unknown error'}`);
-        }, 100);
-      }
-
       // Update the displayed steps
       setGeneratedSteps(updatedGeneratedSteps);
       setIsEditingSteps(false);
       setEditedSteps([]);
-      setTestPlanSaved(true);
-<<<<<<< Updated upstream
-      
-      console.log(' Edited test plan saved successfully');
-=======
->>>>>>> Stashed changes
-      setTimeout(() => setTestPlanSaved(false), 3000);
+      setTestPlanSaved(true);setTimeout(() => setTestPlanSaved(false), 3000);
       
     } catch (error) {
+      console.error(' Failed to save edited test plan:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
       alert(`Failed to save edited test plan: ${errorMessage}`);
     } finally {
@@ -2260,37 +2948,11 @@ export const PromptDetailView: React.FC = () => {
     setShowAddStepForm(false);
   };
 
-  const updateStep = async (index: number, updatedStep: any) => {
-    const oldStep = editedSteps[index];
+  const updateStep = (index: number, updatedStep: any) => {
     const newSteps = [...editedSteps];
     newSteps[index] = updatedStep;
     setEditedSteps(newSteps);
     setEditingStepIndex(null);
-
-    // Check for selector changes that need to be synced
-    const selectorKeys = ['selector', 'elementId', 'target', 'locator'];
-    
-    if (oldStep && updatedStep.params) {
-      for (const [key, newValue] of Object.entries(updatedStep.params)) {
-        if (selectorKeys.includes(key)) {
-          const oldValue = oldStep.params?.[key];
-          const newVal = String(newValue || '').trim();
-          const oldVal = String(oldValue || '').trim();
-          
-          // If selector value changed, trigger sync
-          if (newVal !== oldVal && newVal) {
-            try {
-              await updateStepSelector(index, key, newVal);
-            } catch (error) {
-              // Don't fail the entire update, but notify user
-              setTimeout(() => {
-                alert(`Step saved, but failed to sync selector '${key}' with related elements: ${error instanceof Error ? error.message : 'Unknown error'}`);
-              }, 100);
-            }
-          }
-        }
-      }
-    }
   };
 
   const deleteStep = (index: number) => {
@@ -2309,18 +2971,12 @@ export const PromptDetailView: React.FC = () => {
     setEditedSteps(newSteps);
   };
 
-  const handleDuplicate = () => {
-    console.log('Duplicate prompt:', id);
-    // TODO: Implement duplicate functionality
+  const handleDuplicate = () => {// TODO: Implement duplicate functionality
   };
 
-  const handleArchive = () => {
-    console.log('Archive prompt:', id);
-    // TODO: Implement archive functionality
+  const handleArchive = () => {// TODO: Implement archive functionality
   };
 
-<<<<<<< Updated upstream
-=======
   // Failure analysis functions
   const loadFailureAnalysis = async () => {
     if (!id) return;
@@ -2352,6 +3008,7 @@ export const PromptDetailView: React.FC = () => {
         } else {setFailureAnalysisData({ executions: [] });
         }
     } catch (error) {
+      console.error('❌ Failed to load failure analysis:', error);
       const errorMessage = error instanceof Error ? error.message : String(error);
         setFailuresError(`Failed to load failure analysis data: ${errorMessage}`);
     } finally {
@@ -2375,6 +3032,7 @@ export const PromptDetailView: React.FC = () => {
       
       setMinimalReproSteps(response);
     } catch (error) {
+      console.error('❌ Failed to generate minimal reproduction steps:', error);
       setMinimalStepsError(`Failed to generate minimal reproduction steps: ${(error as Error)?.message || String(error)}`);
     } finally {
       setGeneratingMinimalSteps(false);
@@ -2394,6 +3052,7 @@ export const PromptDetailView: React.FC = () => {
         patterns: response
       }));
     } catch (error) {
+      console.error('Failed to analyze failure patterns:', error);
       setFailuresError('Failed to analyze failure patterns');
     } finally {
       setLoadingFailures(false);
@@ -2437,6 +3096,7 @@ export const PromptDetailView: React.FC = () => {
       // For now, we'll just show that execution started
 
     } catch (error: any) {
+      console.error('❌ Failed to run AI debug steps:', error);
       setDebugStepsError(`Failed to run debug steps: ${(error as Error)?.message || String(error)}`);
     } finally {
       setRunningDebugSteps(false);
@@ -2450,247 +3110,176 @@ export const PromptDetailView: React.FC = () => {
     }
   }, [activeTab, id]);
 
->>>>>>> Stashed changes
   if (loading) {
     return (
-      <div style={detailStyles.container}>
-        <div style={detailStyles.loading}>
-          <div style={{
-            border: '2px solid #f3f4f6',
-            borderTop: '2px solid #0f766e',
-            borderRadius: '50%',
-            width: '32px',
-            height: '32px',
-            animation: 'spin 1s linear infinite'
-          }}></div>
-          <span style={{ marginLeft: '12px', color: '#64748b' }}>Loading prompt...</span>
-        </div>
-      </div>
+      <Container>
+        <LoadingContainer>
+          <LoadingSpinner />
+          <LoadingText>Loading prompt...</LoadingText>
+        </LoadingContainer>
+      </Container>
     );
   }
 
   if (error || !prompt) {
     return (
-      <div style={detailStyles.container}>
-        <div style={detailStyles.error}>
+      <Container>
+        <ErrorMessage>
           {error || 'Prompt not found'}
-          <button
-            onClick={handleBackToPrompts}
-            style={{
-              marginLeft: '12px',
-              padding: '4px 8px',
-              backgroundColor: '#dc2626',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              fontSize: '12px',
-              cursor: 'pointer'
-            }}
-          >
+          <SecondaryButton onClick={handleBackToPrompts}>
+            <ArrowLeft size={16} />
             Back to Prompts
-          </button>
-        </div>
-      </div>
+          </SecondaryButton>
+        </ErrorMessage>
+      </Container>
     );
   }
 
   return (
-    <div style={detailStyles.container}>
-      <div style={detailStyles.layout}>
+    <Container theme={theme}>
+      <Layout>
         {/* Main Content */}
-        <div style={detailStyles.mainContent}>
+        <MainContent>
           {/* Header */}
-          <div style={detailStyles.header}>
-            <div style={detailStyles.breadcrumb}>
-              <span 
-                style={detailStyles.breadcrumbLink}
-                onClick={handleBackToPrompts}
-              >
+          <Header>
+            <Breadcrumb>
+              <BreadcrumbLink onClick={handleBackToPrompts}>
+                <ArrowLeft size={16} />
                 Prompts
-              </span>
-              {' > '}
+              </BreadcrumbLink>
+              <span>{'>'}</span>
               <span>{prompt.title}</span>
-            </div>
+            </Breadcrumb>
 
-            <div style={detailStyles.titleSection}>
-              <div style={detailStyles.titleLeft}>
-                <div style={detailStyles.category}>
+            <TitleSection>
+              <TitleLeft>
+                <Category>
+                  <FileText size={14} />
                   {prompt.category || 'E-commerce'}
-                </div>
-                <h1 style={detailStyles.title}>{prompt.title}</h1>
-              </div>
+                </Category>
+                <Title>{prompt.title}</Title>
+              </TitleLeft>
 
-              <div style={detailStyles.actions}>
-                <button
-                  style={{
-                    ...detailStyles.primaryButton,
-                    backgroundColor: isRunning ? '#6b7280' : '#0f766e'
-                  }}
+              <ActionsBar>
+                <PrimaryButton
+                  variant={isRunning ? 'running' : 'primary'}
                   onClick={handleRun}
                   disabled={isRunning}
-                  onMouseEnter={(e) => {
-                    if (!isRunning) {
-                      e.currentTarget.style.backgroundColor = '#0d9488';
-                    }
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!isRunning) {
-                      e.currentTarget.style.backgroundColor = '#0f766e';
-                    }
-                  }}
                 >
+                  <Play size={16} />
                   {isRunning ? 'Running...' : runningExecutionId ? 'Executing...' : 'Run'}
-                </button>
-                <button
-                  style={detailStyles.secondaryButton}
+                </PrimaryButton>
+                <SecondaryButton
                   onClick={handleGenerateSteps}
                   disabled={generatingSteps}
-                  onMouseEnter={(e) => {
-                    if (!generatingSteps) {
-                      e.currentTarget.style.backgroundColor = '#f9fafb';
-                    }
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!generatingSteps) {
-                      e.currentTarget.style.backgroundColor = '#ffffff';
-                    }
-                  }}
                 >
+                  <Zap size={16} />
                   {generatingSteps ? 'Generating...' : 'Generate Steps'}
-                </button>
-                {!isEditing && (
-                  <button
-                    style={detailStyles.secondaryButton}
-                    onClick={handleEdit}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.backgroundColor = '#f9fafb';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.backgroundColor = '#ffffff';
-                    }}
-                  >
+                </SecondaryButton>
+                {!isEditing ? (
+                  <SecondaryButton onClick={handleEdit}>
+                    <Edit3 size={16} />
                     Edit
-                  </button>
+                  </SecondaryButton>
+                ) : (
+                  <EditingIndicator>
+                    <Edit3 size={14} />
+                    Editing...
+                  </EditingIndicator>
                 )}
-                {isEditing && (
-                  <span style={{ 
-                    color: '#f59e0b', 
-                    fontWeight: '500',
-                    fontSize: '14px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px'
-                  }}>
-                    ✏️ Editing...
-                  </span>
-                )}
-                <div style={{ position: 'relative' }}>
-                  <button
-                    style={detailStyles.dropdownButton}
+                <DropdownContainer>
+                  <DropdownButton
                     onClick={() => setShowDropdown(!showDropdown)}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.backgroundColor = '#f9fafb';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.backgroundColor = '#ffffff';
-                    }}
                   >
-                    ⋯
-                  </button>
+                    <MoreVertical size={16} />
+                  </DropdownButton>
                   {showDropdown && (
-                    <div style={detailStyles.dropdown}>
-                      <div 
-                        style={detailStyles.dropdownItem}
-                        onClick={() => {
-                          handleDuplicate();
-                          setShowDropdown(false);
-                        }}
-                      >
+                    <Dropdown theme={theme}>
+                      <DropdownItem theme={theme} onClick={() => {
+                        handleDuplicate();
+                        setShowDropdown(false);
+                      }}>
+                        <Copy size={14} />
                         Duplicate
-                      </div>
-                      <div 
-                        style={detailStyles.dropdownItem}
-                        onClick={() => {
-                          handleArchive();
-                          setShowDropdown(false);
-                        }}
-                      >
+                      </DropdownItem>
+                      <DropdownItem theme={theme} onClick={() => {
+                        handleArchive();
+                        setShowDropdown(false);
+                      }}>
+                        <Archive size={14} />
                         Archive
-                      </div>
-                      <div style={detailStyles.dropdownItem}>Versions</div>
-                      <div style={detailStyles.dropdownItem}>Bindings</div>
-                      <div style={detailStyles.dropdownItem}>Permissions</div>
-                    </div>
+                      </DropdownItem>
+                      <DropdownItem theme={theme}>
+                        <History size={14} />
+                        Versions
+                      </DropdownItem>
+                      <DropdownItem theme={theme}>
+                        <Settings size={14} />
+                        Bindings
+                      </DropdownItem>
+                      <DropdownItem theme={theme}>
+                        <Settings size={14} />
+                        Permissions
+                      </DropdownItem>
+                    </Dropdown>
                   )}
-                </div>
-              </div>
-            </div>
-          </div>
+                </DropdownContainer>
+              </ActionsBar>
+            </TitleSection>
+          </Header>
 
           {/* Tabs */}
-          <div style={detailStyles.tabs}>
-            <div
-              style={{
-                ...detailStyles.tab,
-                ...(activeTab === 'overview' ? detailStyles.tabActive : {})
-              }}
+          <TabsContainer>
+            <Tab
+              active={activeTab === 'overview'}
               onClick={() => setActiveTab('overview')}
             >
               Overview
-            </div>
-            <div
-              style={{
-                ...detailStyles.tab,
-                ...(activeTab === 'versions' ? detailStyles.tabActive : {})
-              }}
+            </Tab>
+            <Tab
+              active={activeTab === 'versions'}
               onClick={() => setActiveTab('versions')}
             >
               Versions
-            </div>
-            <div
-              style={{
-                ...detailStyles.tab,
-                ...(activeTab === 'steps' ? detailStyles.tabActive : {})
-              }}
+            </Tab>
+            <Tab
+              active={activeTab === 'steps'}
               onClick={() => setActiveTab('steps')}
             >
-              Generated Steps {generatedSteps && <span style={{ 
-                backgroundColor: '#0f766e', 
-                color: 'white', 
-                borderRadius: '10px', 
-                padding: '2px 6px', 
-                fontSize: '12px', 
-                marginLeft: '6px' 
-              }}>
-                {generatedSteps.plan?.actions?.length || 0}
-              </span>}
-            </div>
-            <div
-              style={{
-                ...detailStyles.tab,
-                ...(activeTab === 'bindings' ? detailStyles.tabActive : {})
-              }}
+              Generated Steps
+              {generatedSteps && (
+                <StepBadge>
+                  {generatedSteps.plan?.actions?.length || 0}
+                </StepBadge>
+              )}
+            </Tab>
+            <Tab
+              active={activeTab === 'bindings'}
               onClick={() => setActiveTab('bindings')}
             >
               Variables
-            </div>
-            <div
-              style={{
-                ...detailStyles.tab,
-                ...(activeTab === 'execution-history' ? detailStyles.tabActive : {})
-              }}
+            </Tab>
+            <Tab
+              active={activeTab === 'execution-history'}
               onClick={() => setActiveTab('execution-history')}
             >
+              <Activity size={14} style={{ marginRight: '4px' }} />
               Execution History
-            </div>
-          </div>
+            </Tab>
+            <Tab
+              active={activeTab === 'failure-analysis'}
+              onClick={() => setActiveTab('failure-analysis')}
+            >
+              🚨 Failure Analysis
+            </Tab>
+          </TabsContainer>
 
           {/* Content */}
-          <div style={detailStyles.content}>
+          <Content theme={theme}>
             {activeTab === 'overview' && (
               <>
                 <div style={detailStyles.descriptionSection}>
-                  <h2 style={detailStyles.sectionTitle}>Description</h2>
+                  <h2 style={{...detailStyles.sectionTitle, color: theme.colors.text}}>Description</h2>
                   {isEditing ? (
                     <textarea
                       value={editedDescription}
@@ -2699,22 +3288,24 @@ export const PromptDetailView: React.FC = () => {
                         width: '100%',
                         minHeight: '100px',
                         padding: '12px',
-                        border: '1px solid #d1d5db',
+                        border: `1px solid ${theme.colors.border}`,
                         borderRadius: '6px',
                         fontSize: '14px',
                         fontFamily: 'inherit',
-                        resize: 'vertical'
+                        resize: 'vertical',
+                        backgroundColor: theme.colors.surface,
+                        color: theme.colors.text
                       }}
                       placeholder="Enter prompt description..."
                     />
                   ) : (
-                    <p style={detailStyles.description}>{prompt.description}</p>
+                    <p style={{...detailStyles.description, color: theme.colors.text}}>{prompt.description}</p>
                   )}
                 </div>
 
                 {(prompt.content || isEditing) && (
                   <div style={detailStyles.contentSection}>
-                    <h2 style={detailStyles.sectionTitle}>Content</h2>
+                    <h2 style={{...detailStyles.sectionTitle, color: theme.colors.text}}>Content</h2>
                     {isEditing ? (
                       <textarea
                         value={editedContent}
@@ -2723,16 +3314,23 @@ export const PromptDetailView: React.FC = () => {
                           width: '100%',
                           minHeight: '200px',
                           padding: '12px',
-                          border: '1px solid #d1d5db',
+                          border: `1px solid ${theme.colors.border}`,
                           borderRadius: '6px',
                           fontSize: '14px',
                           fontFamily: 'monospace',
-                          resize: 'vertical'
+                          resize: 'vertical',
+                          backgroundColor: theme.colors.surface,
+                          color: theme.colors.text
                         }}
                         placeholder="Enter prompt content..."
                       />
                     ) : (
-                      <div style={detailStyles.contentBox}>
+                      <div style={{
+                        ...detailStyles.contentBox,
+                        backgroundColor: theme.colors.surface,
+                        color: theme.colors.text,
+                        borderColor: theme.colors.border
+                      }}>
                         {prompt.content}
                       </div>
                     )}
@@ -2741,7 +3339,7 @@ export const PromptDetailView: React.FC = () => {
 
                 {/* Starting URL Section */}
                 <div style={detailStyles.descriptionSection}>
-                  <h2 style={detailStyles.sectionTitle}>Starting URL</h2>
+                  <h2 style={{...detailStyles.sectionTitle, color: theme.colors.text}}>Starting URL</h2>
                   {isEditing ? (
                     <input
                       type="url"
@@ -2750,19 +3348,126 @@ export const PromptDetailView: React.FC = () => {
                       style={{
                         width: '100%',
                         padding: '12px',
-                        border: '1px solid #d1d5db',
+                        border: `1px solid ${theme.colors.border}`,
                         borderRadius: '6px',
                         fontSize: '14px',
-                        fontFamily: 'inherit'
+                        fontFamily: 'inherit',
+                        backgroundColor: theme.colors.surface,
+                        color: theme.colors.text
                       }}
                       placeholder="https://example.com - Enter the URL where the test should start"
                     />
                   ) : (
-                    <div style={detailStyles.contentBox}>
+                    <div style={{
+                      ...detailStyles.contentBox,
+                      backgroundColor: theme.colors.surface,
+                      color: theme.colors.text,
+                      borderColor: theme.colors.border
+                    }}>
                       {prompt.starting_url || 'No starting URL specified'}
                     </div>
                   )}
                 </div>
+
+                {/* Element Synchronization Status */}
+                {!isEditing && (
+                  <div style={detailStyles.descriptionSection}>
+                    <h2 style={{...detailStyles.sectionTitle, color: theme.colors.text}}>
+                      Element Synchronization
+                      <SyncIndicator 
+                        status={hasRelatedElements ? 'linked' : 'unlinked'}
+                        count={relatedElementsCount}
+                        animated={isSyncUpdating}
+                      />
+                    </h2>
+                    <div style={{
+                      ...detailStyles.contentBox,
+                      backgroundColor: theme.colors.surface,
+                      color: theme.colors.text,
+                      borderColor: theme.colors.border
+                    }}>
+                      {hasRelatedElements ? (
+                        <div>
+                          <SyncDescriptionText theme={theme}>
+                            This prompt references {relatedElementsCount} element{relatedElementsCount !== 1 ? 's' : ''}. 
+                            Changes to element selectors will automatically sync to this prompt.
+                          </SyncDescriptionText>
+                          <div>
+                            <strong>Linked Elements:</strong>
+                            <ul style={{ margin: '8px 0', paddingLeft: '20px' }}>
+                              {relatedElements.map(elementId => (
+                                <li key={elementId} style={{ marginBottom: '4px' }}>
+                                  <SyncElementCode theme={theme}>
+                                    {elementId}
+                                  </SyncElementCode>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                          {getStepsWithElements().length > 0 && (
+                            <div style={{ marginTop: '12px', fontSize: '13px' }}>
+                              <strong>Steps with synchronized elements:</strong>
+                              <div style={{ margin: '8px 0' }}>
+                                {(() => {
+                                  // Debug: Log the raw steps data
+                                  const rawSteps = getStepsWithElements();// More intelligent deduplication: group by step + selector combination
+                                  const stepSelectorGroups = new Map();
+                                  
+                                  rawSteps.forEach(step => {
+                                    // Create a unique key combining step and selector
+                                    const key = `${step.stepIndex}-${step.currentValue}`;
+                                    
+                                    if (!stepSelectorGroups.has(key)) {
+                                      stepSelectorGroups.set(key, {
+                                        stepIndex: step.stepIndex,
+                                        selector: step.currentValue,
+                                        parameterKeys: [],
+                                        elementIds: new Set()
+                                      });
+                                    }
+                                    
+                                    const group = stepSelectorGroups.get(key);
+                                    group.parameterKeys.push(step.parameterKey);
+                                    group.elementIds.add(step.elementId);
+                                  });return Array.from(stepSelectorGroups.values())
+                                    .sort((a, b) => a.stepIndex - b.stepIndex)
+                                    .map((group, index) => (
+                                    <div key={`${group.stepIndex}-${group.selector}`} style={{ 
+                                      marginBottom: '12px', 
+                                      padding: '12px', 
+                                      background: 'rgba(102, 126, 234, 0.05)', 
+                                      borderRadius: '8px',
+                                      border: '1px solid rgba(102, 126, 234, 0.1)' 
+                                    }}>
+                                      <div style={{ marginBottom: '6px' }}>
+                                        <strong>Step {group.stepIndex + 1} - Selector:</strong>
+                                        <SyncCodeElement theme={theme}>
+                                          {group.selector}
+                                        </SyncCodeElement>
+                                      </div>
+                                      <div style={{ fontSize: '12px', color: theme.colors.textSecondary }}>
+                                        Used in parameters: {group.parameterKeys.join(', ')} 
+                                        {group.elementIds.size > 1 && ` (${group.elementIds.size} elements)`}
+                                      </div>
+                                    </div>
+                                  ));
+                                })()}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <SyncEmptyStateText theme={theme}>
+                          <div className="icon">🔓</div>
+                          <div>This prompt doesn't reference any tracked elements yet.</div>
+                          <div className="description">
+                            When you use element selectors in test steps, synchronization will be enabled automatically.
+                          </div>
+                        </SyncEmptyStateText>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 {isEditing && (
                   <div style={{ marginTop: '20px', display: 'flex', gap: '12px', justifyContent: 'flex-start' }}>
@@ -2791,15 +3496,16 @@ export const PromptDetailView: React.FC = () => {
                 )}
 
                 <div style={detailStyles.tagsSection}>
-                  <h2 style={detailStyles.sectionTitle}>Tags</h2>
+                  <h2 style={{...detailStyles.sectionTitle, color: theme.colors.text}}>Tags</h2>
                   <div>
                     {prompt.tags.map((tag, index) => (
                       <span 
                         key={index}
                         style={{
                           ...detailStyles.tag,
-                          backgroundColor: '#f1f5f9',
-                          color: '#475569'
+                          backgroundColor: theme.colors.surface,
+                          color: theme.colors.text,
+                          borderColor: theme.colors.border
                         }}
                       >
                         {tag}
@@ -2813,30 +3519,37 @@ export const PromptDetailView: React.FC = () => {
             {activeTab === 'versions' && (
               <div>
                 <h2 style={detailStyles.sectionTitle}>Versions</h2>
-                <p style={detailStyles.description}>Version management coming soon...</p>
+                <p style={{...detailStyles.description, color: theme.colors.text}}>Version management coming soon...</p>
               </div>
             )}
 
             {activeTab === 'steps' && (
-              <div>
-                <h2 style={detailStyles.sectionTitle}>Generated Test Steps</h2>
+              <StepsSection>
+                <StepsSectionTitle>
+                  <Zap size={20} />
+                  Generated Test Steps
+                </StepsSectionTitle>
                 
                 {stepsError && (
-                  <div style={detailStyles.stepsError}>
+                  <StepsErrorAlert>
                     Error: {stepsError}
-                  </div>
+                  </StepsErrorAlert>
                 )}
                 
                 {!generatedSteps && !stepsError && (
-                  <div style={detailStyles.description}>
-                    Click "Generate Steps" to create executable test steps from this prompt.
-                  </div>
+                  <StepsEmptyState>
+                    <EmptyStateIcon>🚀</EmptyStateIcon>
+                    <EmptyStateText>Ready to Generate Test Steps</EmptyStateText>
+                    <EmptyStateSubtext>
+                      Click "Generate Steps" to create executable test steps from this prompt.
+                    </EmptyStateSubtext>
+                  </StepsEmptyState>
                 )}
                 
                 {generatedSteps && (
                   <>
                     {generatedSteps.metadata && (
-                      <div style={detailStyles.stepsMetadata}>
+                      <StepsMetadataCard>
                         <strong>Generation Info:</strong> {generatedSteps.metadata.stepCount} steps generated 
                         using {generatedSteps.metadata.method} 
                         {generatedSteps.metadata.model && ` (${generatedSteps.metadata.model})`} 
@@ -2847,311 +3560,424 @@ export const PromptDetailView: React.FC = () => {
                             {generatedSteps.plan.meta.realElementsFound} steps use real selectors
                           </>
                         )}
-                      </div>
+                      </StepsMetadataCard>
                     )}
                     
                     {/* Save Test Plan Button */}
-                    <div style={{ marginBottom: '20px', display: 'flex', gap: '12px', alignItems: 'center' }}>
-                      <button
+                    <StepsActionButtonsContainer>
+                      <StepsSaveButton
                         onClick={handleSaveTestPlan}
                         disabled={savingTestPlan}
-                        style={{
-                          ...detailStyles.primaryButton,
-                          padding: '10px 20px',
-                          fontSize: '14px',
-                          fontWeight: '600',
-                          opacity: savingTestPlan ? 0.6 : 1,
-                          cursor: savingTestPlan ? 'not-allowed' : 'pointer',
-                          marginRight: '12px'
-                        }}
+                        loading={savingTestPlan}
                       >
-                        {savingTestPlan ? ' Saving...' : ' Save Test Plan'}
-                      </button>
+                        <CheckCircle size={16} />
+                        {savingTestPlan ? 'Saving...' : 'Save Test Plan'}
+                      </StepsSaveButton>
                       
                       {!isEditingSteps ? (
-                        <button
-                          onClick={startEditingSteps}
-                          style={{
-                            padding: '10px 20px',
-                            fontSize: '14px',
-                            fontWeight: '600',
-                            backgroundColor: '#f59e0b',
-                            color: '#ffffff',
-                            border: 'none',
-                            borderRadius: '8px',
-                            cursor: 'pointer'
-                          }}
-                        >
-                          ✏️ Edit Steps
-                        </button>
+                        <StepsEditButton onClick={startEditingSteps}>
+                          <Edit3 size={16} />
+                          Edit Steps
+                        </StepsEditButton>
                       ) : (
-                        <div style={{ display: 'flex', gap: '8px' }}>
-                          <button
+                        <>
+                          <StepsSaveButton
                             onClick={saveEditedSteps}
                             disabled={savingTestPlan}
-                            style={{
-                              padding: '10px 20px',
-                              fontSize: '14px',
-                              fontWeight: '600',
-                              backgroundColor: '#10b981',
-                              color: '#ffffff',
-                              border: 'none',
-                              borderRadius: '8px',
-                              cursor: savingTestPlan ? 'not-allowed' : 'pointer',
-                              opacity: savingTestPlan ? 0.6 : 1
-                            }}
+                            loading={savingTestPlan}
                           >
-                            {savingTestPlan ? 'Saving...' : ' Save Changes'}
-                          </button>
-                          <button
-                            onClick={cancelEditingSteps}
-                            style={{
-                              padding: '10px 20px',
-                              fontSize: '14px',
-                              fontWeight: '600',
-                              backgroundColor: '#6b7280',
-                              color: '#ffffff',
-                              border: 'none',
-                              borderRadius: '8px',
-                              cursor: 'pointer'
-                            }}
-                          >
-                             Cancel
-                          </button>
-                        </div>
+                            <CheckCircle size={16} />
+                            {savingTestPlan ? 'Saving...' : 'Save Changes'}
+                          </StepsSaveButton>
+                          <StepsCancelButton onClick={cancelEditingSteps}>
+                            <XCircle size={16} />
+                            Cancel
+                          </StepsCancelButton>
+                        </>
                       )}
                       
                       {testPlanSaved && (
-                        <span style={{
-                          color: '#10b981',
-                          fontSize: '14px',
-                          fontWeight: '500',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '4px'
-                        }}>
-                           Test plan saved successfully!
-                        </span>
+                        <StepsSuccessMessage>
+                          <CheckCircle size={16} />
+                          Test plan saved successfully!
+                        </StepsSuccessMessage>
                       )}
-                    </div>
+                    </StepsActionButtonsContainer>
                     
-                    <div style={detailStyles.stepsContainer}>
+                    <ModernStepsContainer>
                       {isEditingSteps && (
-                        <div style={{
-                          marginBottom: '16px',
-                          padding: '12px',
-                          backgroundColor: '#fef3c7',
-                          border: '1px solid #f59e0b',
-                          borderRadius: '8px',
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'center'
-                        }}>
-                          <span style={{ fontSize: '14px', fontWeight: '500' }}>
+                        <EditingModeAlert>
+                          <EditingModeText>
                             🛠️ Editing Mode: Click any step to edit, or add a new step
-                          </span>
-                          <button
-                            onClick={() => setShowAddStepForm(true)}
-                            style={{
-                              padding: '8px 16px',
-                              fontSize: '12px',
-                              fontWeight: '600',
-                              backgroundColor: '#10b981',
-                              color: '#ffffff',
-                              border: 'none',
-                              borderRadius: '6px',
-                              cursor: 'pointer'
-                            }}
-                          >
+                          </EditingModeText>
+                          <AddStepButton onClick={() => setShowAddStepForm(true)}>
                             ➕ Add Step
-                          </button>
-                        </div>
+                          </AddStepButton>
+                        </EditingModeAlert>
                       )}
                       
                       {(isEditingSteps ? editedSteps : generatedSteps.plan?.actions)?.map((action: any, index: number) => {
                         const hasRealElement = action.params?.selector || action.params?.elementId || action.params?.elementName || action.target;
                         const isEditing = editingStepIndex === index;
                         
+                        // Helper function to get meaningful description
+                        const getStepDescription = () => {
+                          // Use description if available and meaningful
+                          if (action.description && action.description !== action.name && action.description !== action.action) {
+                            return action.description;
+                          }
+                          
+                          // Generate human-readable description based on action type
+                          switch(action.action || action.name) {
+                            case 'open_url':
+                              const url = action.url || action.params?.url;
+                              return url ? `Navigate to ${url}` : 'Navigate to URL';
+                            case 'click_css':
+                            case 'click':
+                              const clickTarget = action.target || action.params?.selector || action.params?.elementId;
+                              return clickTarget ? `Click on ${clickTarget}` : 'Click element';
+                            case 'type_css':
+                            case 'type':
+                              const typeText = action.text || action.value || action.params?.text || action.params?.value;
+                              const typeTarget = action.target || action.params?.selector || action.params?.elementId;
+                              if (typeText && typeTarget) {
+                                return `Type "${typeText}" into ${typeTarget}`;
+                              } else if (typeText) {
+                                return `Type "${typeText}"`;
+                              } else if (typeTarget) {
+                                return `Type text into ${typeTarget}`;
+                              }
+                              return 'Type text into element';
+                            case 'wait_for_css':
+                            case 'wait_for':
+                              const waitTarget = action.target || action.params?.selector || action.params?.elementId;
+                              return waitTarget ? `Wait for ${waitTarget} to appear` : 'Wait for element to appear';
+                            case 'assert_text_css':
+                            case 'assert_text':
+                              const assertTarget = action.target || action.params?.selector || action.params?.elementId;
+                              const expectedText = action.expected_result || action.params?.expected_text || action.params?.expected_result;
+                              if (assertTarget && expectedText) {
+                                return `Verify ${assertTarget} contains "${expectedText}"`;
+                              } else if (assertTarget) {
+                                return `Verify text in ${assertTarget}`;
+                              }
+                              return 'Verify element text';
+                            case 'assert_title_contains':
+                              const titleText = action.expected_result || action.params?.expected_text || action.params?.expected_result;
+                              return titleText ? `Verify page title contains "${titleText}"` : 'Verify page title';
+                            case 'screenshot':
+                              return 'Take a screenshot';
+                            case 'extract_data':
+                            case 'extract':
+                            case 'get_data':
+                              const extractTarget = action.target || action.params?.selector || action.params?.element;
+                              const variableName = action.variable || action.params?.variable || action.store_as || action.params?.store_as || action.save_to || action.params?.save_to;
+                              const dataType = action.data_type || action.params?.data_type || action.type || action.params?.type;
+                              
+                              if (extractTarget && variableName) {
+                                return `Extract data from ${extractTarget} into variable '${variableName}'`;
+                              } else if (extractTarget && dataType) {
+                                return `Extract ${dataType} data from ${extractTarget}`;
+                              } else if (extractTarget) {
+                                return `Extract data from ${extractTarget}`;
+                              } else if (variableName) {
+                                return `Extract data into variable '${variableName}'`;
+                              }
+                              return 'Extract data from element';
+                            case 'calculate':
+                            case 'math':
+                            case 'computation':
+                              // Try to find calculation details from various possible fields
+                              const expression = action.expression || action.params?.expression || action.formula || action.params?.formula;
+                              const calculation = action.calculation || action.params?.calculation;
+                              const operation = action.operation || action.params?.operation;
+                              const value = action.value || action.params?.value;
+                              const text = action.text || action.params?.text;
+                              
+                              // Build description based on available data
+                              if (expression) {
+                                return `Calculate: ${expression}`;
+                              } else if (calculation) {
+                                return `Calculate: ${calculation}`;
+                              } else if (operation && value) {
+                                return `Calculate: ${operation} ${value}`;
+                              } else if (operation) {
+                                return `Perform ${operation} calculation`;
+                              } else if (text && text.includes('=')) {
+                                return `Calculate: ${text}`;
+                              } else if (value) {
+                                return `Calculate: ${value}`;
+                              } else if (text) {
+                                return `Calculate: ${text}`;
+                              }
+                              return 'Perform calculation';
+                            case 'scroll':
+                              const scrollTarget = action.target || action.params?.selector || action.params?.direction;
+                              return scrollTarget ? `Scroll ${scrollTarget}` : 'Scroll page';
+                            case 'hover':
+                              const hoverTarget = action.target || action.params?.selector;
+                              return hoverTarget ? `Hover over ${hoverTarget}` : 'Hover over element';
+                            case 'select':
+                            case 'select_option':
+                              const selectTarget = action.target || action.params?.selector;
+                              const selectValue = action.value || action.params?.value || action.params?.option;
+                              if (selectTarget && selectValue) {
+                                return `Select "${selectValue}" from ${selectTarget}`;
+                              } else if (selectTarget) {
+                                return `Select option from ${selectTarget}`;
+                              }
+                              return 'Select option';
+                            default:
+                              // Fallback: try to create meaningful description from available data
+                              const fallbackTarget = action.target || action.params?.selector || action.params?.elementId;
+                              const fallbackValue = action.value || action.text || action.params?.value || action.params?.text;
+                              const actionName = action.action || action.name || 'Perform action';
+                              
+                              if (fallbackTarget && fallbackValue) {
+                                return `${actionName} "${fallbackValue}" on ${fallbackTarget}`;
+                              } else if (fallbackTarget) {
+                                return `${actionName} on ${fallbackTarget}`;
+                              } else if (fallbackValue) {
+                                return `${actionName}: ${fallbackValue}`;
+                              }
+                              
+                              // Last resort: use the action name or description if available
+                              if (action.name && action.name !== action.action) {
+                                return action.name;
+                              }
+                              return actionName;
+                          }
+                        };
+
+                        // Helper function to get essential parameters only
+                        const getEssentialParams = () => {
+                          const essentials: {key: string, value: any}[] = [];
+                          
+                          // Add URL for navigation
+                          if (action.url || action.params?.url) {
+                            essentials.push({
+                              key: 'URL',
+                              value: action.url || action.params?.url
+                            });
+                          }
+                          
+                          // Add selector if it exists and is meaningful
+                          const selector = action.selector || action.params?.selector || action.target;
+                          if (selector && selector !== '' && selector !== 'undefined') {
+                            essentials.push({
+                              key: 'Element',
+                              value: selector
+                            });
+                          }
+                          
+                          // Add text/value for input actions and calculations
+                          const textValue = action.text || action.value || action.params?.text || action.params?.value;
+                          const expression = action.expression || action.params?.expression || action.formula || action.params?.formula;
+                          const calculation = action.calculation || action.params?.calculation;
+                          const operation = action.operation || action.params?.operation;
+                          
+                          // For calculations, prioritize showing the mathematical expression
+                          if ((action.action === 'calculate' || action.name === 'calculate') && expression) {
+                            essentials.push({
+                              key: 'Expression',
+                              value: expression
+                            });
+                          } else if ((action.action === 'calculate' || action.name === 'calculate') && calculation) {
+                            essentials.push({
+                              key: 'Calculation',
+                              value: calculation
+                            });
+                          } else if ((action.action === 'calculate' || action.name === 'calculate') && operation) {
+                            essentials.push({
+                              key: 'Operation',
+                              value: operation
+                            });
+                          } else if (textValue && textValue !== '' && textValue !== 'undefined') {
+                            const label = expression || action.params?.expression ? 'Expression' : 'Text';
+                            essentials.push({
+                              key: label,
+                              value: textValue
+                            });
+                          }
+                          
+                          // For calculations, also show any variables or inputs
+                          if (action.action === 'calculate' || action.name === 'calculate') {
+                            const variables = action.variables || action.params?.variables;
+                            const inputs = action.inputs || action.params?.inputs;
+                            
+                            if (variables && typeof variables === 'object') {
+                              Object.entries(variables).forEach(([key, value]) => {
+                                essentials.push({
+                                  key: `Variable ${key}`,
+                                  value: String(value)
+                                });
+                              });
+                            }
+                            
+                            if (inputs && typeof inputs === 'object') {
+                              Object.entries(inputs).forEach(([key, value]) => {
+                                essentials.push({
+                                  key: `Input ${key}`,
+                                  value: String(value)
+                                });
+                              });
+                            }
+                          }
+                          
+                          // For extract_data actions, show variable and data type information
+                          if (action.action === 'extract_data' || action.name === 'extract_data' || action.action === 'extract' || action.name === 'extract') {
+                            const variableName = action.variable || action.params?.variable || action.store_as || action.params?.store_as || action.save_to || action.params?.save_to;
+                            const dataType = action.data_type || action.params?.data_type || action.type || action.params?.type;
+                            const attribute = action.attribute || action.params?.attribute;
+                            const property = action.property || action.params?.property;
+                            
+                            if (variableName) {
+                              essentials.push({
+                                key: 'Variable',
+                                value: variableName
+                              });
+                            }
+                            
+                            if (dataType) {
+                              essentials.push({
+                                key: 'Data Type',
+                                value: dataType
+                              });
+                            }
+                            
+                            if (attribute) {
+                              essentials.push({
+                                key: 'Attribute',
+                                value: attribute
+                              });
+                            }
+                            
+                            if (property) {
+                              essentials.push({
+                                key: 'Property',
+                                value: property
+                              });
+                            }
+                          }
+                          
+                          // Add expected result for assertions and calculations
+                          const expectedResult = action.expected_result || action.params?.expected_text || action.params?.expected_result || action.result || action.params?.result;
+                          const calculationResult = action.calculation_result || action.params?.calculation_result || action.computed_value || action.params?.computed_value;
+                          
+                          if (calculationResult && calculationResult !== '' && calculationResult !== 'undefined') {
+                            essentials.push({
+                              key: 'Result',
+                              value: calculationResult
+                            });
+                          } else if (expectedResult && expectedResult !== '' && expectedResult !== 'undefined') {
+                            const label = (action.action === 'calculate' || action.name === 'calculate') ? 'Expected Result' : 'Expected';
+                            essentials.push({
+                              key: label,
+                              value: expectedResult
+                            });
+                          }
+                          
+                          // Add direction for scroll actions
+                          const direction = action.direction || action.params?.direction;
+                          if (direction && direction !== '' && direction !== 'undefined') {
+                            essentials.push({
+                              key: 'Direction',
+                              value: direction
+                            });
+                          }
+                          
+                          // Add option/value for select actions
+                          const option = action.option || action.params?.option;
+                          if (option && option !== '' && option !== 'undefined' && option !== textValue) {
+                            essentials.push({
+                              key: 'Option',
+                              value: option
+                            });
+                          }
+                          
+                          return essentials;
+                        };
+                        
                         return (
-                          <div key={index} style={{
-                            ...hasRealElement ? detailStyles.stepItemWithRealElement : detailStyles.stepItem,
-                            border: isEditingSteps ? '2px dashed #d1d5db' : undefined
-                          }}>
+                          <StepCard key={index} isEditing={isEditing}>
                             {isEditing ? (
                               <StepEditForm
                                 step={action}
-<<<<<<< Updated upstream
-                                onSave={(updatedStep) => updateStep(index, updatedStep)}
-                                onCancel={() => setEditingStepIndex(null)}
-=======
                                 stepIndex={index}
                                 promptId={id || ''}
-                                onSave={async (updatedStep) => await updateStep(index, updatedStep)}
+                                onSave={(updatedStep) => updateStep(index, updatedStep)}
                                 onCancel={() => setEditingStepIndex(null)}
                                 onSyncUpdate={async (stepIndex, paramKey, newValue) => {
                                   try {
                                     await updateStepSelector(stepIndex, paramKey, newValue);
                                   } catch (error) {
+                                    console.error('Failed to sync step selector:', error);
                                     throw error;
                                   }
                                 }}
->>>>>>> Stashed changes
                               />
                             ) : (
                               <>
-                                <div style={detailStyles.stepHeader}>
-                                  <div style={{ display: 'flex', alignItems: 'center' }}>
-                                    <span style={detailStyles.stepName}>
-                                      {action.name || action.description || `${action.action || 'Action'} on ${action.target || 'element'}`}
-                                    </span>
-                                    {/* Show action type badge based on action name */}
-                                    <span style={{
-                                      ...detailStyles.genericElementBadge,
-                                      backgroundColor: getActionTypeColor(action.name)
-                                    }}>
-                                      {getActionTypeLabel(action.name)}
-                                    </span>
-                                  </div>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                    <span style={detailStyles.stepIndex}>Step {action.step || index + 1}</span>
-                                    {isEditingSteps && (
-                                      <div style={{ display: 'flex', gap: '4px' }}>
-                                        <button
-                                          onClick={() => setEditingStepIndex(index)}
-                                          style={{
-                                            padding: '4px 8px',
-                                            fontSize: '12px',
-                                            backgroundColor: '#3b82f6',
-                                            color: '#ffffff',
-                                            border: 'none',
-                                            borderRadius: '4px',
-                                            cursor: 'pointer'
-                                          }}
-                                        >
-                                          ✏️
-                                        </button>
-                                        <button
-                                          onClick={() => moveStep(index, index - 1)}
-                                          disabled={index === 0}
-                                          style={{
-                                            padding: '4px 8px',
-                                            fontSize: '12px',
-                                            backgroundColor: index === 0 ? '#d1d5db' : '#6b7280',
-                                            color: '#ffffff',
-                                            border: 'none',
-                                            borderRadius: '4px',
-                                            cursor: index === 0 ? 'not-allowed' : 'pointer'
-                                          }}
-                                        >
-                                          ⬆️
-                                        </button>
-                                        <button
-                                          onClick={() => moveStep(index, index + 1)}
-                                          disabled={index === editedSteps.length - 1}
-                                          style={{
-                                            padding: '4px 8px',
-                                            fontSize: '12px',
-                                            backgroundColor: index === editedSteps.length - 1 ? '#d1d5db' : '#6b7280',
-                                            color: '#ffffff',
-                                            border: 'none',
-                                            borderRadius: '4px',
-                                            cursor: index === editedSteps.length - 1 ? 'not-allowed' : 'pointer'
-                                          }}
-                                        >
-                                          ⬇️
-                                        </button>
-                                        <button
-                                          onClick={() => deleteStep(index)}
-                                          style={{
-                                            padding: '4px 8px',
-                                            fontSize: '12px',
-                                            backgroundColor: '#ef4444',
-                                            color: '#ffffff',
-                                            border: 'none',
-                                            borderRadius: '4px',
-                                            cursor: 'pointer'
-                                          }}
-                                        >
-                                          🗑️
-                                        </button>
-                                      </div>
+                                <StepHeader>
+                                  <StepNumber>{index + 1}</StepNumber>
+                                  <StepContent>
+                                    <StepTitle>
+                                      <ActionTypeBadge actionType={action.action || action.name}>
+                                        {action.action || action.name || 'action'}
+                                      </ActionTypeBadge>
+                                      <StepDescription>{getStepDescription()}</StepDescription>
+                                    </StepTitle>
+                                    
+                                    {getEssentialParams().length > 0 && (
+                                      <StepDetails>
+                                        {getEssentialParams().map(({key, value}) => (
+                                          <StepDetailRow key={key}>
+                                            <StepDetailLabel>{key}:</StepDetailLabel>
+                                            <StepDetailValue>{value}</StepDetailValue>
+                                          </StepDetailRow>
+                                        ))}
+                                      </StepDetails>
                                     )}
-                                  </div>
-                                </div>
-                                
-                                {/* Display step parameters */}
-                                <div style={detailStyles.stepParams}>
-                                  {/* Show action type */}
-                                  {action.action && (
-                                    <div style={detailStyles.stepParamRow}>
-                                      <span style={detailStyles.stepParamKey}>action:</span>
-                                      <span style={detailStyles.stepParamValue}>{action.action}</span>
-                                    </div>
-                                  )}
+                                  </StepContent>
                                   
-                                  {/* Show target/selector */}
-                                  {action.target && (
-                                    <div style={detailStyles.stepParamRow}>
-                                      <span style={detailStyles.stepParamKey}>target:</span>
-                                      <span style={detailStyles.stepParamValue}>{action.target}</span>
-                                    </div>
+                                  {isEditingSteps && (
+                                    <StepActions>
+                                      <StepActionButton
+                                        variant="edit"
+                                        onClick={() => setEditingStepIndex(index)}
+                                        title="Edit step"
+                                      >
+                                        <Edit3 size={12} />
+                                      </StepActionButton>
+                                      <StepActionButton
+                                        variant="up"
+                                        onClick={() => moveStep(index, index - 1)}
+                                        disabled={index === 0}
+                                        title="Move up"
+                                      >
+                                        ⬆️
+                                      </StepActionButton>
+                                      <StepActionButton
+                                        variant="down"
+                                        onClick={() => moveStep(index, index + 1)}
+                                        disabled={index === editedSteps.length - 1}
+                                        title="Move down"
+                                      >
+                                        ⬇️
+                                      </StepActionButton>
+                                      <StepActionButton
+                                        variant="delete"
+                                        onClick={() => deleteStep(index)}
+                                        title="Delete step"
+                                      >
+                                        🗑️
+                                      </StepActionButton>
+                                    </StepActions>
                                   )}
-                                  
-                                  {action.selector && (
-                                    <div style={detailStyles.stepParamRow}>
-                                      <span style={detailStyles.stepParamKey}>selector:</span>
-                                      <span style={detailStyles.stepParamValue}>{action.selector}</span>
-                                    </div>
-                                  )}
-                                  
-                                  {/* Show value/text */}
-                                  {action.value && (
-                                    <div style={detailStyles.stepParamRow}>
-                                      <span style={detailStyles.stepParamKey}>value:</span>
-                                      <span style={detailStyles.stepParamValue}>{action.value}</span>
-                                    </div>
-                                  )}
-                                  
-                                  {action.text && (
-                                    <div style={detailStyles.stepParamRow}>
-                                      <span style={detailStyles.stepParamKey}>text:</span>
-                                      <span style={detailStyles.stepParamValue}>{action.text}</span>
-                                    </div>
-                                  )}
-                                  
-                                  {/* Show URL for navigation steps */}
-                                  {action.url && (
-                                    <div style={detailStyles.stepParamRow}>
-                                      <span style={detailStyles.stepParamKey}>url:</span>
-                                      <span style={detailStyles.stepParamValue}>{action.url}</span>
-                                    </div>
-                                  )}
-                                  
-                                  {/* Show expected result */}
-                                  {action.expected_result && (
-                                    <div style={detailStyles.stepParamRow}>
-                                      <span style={detailStyles.stepParamKey}>expected_result:</span>
-                                      <span style={detailStyles.stepParamValue}>{action.expected_result}</span>
-                                    </div>
-                                  )}
-                                  
-                                  {/* Show any other parameters from the params object */}
-                                  {action.params && Object.keys(action.params).length > 0 && (
-                                    <>
-                                      {Object.entries(action.params).map(([key, value]) => (
-                                        <div key={key} style={detailStyles.stepParamRow}>
-                                          <span style={detailStyles.stepParamKey}>{key}:</span>
-                                          <span style={detailStyles.stepParamValue}>
-                                            {typeof value === 'string' ? value : JSON.stringify(value)}
-                                          </span>
-                                        </div>
-                                      ))}
-                                    </>
-                                  )}
-                                </div>
+                                </StepHeader>
                               </>
                             )}
-                          </div>
+                          </StepCard>
                         );
                       })}
                       
@@ -3161,25 +3987,25 @@ export const PromptDetailView: React.FC = () => {
                           onCancel={() => setShowAddStepForm(false)}
                         />
                       )}
-                    </div>
+                    </ModernStepsContainer>
                     
                     {generatedSteps.plan?.meta && (
-                      <div style={detailStyles.stepsMetadata}>
+                      <StepsMetadataCard>
                         <strong>Plan Metadata:</strong><br/>
                         Prompt: {generatedSteps.plan.meta.prompt}<br/>
                         Version: {generatedSteps.plan.meta.version}<br/>
                         Generated: {new Date(generatedSteps.plan.meta.generatedAt).toLocaleString()}
-                      </div>
+                      </StepsMetadataCard>
                     )}
                   </>
                 )}
-              </div>
+              </StepsSection>
             )}
 
             {activeTab === 'bindings' && (
               <div>
-                <h2 style={detailStyles.sectionTitle}>Test Variables</h2>
-                <p style={detailStyles.description}>
+                <h2 style={{...detailStyles.sectionTitle, color: theme.colors.text}}>Test Variables</h2>
+                <p style={{...detailStyles.description, color: theme.colors.text}}>
                   Define variables with names and descriptions that can be used during step generation or test execution.
                 </p>
                 <BindingsManager promptId={prompt?.id} />
@@ -3194,10 +4020,369 @@ export const PromptDetailView: React.FC = () => {
                 />
               </div>
             )}
-          </div>
-        </div>
 
-        {/* History Sidebar */}
+            {activeTab === 'failure-analysis' && (
+              <FailureAnalysisSection theme={theme}>
+                <FailureAnalysisHeader theme={theme}>
+                  <FailureAnalysisTitle theme={theme}>
+                    🚨 Recent Failures Analysis
+                  </FailureAnalysisTitle>
+                  <RefreshButton 
+                    theme={theme} 
+                    onClick={loadFailureAnalysis}
+                    disabled={loadingFailures}
+                  >
+                    {loadingFailures ? 'Loading...' : 'Refresh'}
+                  </RefreshButton>
+                </FailureAnalysisHeader>
+
+                {failuresError && (
+                  <FailureErrorMessage theme={theme}>
+                    {failuresError}
+                  </FailureErrorMessage>
+                )}
+
+                {loadingFailures && !failureAnalysisData && (
+                  <LoadingMessage theme={theme}>
+                    🔍 Analyzing recent test failures...
+                  </LoadingMessage>
+                )}
+
+                {failureAnalysisData?.executions?.length === 0 && !loadingFailures && (
+                  <EmptyState theme={theme}>
+                    <div className="icon">🎉</div>
+                    <div className="title">No Recent Failures</div>
+                    <div className="description">
+                      Great news! This prompt hasn't had any failed test executions recently.
+                      Keep up the good work with stable test automation.
+                    </div>
+                  </EmptyState>
+                )}
+
+                {failureAnalysisData?.executions?.map((execution: any, index: number) => (
+                  <FailureCard key={execution.execution_id || index} theme={theme}>
+                    <FailureHeader theme={theme}>
+                      <FailureInfo theme={theme}>
+                        <FailureTitle theme={theme}>
+                          ❌ Execution #{execution.execution_id?.slice(-8)}
+                        </FailureTitle>
+                        <FailureDate theme={theme}>
+                          {new Date(execution.started_at).toLocaleDateString('en-US', {
+                            month: 'short',
+                            day: 'numeric',
+                            year: 'numeric',
+                            hour: 'numeric',
+                            minute: '2-digit'
+                          })}
+                        </FailureDate>
+                      </FailureInfo>
+                    </FailureHeader>
+
+                    {execution.failed_steps?.length > 0 && (
+                      <FailedStepsContainer theme={theme}>
+                        <FailedStepsTitle theme={theme}>
+                          Failed Steps ({execution.failed_steps.length})
+                        </FailedStepsTitle>
+                        {execution.failed_steps.slice(0, 3).map((step: any, stepIndex: number) => (
+                          <FailureStepCard key={stepIndex} theme={theme}>
+                            <StepAction theme={theme}>
+                              {step.action} {step.element_type && `(${step.element_type})`}
+                            </StepAction>
+                            {step.error_message && (
+                              <StepError theme={theme}>
+                                {step.error_message}
+                              </StepError>
+                            )}
+                          </FailureStepCard>
+                        ))}
+                        {execution.failed_steps.length > 3 && (
+                          <div style={{ 
+                            textAlign: 'center', 
+                            color: theme.colors.textSecondary,
+                            fontSize: '13px',
+                            marginTop: '8px'
+                          }}>
+                            +{execution.failed_steps.length - 3} more failed steps
+                          </div>
+                        )}
+                      </FailedStepsContainer>
+                    )}
+
+                    {selectedExecution?.execution_id === execution.execution_id && minimalReproSteps && (
+                      <MinimalReproSection theme={theme}>
+                        <div style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          marginBottom: '16px',
+                          padding: '12px',
+                          background: theme.colors.surface === '#2d3748' ? 'rgba(102, 126, 234, 0.1)' : 'rgba(102, 126, 234, 0.05)',
+                          borderRadius: '8px',
+                          border: `1px solid ${theme.colors.border}`
+                        }}>
+                          <div>
+                            <h4 style={{ 
+                              margin: 0,
+                              color: theme.colors.text,
+                              fontSize: '14px',
+                              fontWeight: '600'
+                            }}>
+                              🤖 AI-Generated Minimal Reproduction Steps
+                            </h4>
+                            <p style={{ 
+                              margin: '4px 0 0 0',
+                              fontSize: '12px',
+                              color: theme.colors.textSecondary
+                            }}>
+                              Reduced from {minimalReproSteps.originalStepsCount || 0} to {minimalReproSteps.reducedStepsCount || 0} steps
+                              {minimalReproSteps.reproductionGuarantee && (
+                                <> • {Math.round(minimalReproSteps.reproductionGuarantee * 100)}% reproduction confidence</>
+                              )}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Analysis Summary */}
+                        {minimalReproSteps.analysisReport && (
+                          <div style={{
+                            marginBottom: '16px',
+                            padding: '12px',
+                            background: theme.colors.surface === '#2d3748' ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.05)',
+                            borderRadius: '8px',
+                            fontSize: '12px'
+                          }}>
+                            <div style={{ fontWeight: '600', marginBottom: '8px', color: theme.colors.text }}>
+                              📊 Analysis Summary
+                            </div>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', fontSize: '11px' }}>
+                              {minimalReproSteps.analysisReport.criticalPath && (
+                                <div>
+                                  <strong style={{ color: theme.colors.text }}>Critical Path:</strong>
+                                  <div style={{ color: theme.colors.textSecondary, marginTop: '2px' }}>
+                                    {Array.isArray(minimalReproSteps.analysisReport.criticalPath) 
+                                      ? minimalReproSteps.analysisReport.criticalPath.join(', ')
+                                      : minimalReproSteps.analysisReport.criticalPath}
+                                  </div>
+                                </div>
+                              )}
+                              {minimalReproSteps.analysisReport.removedSteps && (
+                                <div>
+                                  <strong style={{ color: theme.colors.text }}>Removed Steps:</strong>
+                                  <div style={{ color: theme.colors.textSecondary, marginTop: '2px' }}>
+                                    {Array.isArray(minimalReproSteps.analysisReport.removedSteps) 
+                                      ? minimalReproSteps.analysisReport.removedSteps.join(', ')
+                                      : minimalReproSteps.analysisReport.removedSteps}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                            {minimalReproSteps.analysisReport.reasoning && (
+                              <div style={{ marginTop: '8px', fontStyle: 'italic', color: theme.colors.textSecondary }}>
+                                "{minimalReproSteps.analysisReport.reasoning}"
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        <MinimalReproTitle theme={theme}>
+                          ⚡ Minimal Reproduction Steps
+                        </MinimalReproTitle>
+                        <div style={{ 
+                          color: theme.colors.textSecondary,
+                          fontSize: '14px',
+                          marginBottom: '16px'
+                        }}>
+                          AI-generated minimal steps to reproduce this failure:
+                        </div>
+
+                        {/* Run AI Debug Steps Button */}
+                        <div style={{ marginBottom: '16px' }}>
+                          <GenerateButton 
+                            theme={theme}
+                            onClick={runAIDebugSteps}
+                            disabled={runningDebugSteps || !minimalReproSteps?.minimalSteps?.length}
+                            style={{
+                              background: runningDebugSteps ? theme.colors.textSecondary : '#4CAF50',
+                              cursor: (runningDebugSteps || !minimalReproSteps?.minimalSteps?.length) ? 'not-allowed' : 'pointer'
+                            }}
+                          >
+                            {runningDebugSteps ? '🔄 Running Debug Steps...' : '🚀 Run AI Debug Steps'}
+                          </GenerateButton>
+                        </div>
+
+                        {debugStepsError && (
+                          <FailureErrorMessage theme={theme}>
+                            {debugStepsError}
+                          </FailureErrorMessage>
+                        )}
+
+                        {debugStepsResults && (
+                          <div style={{
+                            background: theme.colors.surface === '#2d3748' ? 'rgba(72, 187, 120, 0.1)' : 'rgba(72, 187, 120, 0.1)',
+                            border: '1px solid #48BB78',
+                            borderRadius: '8px',
+                            padding: '12px',
+                            marginBottom: '16px'
+                          }}>
+                            <div style={{ 
+                              fontWeight: '600', 
+                              color: '#48BB78',
+                              marginBottom: '8px'
+                            }}>
+                              ✅ Debug Steps Execution Completed
+                            </div>
+                            <div style={{ fontSize: '13px', color: theme.colors.textSecondary }}>
+                              Execution ID: {debugStepsResults.execution_id || 'N/A'}
+                            </div>
+                            {debugStepsResults.success_rate && (
+                              <div style={{ fontSize: '13px', color: theme.colors.textSecondary }}>
+                                Success Rate: {debugStepsResults.success_rate}%
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        
+                        {minimalStepsError && (
+                          <FailureErrorMessage theme={theme}>
+                            {minimalStepsError}
+                          </FailureErrorMessage>
+                        )}
+
+                        {minimalReproSteps.minimalSteps && (
+                          <ModernStepsContainer>
+                            {minimalReproSteps.minimalSteps.map((step: any, stepIndex: number) => {
+                              // Helper function to get step description
+                              const getStepDescription = () => {
+                                switch(step.action) {
+                                  case 'open_url':
+                                  case 'open':
+                                    const url = step.target || step.value || step.text_value;
+                                    return url ? `Navigate to ${url}` : 'Navigate to URL';
+                                  case 'type':
+                                    const typeText = step.text_value || step.value;
+                                    const typeTarget = step.target?.replace('css=', '') || step.selector;
+                                    if (typeText && typeTarget) {
+                                      return `Type "${typeText}" into ${typeTarget}`;
+                                    } else if (typeText) {
+                                      return `Type "${typeText}"`;
+                                    } else if (typeTarget) {
+                                      return `Type text into ${typeTarget}`;
+                                    }
+                                    return 'Type text into element';
+                                  case 'click':
+                                    const clickTarget = step.target?.replace('css=', '') || step.selector;
+                                    return clickTarget ? `Click on ${clickTarget}` : 'Click element';
+                                  case 'wait_for':
+                                    const waitTarget = step.target?.replace('css=', '') || step.selector;
+                                    return waitTarget ? `Wait for ${waitTarget} to appear` : 'Wait for element to appear';
+                                  case 'verify_element':
+                                  case 'assert_visible':
+                                    const verifyTarget = step.target?.replace('css=', '') || step.selector;
+                                    return verifyTarget ? `Verify ${verifyTarget}` : 'Verify element';
+                                  case 'verify_text':
+                                  case 'assert_text':
+                                    const assertTarget = step.target?.replace('css=', '') || step.selector;
+                                    const expectedText = step.text_value || step.value;
+                                    if (assertTarget && expectedText) {
+                                      return `Verify ${assertTarget} contains "${expectedText}"`;
+                                    } else if (assertTarget) {
+                                      return `Verify text in ${assertTarget}`;
+                                    }
+                                    return 'Verify element text';
+                                  case 'screenshot':
+                                    return 'Take a screenshot';
+                                  default:
+                                    return step.description || step.action || 'Perform action';
+                                }
+                              };
+
+                              // Helper function to get essential parameters
+                              const getEssentialParams = () => {
+                                const essentials: {key: string, value: any}[] = [];
+                                
+                                // Add URL for navigation
+                                if (step.action === 'open_url' || step.action === 'open') {
+                                  const url = step.target || step.value || step.text_value;
+                                  if (url) {
+                                    essentials.push({
+                                      key: 'URL',
+                                      value: url
+                                    });
+                                  }
+                                } else {
+                                  // Add element selector for other actions
+                                  const selector = step.target?.replace('css=', '') || step.selector;
+                                  if (selector && selector !== '' && selector !== 'undefined') {
+                                    essentials.push({
+                                      key: 'Element',
+                                      value: selector
+                                    });
+                                  }
+                                }
+                                
+                                // Add text/value for input actions
+                                const textValue = step.text_value || step.value;
+                                if (textValue && textValue !== '' && textValue !== 'undefined' && step.action !== 'open_url' && step.action !== 'open') {
+                                  essentials.push({
+                                    key: 'Text',
+                                    value: textValue
+                                  });
+                                }
+                                
+                                return essentials;
+                              };
+
+                              return (
+                                <StepCard key={stepIndex}>
+                                  <StepHeader>
+                                    <StepNumber>{stepIndex + 1}</StepNumber>
+                                    <StepContent>
+                                      <StepTitle>
+                                        <ActionTypeBadge actionType={step.action}>
+                                          {step.action?.replace('_', ' ').toUpperCase() || 'ACTION'}
+                                        </ActionTypeBadge>
+                                        <StepDescription>{getStepDescription()}</StepDescription>
+                                        {step.status && (
+                                          <span style={{ 
+                                            marginLeft: '8px',
+                                            padding: '2px 8px',
+                                            borderRadius: '12px',
+                                            fontSize: '10px',
+                                            fontWeight: '600',
+                                            background: step.status === 'failed' ? '#ff6b6b' : 
+                                                       step.status === 'passed' ? '#51cf66' : '#6c757d',
+                                            color: 'white'
+                                          }}>
+                                            {step.status === 'failed' ? '❌ FAILED' : 
+                                             step.status === 'passed' ? '✅ PASSED' : step.status?.toUpperCase()}
+                                          </span>
+                                        )}
+                                      </StepTitle>
+                                      
+                                      {getEssentialParams().length > 0 && (
+                                        <StepDetails>
+                                          {getEssentialParams().map(({key, value}) => (
+                                            <StepDetailRow key={key}>
+                                              <StepDetailLabel>{key}:</StepDetailLabel>
+                                              <StepDetailValue>{value}</StepDetailValue>
+                                            </StepDetailRow>
+                                          ))}
+                                        </StepDetails>
+                                      )}
+                                    </StepContent>
+                                  </StepHeader>
+                                </StepCard>
+                              );
+                            })}
+                          </ModernStepsContainer>
+                        )}
+                      </MinimalReproSection>
+                    )}
+                  </FailureCard>
+                ))}
+              </FailureAnalysisSection>
+            )}
+          </Content>
+        </MainContent>        {/* History Sidebar */}
         <div style={detailStyles.historySidebar}>
           <div style={detailStyles.sidebarHeader}>History</div>
           
@@ -3227,7 +4412,16 @@ export const PromptDetailView: React.FC = () => {
             </div>
           </div>
         </div>
-      </div>
-    </div>
+      </Layout>
+
+      {/* Sync Notification */}
+      {notification && (
+        <SyncNotificationDisplay 
+          type={notification.type}
+          message={notification.message}
+          onClose={clearNotification}
+        />
+      )}
+    </Container>
   );
 };

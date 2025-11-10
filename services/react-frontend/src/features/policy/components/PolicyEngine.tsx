@@ -292,8 +292,6 @@ const LogAction = styled.span`
   margin: 0 0.5rem;
 `;
 
-<<<<<<< Updated upstream
-=======
 const ErrorMessage = styled.div`
   color: ${props => props.theme.colors.error};
   margin-top: 12px;
@@ -345,7 +343,6 @@ const SaveButton = styled.button<{ $hasChanges: boolean; $isSaving: boolean }>`
       (props.theme.colors.surface === '#2d3748' ? '#4a5568' : '#9ca3af')};
   }
 `;
->>>>>>> Stashed changes
 // ================================
 // Policy Engine Component  
 // ================================
@@ -536,23 +533,17 @@ const PolicyEngine: React.FC = () => {
   };
 
   return (
-    <ThemeProvider theme={theme}>
-      <Container>
+    <Container>
       <Header>
         <div>
           <Title> Policy Engine</Title>
           <Subtitle>Governance & Decision Layer for Prompt-Driven Self-Healing Framework</Subtitle>
-<<<<<<< Updated upstream
-          {error && <div style={{color: '#ef4444', marginTop: '8px', fontSize: '14px'}}> {error}</div>}
-          {loading && <div style={{color: '#6b7280', marginTop: '8px', fontSize: '14px'}}>🔄 Loading policies from server...</div>}
-=======
           {error && (
             <ErrorMessage>
               ❌ {error}
             </ErrorMessage>
           )}
           {loading && <LoadingMessage>🔄 Loading policies from server...</LoadingMessage>}
->>>>>>> Stashed changes
         </div>
         <HeaderActions>
           {hasUnsavedChanges && (
@@ -560,28 +551,17 @@ const PolicyEngine: React.FC = () => {
                Unsaved changes
             </UnsavedChangesIndicator>
           )}
-<<<<<<< Updated upstream
-          <button
-            onClick={() => savePolicyChanges()}
-=======
           <SaveButton
             onClick={() => {
               savePolicyChanges();
             }}
->>>>>>> Stashed changes
             disabled={!hasUnsavedChanges || isSaving}
             $hasChanges={hasUnsavedChanges}
             $isSaving={isSaving}
           >
-<<<<<<< Updated upstream
-            {isSaving ? ' Saving...' : ' Save Changes'}
-          </button>
-        </div>
-=======
             {isSaving ? '🔄 Saving...' : '💾 Save Changes'}
           </SaveButton>
         </HeaderActions>
->>>>>>> Stashed changes
       </Header>
 
       <MainContent>
@@ -814,7 +794,6 @@ const PolicyEngine: React.FC = () => {
         </PolicySection>
       </MainContent>
     </Container>
-    </ThemeProvider>
   );
 };
 
