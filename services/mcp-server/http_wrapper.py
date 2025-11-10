@@ -264,6 +264,7 @@ async def mcp_websocket_endpoint(websocket: WebSocket):
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """WebSocket endpoint for MCP communication"""
+    print(f"WebSocket connection attempt at /ws from {websocket.client}")
     await websocket.accept()
     
     try:
@@ -277,9 +278,36 @@ async def websocket_endpoint(websocket: WebSocket):
             # Send response back
             await websocket.send_text(response)
     except Exception as e:
-        print(f"WebSocket error: {e}")
+        print(f"WebSocket error at /ws: {e}")
     finally:
-        await websocket.close()
+        try:
+            await websocket.close()
+        except:
+            pass
+
+@app.websocket("/")
+async def root_websocket_endpoint(websocket: WebSocket):
+    """WebSocket endpoint at root path for ALB routing"""
+    print(f"WebSocket connection attempt at / from {websocket.client}")
+    await websocket.accept()
+    
+    try:
+        while True:
+            # Receive message from client
+            message = await websocket.receive_text()
+            
+            # Process through MCP server
+            response = await mcp_server.handle_message(message)
+            
+            # Send response back
+            await websocket.send_text(response)
+    except Exception as e:
+        print(f"WebSocket error at /: {e}")
+    finally:
+        try:
+            await websocket.close()
+        except:
+            pass
 
 @app.post("/mcp")
 async def mcp_http_endpoint(request: dict):
