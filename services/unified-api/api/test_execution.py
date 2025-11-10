@@ -20,14 +20,13 @@ from pathlib import Path
 from core.database import get_database, DatabaseManager
 from core.binding_processor import BindingProcessor
 from schemas.enterprise import TestBindings, DataBinding
+from services.selector_conversion import convert_steps_to_dual_selector_format, SelectorConverter
 
 # Setup logger
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-<<<<<<< Updated upstream
-=======
 def determine_test_execution_status(results: Dict, return_code: int) -> str:
     """
     Determine the final test execution status based on the new status system:
@@ -323,7 +322,6 @@ async def log_selector_policy_decision(
             json.dumps(context_data)
         )
 
->>>>>>> Stashed changes
 async def get_db() -> DatabaseManager:
     """Get database dependency"""
     return await get_database()
@@ -358,9 +356,6 @@ async def execute_prompt(
         plan_data = json.loads(plan_result['plan_json'])
         steps_data = plan_data.get('steps', [])
         
-<<<<<<< Updated upstream
-        # Load active data bindings from datahub.data_bindings table
-=======
         # Fix corrupted XPath selectors in existing plan data
         for step in steps_data:
             if 'dual_selectors' in step and step['dual_selectors']:
@@ -371,7 +366,6 @@ async def execute_prompt(
                     step['dual_selectors']['xpath_selector'] = corrected_xpath
         
         # Load active data bindings from datahub.data_bindings table for this specific prompt
->>>>>>> Stashed changes
         active_bindings = []
         try:
             bindings_query = """
@@ -383,10 +377,6 @@ async def execute_prompt(
             db_bindings = await db.execute(bindings_query)
             
             if db_bindings:
-<<<<<<< Updated upstream
-                logger.info(f"🔗 Found {len(db_bindings)} active data bindings from datahub")
-=======
->>>>>>> Stashed changes
                 
                 for binding in db_bindings:
                     source_ref = binding.get('source_ref', {})
@@ -414,13 +404,8 @@ async def execute_prompt(
         
         if not steps_data:
             raise HTTPException(status_code=400, detail="No steps found in the plan. Please generate steps first.")
-<<<<<<< Updated upstream
-        
-        # Convert steps to format expected by Java runner
-=======
 
         # Initialize test_steps array for processing
->>>>>>> Stashed changes
         test_steps = []
         
         # Initialize variable mapping for binding names
@@ -513,22 +498,14 @@ async def execute_prompt(
                 if 'args' in processed_step:
                     step_args = processed_step.get('args', {})
                     variable_name = step_args.get('variable', step_args.get('data', ''))
-<<<<<<< Updated upstream
-                    locator = step_args.get('selector', step_args.get('locator', ''))
-=======
                     # Apply selector policy - pass full step to access dual_selectors
                     locator = await get_policy_based_selector(prompt_id, i, processed_step, db)
->>>>>>> Stashed changes
                     element_index = step_args.get('element_index') or step_args.get('index')  # Get element_index or index if present
                 elif 'params' in processed_step:
                     step_params = processed_step.get('params', {})
                     variable_name = step_params.get('variable', step_params.get('data', ''))
-<<<<<<< Updated upstream
-                    locator = step_params.get('selector', step_params.get('locator', ''))
-=======
                     # Apply selector policy - pass full step to access dual_selectors
                     locator = await get_policy_based_selector(prompt_id, i, processed_step, db)
->>>>>>> Stashed changes
                     element_index = step_params.get('element_index') or step_params.get('index')  # Get element_index or index if present
                 else:
                     variable_name = processed_step.get('variable', processed_step.get('data', ''))
@@ -540,12 +517,7 @@ async def execute_prompt(
                 if element_index is not None:
                     # Include element_index in the data field as JSON for Java parsing
                     import json
-<<<<<<< Updated upstream
-                    data_field = json.dumps({"variable": variable_name, "element_index": element_index})
-                
-=======
                     data_field = json.dumps({"variable": variable_name, "index": element_index})
->>>>>>> Stashed changes
                 test_steps.append({
                     "step_id": f"step_{i+1}",
                     "action": action,
@@ -582,11 +554,8 @@ async def execute_prompt(
             elif 'args' in processed_step:
                 # New AI format with 'args'
                 step_args = processed_step.get('args', {})
-<<<<<<< Updated upstream
-=======
                 # Apply selector policy - pass full step to access dual_selectors
                 policy_locator = await get_policy_based_selector(prompt_id, i, processed_step, db)
->>>>>>> Stashed changes
                 test_steps.append({
                     "step_id": f"step_{i+1}",
                     "action": action,
@@ -597,11 +566,8 @@ async def execute_prompt(
             elif 'params' in processed_step:
                 # Another format with 'params'
                 step_params = processed_step.get('params', {})
-<<<<<<< Updated upstream
-=======
                 # Apply selector policy - pass full step to access dual_selectors
                 policy_locator = await get_policy_based_selector(prompt_id, i, processed_step, db)
->>>>>>> Stashed changes
                 test_steps.append({
                     "step_id": f"step_{i+1}",
                     "action": processed_step.get('name', action),
@@ -773,63 +739,6 @@ async def create_execution_record(db: DatabaseManager, prompt_id: str, steps: Li
 def update_db_status_sync(status: str, execution_id: str, prompt_id: str = None, message: str = None, results: Dict = None, bindings: List[Dict] = None):
     """Helper to update database status synchronously using direct connection"""
     try:
-<<<<<<< Updated upstream
-        logger.info(f" Starting DATABASE-TRACKED execution for prompt {prompt_id}, execution_id: {execution_id}")
-
-        # Synchronous database update function that uses direct psycopg2 connection
-        def update_db_status_sync(status: str, message: str = None, results: Dict = None):
-            """Helper to update database status synchronously using direct connection"""
-            try:
-                import psycopg2
-                import os
-                
-                # Get database connection parameters from environment or defaults
-                db_config = {
-                    'host': os.getenv('DB_HOST', 'localhost'),
-                    'port': int(os.getenv('DB_PORT', 5432)),
-                    'database': os.getenv('DB_NAME', 'self_healing_tests'),
-                    'user': os.getenv('DB_USER', 'postgres'),
-                    'password': os.getenv('DB_PASSWORD', 'password')
-                }
-                
-                # Create direct synchronous connection
-                conn = psycopg2.connect(**db_config)
-                cur = conn.cursor()
-                
-                if status == 'completed' and results:
-                    # Final update with results
-                    cur.execute("""
-                        UPDATE exec.runs 
-                        SET status = %s, finished_at = NOW(), runner_meta = %s
-                        WHERE id = %s
-                    """, (status, json.dumps(results), execution_id))
-                    
-                    # Update individual step results if available
-                    step_results = None
-                    if 'results' in results:
-                        step_results = results['results']
-                    elif 'steps' in results:
-                        step_results = results['steps']
-                        
-                    if step_results:
-                        logger.info(f" Updating {len(step_results)} step statuses synchronously...")
-                        for i, step_result in enumerate(step_results):
-                            java_status = step_result.get('status', 'unknown')
-                            step_status = 'passed' if java_status == 'PASS' else 'failed'
-                            error_msg = step_result.get('error', '')
-                            
-                            cur.execute("""
-                                UPDATE exec.step_results 
-                                SET status = %s, error_message = %s
-                                WHERE test_run_id = %s AND step_order = %s
-                            """, (step_status, error_msg, execution_id, i + 1))
-                            
-                        logger.info(f" Updated {len(step_results)} step statuses")
-                    else:
-                        logger.warning(f" No step results found for update. Keys: {list(results.keys())}")
-                else:
-                    # Simple status update
-=======
         import psycopg2
         import os
         
@@ -895,7 +804,6 @@ def update_db_status_sync(status: str, execution_id: str, prompt_id: str = None,
                         'step_context': f'execution_step_{i}'
                     }
                     
->>>>>>> Stashed changes
                     cur.execute("""
                         INSERT INTO exec.binding_usage (execution_id, binding_name, binding_scope, usage_context)
                         VALUES (%s, %s, %s, %s)
@@ -1000,58 +908,6 @@ async def execute_java_test_background(prompt_id: str, test_steps: List[Dict], e
         # Convert to Java runner format
         java_steps = []
         for step in test_steps:
-<<<<<<< Updated upstream
-            # Map action names to Java runner format
-            action = step["action"]
-            if action == "open_url":
-                action = "open"
-            elif action == "assert_visible":
-                action = "verify_element"
-            elif action == "assert_text":
-                action = "verify_text"
-            elif action == "screenshot":
-                action = "screenshot"
-            # Keep extract_data and calculate as-is since Java runner supports them
-            
-            # Format locator properly
-            locator = step["locator"]
-            if locator and not locator.startswith("css=") and not locator.startswith("xpath="):
-                if locator.startswith("#") or locator.startswith(".") or "[" in locator:
-                    locator = f"css={locator}"
-            
-            # For open_url, put URL in locator field as well
-            if step["action"] == "open_url":
-                locator = step["value"]
-            
-            # Special handling for extract_data and calculate actions
-            data_value = step["value"]
-            if step["action"] == "extract_data":
-                # For extract_data, the Java runner expects the variable name in the 'data' field
-                data_value = step["value"]  # Variable name
-            elif step["action"] == "calculate":
-                # For calculate, the Java runner expects the result variable in 'data' field
-                # and the formula in 'locator' field (which is already set above)
-                data_value = step["value"]  # Result variable name
-                
-            java_steps.append({
-                "page": "saucedemo",
-                "action": action,
-                "locator": locator,
-                "elementId": f"element_{len(java_steps) + 1}",
-                "data": data_value
-            })
-
-        logger.info(f" Converted {len(java_steps)} steps to Java format")
-
-        # Java runner expects a direct JSON array of steps, not an object with "steps" property
-        # Log bindings information but don't include in the JSON file
-        if bindings:
-            logger.info(f"🔗 Found {len(bindings)} bindings for this execution")
-        else:
-            logger.info("📝 No bindings provided to execution")
-
-        # Create temporary execution file with JUST the steps array (Java format)
-=======
             # Check if steps are already in Java format (from AI debug execution)
             if "elementId" in step and "page" in step:
                 # Steps are already in Java format, ensure selectorPolicy is set
@@ -1102,7 +958,6 @@ async def execute_java_test_background(prompt_id: str, test_steps: List[Dict], e
                     "data": data_value,
                     "selectorPolicy": current_selector_policy  # KEY FIX: Pass policy to Java runner
                 })
->>>>>>> Stashed changes
         with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
             json.dump(java_steps, f, indent=2)  # Write steps array directly, not wrapped in object
             temp_file = f.name
@@ -1309,9 +1164,6 @@ async def update_execution_status(db: DatabaseManager, execution_id: str, status
                     step_index + 1  # Convert 0-based to 1-based indexing
                 )
     except Exception as e:
-<<<<<<< Updated upstream
-        logger.error(f"Error updating execution status: {str(e)}")
-=======
         logger.error(f"Failed to update execution status: {e}")
         raise
 
@@ -1522,4 +1374,3 @@ async def execute_debug_steps(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to execute debug steps: {str(e)}")
->>>>>>> Stashed changes

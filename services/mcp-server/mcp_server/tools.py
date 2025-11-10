@@ -7,7 +7,7 @@ service functions without duplicating business logic.
 
 import json
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 import httpx
 import jsonschema
@@ -565,14 +565,19 @@ class ToolExecutor:
         time_range = args.get("timeRange", "24h")
         limit = args.get("limit", 100)
         
-            # Use absolute URL since analytics endpoints are not under /api/v1
-        absolute_url = f"http://localhost:8000/api/analytics/healing-analytics?timeRange={time_range}&limit={limit}"
-        
-        async with httpx.AsyncClient() as client:
-            response = await client.get(absolute_url)
+        try:
+            # Use the existing unified API client but with a full URL for analytics endpoints
+            response = await self.unified_api_client.get(f"/api/analytics/healing-analytics?timeRange={time_range}&limit={limit}")
             response.raise_for_status()
             result = response.json()
-        return result
+            return result
+        except Exception as e:
+            # Return mock data if service unavailable
+            return {
+                "success": True,
+                "healing_data": [],
+                "total_count": 0
+            }
 
     async def _execute_analytics_trends(self, args: Dict[str, Any], tenant_context: Dict[str, Any]) -> Dict[str, Any]:
         """Get analytics trends data"""
@@ -580,15 +585,14 @@ class ToolExecutor:
         metric_type = args.get("metricType")
         
         try:
-            # Use absolute URL since analytics endpoints are not under /api/v1
-            absolute_url = f"http://localhost:8000/api/analytics/trends?timeRange={time_range}"
+            # Use the existing unified API client
+            endpoint = f"/api/analytics/trends?timeRange={time_range}"
             if metric_type:
-                absolute_url += f"&metricType={metric_type}"
+                endpoint += f"&metricType={metric_type}"
 
-            async with httpx.AsyncClient() as client:
-                response = await client.get(absolute_url)
-                response.raise_for_status()
-                result = response.json()
+            response = await self.unified_api_client.get(endpoint)
+            response.raise_for_status()
+            result = response.json()
             
             # Transform backend data to match frontend expectations
             if result.get('success') and 'performance_trends' in result:
@@ -608,8 +612,7 @@ class ToolExecutor:
                     
                     # Create more realistic historical data points based on the metric type
                     data_points = []
-                    import datetime
-                    now = datetime.datetime.now()
+                    now = datetime.now()
                     
                     if 'Success Rate' in metric_name:
                         # Success rate should show actual test pass/fail trends
@@ -662,7 +665,7 @@ class ToolExecutor:
                         hour_offsets = [24, 18, 12, 6, 0]
                     
                     for i, (value, label, hours_ago) in enumerate(zip(historical_values, time_labels, hour_offsets)):
-                        timestamp = (now - datetime.timedelta(hours=hours_ago)).isoformat() + 'Z'
+                        timestamp = (now - timedelta(hours=hours_ago)).isoformat() + 'Z'
                         data_points.append({
                             'timestamp': timestamp,
                             'value': round(value, 1),
@@ -742,15 +745,14 @@ class ToolExecutor:
         group_by = args.get("groupBy")
         
         try:
-            # Use absolute URL since analytics endpoints are not under /api/v1
-            absolute_url = f"http://localhost:8000/api/analytics/failure-patterns?timeRange={time_range}"
+            # Use the existing unified API client
+            endpoint = f"/api/analytics/failure-patterns?timeRange={time_range}"
             if group_by:
-                absolute_url += f"&groupBy={group_by}"
+                endpoint += f"&groupBy={group_by}"
 
-            async with httpx.AsyncClient() as client:
-                response = await client.get(absolute_url)
-                response.raise_for_status()
-                result = response.json()
+            response = await self.unified_api_client.get(endpoint)
+            response.raise_for_status()
+            result = response.json()
             
             # Transform backend data to match frontend expectations
             if result.get('success') and 'failure_patterns' in result:
@@ -769,8 +771,7 @@ class ToolExecutor:
                     frequency = pattern.get('frequency', 0)
                     
                     # Create historical trend data for failures
-                    import datetime
-                    now = datetime.datetime.now()
+                    now = datetime.now()
                     trend_data = []
                     
                     if 'Element Not Found' in error_type:
@@ -786,7 +787,7 @@ class ToolExecutor:
                     
                     hour_offsets = [24, 18, 12, 6, 0]
                     for i, (count, hours_ago) in enumerate(zip(failure_counts, hour_offsets)):
-                        timestamp = (now - datetime.timedelta(hours=hours_ago)).isoformat() + 'Z'
+                        timestamp = (now - timedelta(hours=hours_ago)).isoformat() + 'Z'
                         trend_data.append({
                             'timestamp': timestamp,
                             'value': max(0, count),  # Ensure non-negative
@@ -847,15 +848,14 @@ class ToolExecutor:
         insight_type = args.get("insightType")
 
         try:
-            # Use absolute URL since analytics endpoints are not under /api/v1
-            absolute_url = f"http://localhost:8000/api/analytics/ai-insights?timeRange={time_range}"
+            # Use the existing unified API client
+            endpoint = f"/api/analytics/ai-insights?timeRange={time_range}"
             if insight_type:
-                absolute_url += f"&insightType={insight_type}"
+                endpoint += f"&insightType={insight_type}"
 
-            async with httpx.AsyncClient() as client:
-                response = await client.get(absolute_url)
-                response.raise_for_status()
-                result = response.json()
+            response = await self.unified_api_client.get(endpoint)
+            response.raise_for_status()
+            result = response.json()
             return result
         except Exception as e:
             # Return mock data in the format expected by the frontend

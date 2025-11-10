@@ -2,9 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import styled from 'styled-components';
 import { useAuth } from '../../contexts/AuthContext';
-<<<<<<< Updated upstream
-
-=======
 import { useTheme } from '../../contexts/ThemeContext';
 import { 
   BarChart3, 
@@ -30,7 +27,6 @@ import {
   Eye,
   X
 } from 'lucide-react';
->>>>>>> Stashed changes
 const SidebarContainer = styled.div`
   width: 250px;
   height: 100vh;
@@ -69,40 +65,26 @@ const NavigationList = styled.div`
   padding: 20px 0;
   flex: 1;
 `;
-<<<<<<< Updated upstream
-
-const NavItem = styled.div<{ active?: boolean }>`
-=======
-const NavItem = styled.div<{ $active?: boolean; $isSubmenu?: boolean }>`
->>>>>>> Stashed changes
+const NavItem = styled.div<{ $active?: boolean; $isSubmenu?: boolean; $themeColors?: any }>`
   display: flex;
   align-items: center;
   gap: 12px;
   padding: 12px 20px;
   padding-left: ${props => props.$isSubmenu ? '52px' : '20px'};
   cursor: pointer;
-<<<<<<< Updated upstream
-  color: ${props => props.active ? '#0066cc' : '#6c757d'};
-  background: ${props => props.active ? '#f0f8ff' : 'transparent'};
-  border-right: ${props => props.active ? '3px solid #0066cc' : '3px solid transparent'};
-  font-weight: ${props => props.active ? '600' : '500'};
-=======
-  color: ${props => props.$active ? props.theme.colors.primary : props.theme.colors.textSecondary};
-  background: ${props => props.$active ? `${props.theme.colors.primary}15` : 'transparent'};
-  border-right: ${props => props.$active ? `3px solid ${props.theme.colors.primary}` : '3px solid transparent'};
+  color: ${props => props.$active ? '#0066cc' : '#6c757d'};
+  background: ${props => props.$active ? '#f0f8ff' : 'transparent'};
+  border-right: ${props => props.$active ? '3px solid #0066cc' : '3px solid transparent'};
   font-weight: ${props => props.$active ? '600' : '500'};
   font-size: ${props => props.$isSubmenu ? '13px' : '14px'};
->>>>>>> Stashed changes
   transition: all 0.2s ease;
 
   &:hover {
-    background: ${props => props.active ? '#f0f8ff' : '#f8f9fa'};
-    color: ${props => props.active ? '#0066cc' : '#495057'};
+    background: ${props => props.$active ? '#f0f8ff' : '#f8f9fa'};
+    color: ${props => props.$active ? '#0066cc' : '#495057'};
   }
 `;
 
-<<<<<<< Updated upstream
-=======
 const NavItemWithSubmenu = styled(NavItem)<{ $expanded?: boolean }>`
   &:hover .chevron {
     color: ${props => props.theme.colors.text};
@@ -119,7 +101,6 @@ const SubmenuContainer = styled.div<{ $expanded?: boolean }>`
   overflow: hidden;
   transition: max-height 0.3s ease;
 `;
->>>>>>> Stashed changes
 const NavIcon = styled.div`
   font-size: 16px;
   width: 20px;
@@ -193,8 +174,6 @@ const LogoutButton = styled.button`
   }
 `;
 
-<<<<<<< Updated upstream
-=======
 const ChromeExtensionPromo = styled.div`
   margin: 16px 20px;
   padding: 16px;
@@ -290,7 +269,6 @@ const PromoCloseButton = styled.button`
     color: white;
   }
 `;
->>>>>>> Stashed changes
 interface GlobalSidebarProps {
   className?: string;
 }
@@ -299,16 +277,6 @@ const GlobalSidebar: React.FC<GlobalSidebarProps> = ({ className }) => {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useAuth();
-<<<<<<< Updated upstream
-
-  const navigationItems = [
-    { path: '/', label: 'Execution Dashboard', icon: '', key: 'execution' },
-    { path: '/elements', label: 'Elements', icon: '', key: 'elements' },
-    { path: '/prompts', label: 'Prompts', icon: '', key: 'prompts' },
-    { path: '/policy', label: 'Policy Dashboard', icon: '', key: 'dashboard' },
-    { path: '/policy-engine', label: 'Policy Engine', icon: '', key: 'policy-engine' },
-    { path: '/page-context', label: 'Page Context', icon: '', key: 'page-context' },
-=======
   const { isDark, toggleTheme } = useTheme();
   const [analyticsExpanded, setAnalyticsExpanded] = useState(false);
   const [showChromeExtensionPromo, setShowChromeExtensionPromo] = useState(true);
@@ -363,29 +331,23 @@ const GlobalSidebar: React.FC<GlobalSidebarProps> = ({ className }) => {
     { path: '/policy', label: 'Policy Dashboard', icon: <Shield size={16} />, key: 'dashboard' },
     { path: '/policy-engine', label: 'Policy Engine', icon: <Settings size={16} />, key: 'policy-engine' },
     { path: '/page-context', label: 'Page Context', icon: <Globe size={16} />, key: 'page-context' },
->>>>>>> Stashed changes
   ];
 
   const handleNavigation = (path: string) => {
     navigate(path);
   };
 
-<<<<<<< Updated upstream
-=======
   const handleSubmenuToggle = (key: string) => {
     if (key === 'analytics') {
       setAnalyticsExpanded(!analyticsExpanded);
     }
   };
 
->>>>>>> Stashed changes
   const handleLogout = () => {
     logout();
     navigate('/login');
   };
 
-<<<<<<< Updated upstream
-=======
   const handleGetChromeExtension = () => {
     navigate('/chrome-extension');
   };
@@ -395,7 +357,6 @@ const GlobalSidebar: React.FC<GlobalSidebarProps> = ({ className }) => {
     localStorage.setItem('sidebarChromeExtensionPromoDismissed', 'true');
   };
 
->>>>>>> Stashed changes
   const isActive = (path: string) => {
     if (path === '/') {
       return location.pathname === '/' || location.pathname === '/execution';
@@ -403,8 +364,6 @@ const GlobalSidebar: React.FC<GlobalSidebarProps> = ({ className }) => {
     return location.pathname === path;
   };
 
-<<<<<<< Updated upstream
-=======
   const isAnalyticsActive = () => {
     return location.pathname.startsWith('/analytics');
   };
@@ -416,7 +375,6 @@ const GlobalSidebar: React.FC<GlobalSidebarProps> = ({ className }) => {
     }
   }, [location.pathname]);
 
->>>>>>> Stashed changes
   const getInitials = (name: string) => {
     return name
       .split(' ')
@@ -435,19 +393,6 @@ const GlobalSidebar: React.FC<GlobalSidebarProps> = ({ className }) => {
       
       <NavigationList>
         {navigationItems.map((item) => (
-<<<<<<< Updated upstream
-          <NavItem
-            key={item.key}
-            active={isActive(item.path)}
-            onClick={() => handleNavigation(item.path)}
-          >
-            <NavIcon>{item.icon}</NavIcon>
-            {item.label}
-          </NavItem>
-        ))}
-      </NavigationList>
-
-=======
           <div key={item.key}>
             {item.hasSubmenu ? (
               <>
@@ -513,7 +458,6 @@ const GlobalSidebar: React.FC<GlobalSidebarProps> = ({ className }) => {
         </ChromeExtensionPromo>
       )}
       
->>>>>>> Stashed changes
       {user && (
         <UserSection>
           <UserInfo>

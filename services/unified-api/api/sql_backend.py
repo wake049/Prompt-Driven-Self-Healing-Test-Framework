@@ -4,18 +4,14 @@ Migrated from Node.js Express to FastAPI
 Handles database operations for test sessions, elements, and review queue
 """
 
-from fastapi import APIRouter, HTTPException, Query, Body
+from fastapi import APIRouter, HTTPException, Query, Body, Depends
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 import json
-<<<<<<< Updated upstream
-import logging
-=======
 
 from core.auth import get_current_active_user
 from models.auth_models import CurrentUser
->>>>>>> Stashed changes
 
 router = APIRouter()
 
@@ -724,8 +720,6 @@ async def get_all_elements(
         
     except Exception as e:raise HTTPException(status_code=500, detail=f"Failed to fetch elements: {str(e)}")
 
-<<<<<<< Updated upstream
-=======
 @router.delete("/elements/{element_id}")
 async def delete_element(
     element_id: str,
@@ -915,7 +909,6 @@ async def get_executions(
         
     except Exception as e:raise HTTPException(status_code=500, detail=f"Failed to fetch executions: {str(e)}")
 
->>>>>>> Stashed changes
 @router.get("/health")
 async def health_check():
     """SQL backend health check"""
@@ -961,9 +954,6 @@ def normalize_selector(selector: str) -> str:
     elif selector.startswith('tag='):
         return selector[4:]
     
-<<<<<<< Updated upstream
-    return selector
-=======
     return selector
 
 # Analytics endpoints for dashboard
@@ -1613,4 +1603,3 @@ async def get_ai_insights():
         return insights
         
     except Exception as e:return []
->>>>>>> Stashed changes

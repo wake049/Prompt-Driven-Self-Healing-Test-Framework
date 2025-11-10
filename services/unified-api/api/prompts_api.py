@@ -10,6 +10,7 @@ import json
 from core.database import get_database, DatabaseManager
 from core.auth import get_current_active_user
 from models.auth_models import CurrentUser
+from services.selector_conversion import convert_steps_to_dual_selector_format
 
 router = APIRouter()
 
@@ -530,8 +531,6 @@ async def create_or_update_test_plan(test_plan_data: Dict[str, Any], db: Databas
             raise HTTPException(status_code=400, detail="prompt_id is required")
         
         steps = test_plan_data.get("generated_steps", test_plan_data.get("steps", []))
-<<<<<<< Updated upstream
-=======
         
         # Convert steps to dual selector format for better policy support
         try:
@@ -539,7 +538,6 @@ async def create_or_update_test_plan(test_plan_data: Dict[str, Any], db: Databas
         except Exception as e:
             steps_with_dual_selectors = steps  # Use original steps if conversion fails
         
->>>>>>> Stashed changes
         plan_json = {
             "steps": steps,
             "metadata": {
@@ -551,11 +549,6 @@ async def create_or_update_test_plan(test_plan_data: Dict[str, Any], db: Databas
             }
         }
         
-<<<<<<< Updated upstream
-        logger.info(f" Saving test plan with {len(steps)} steps for prompt {prompt_id}")
-        
-=======
->>>>>>> Stashed changes
         # Check if a plan already exists for this prompt_id
         check_query = "SELECT id FROM planner.plans WHERE prompt_id = $1 ORDER BY created_at DESC LIMIT 1"
         existing_plan = await db.execute_one(check_query, prompt_id)

@@ -21,10 +21,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import asyncio
 from pathlib import Path
 import asyncio
-<<<<<<< Updated upstream
-=======
 from fastapi import Depends, Request, HTTPException
->>>>>>> Stashed changes
 
 try:
     from openai import OpenAI
@@ -41,7 +38,18 @@ from services.page_context_service import page_context_service
 from core.element_ranking import ElementRankingService
 from core.caching import CacheService  
 from core.cost_management import CostManagementService
-from core.database import get_database
+from core.database import get_database, DatabaseManager, get_database_manager
+
+# Import authentication dependencies
+try:
+    from core.auth import get_current_active_user
+    from models.auth_models import CurrentUser
+except ImportError:
+    # Define fallback types for when auth is not available
+    from typing import Any
+    CurrentUser = Any
+    def get_current_active_user():
+        return {"user_id": "anonymous", "is_admin": False}
 
 class VariableValidationService:
     """Service to validate and correct AI-generated variable names against active data bindings"""
@@ -402,13 +410,6 @@ class EnterpriseAIService:
                             if css_selector:
                                 element_selectors[element['element_key']] = css_selector
                     
-<<<<<<< Updated upstream
-                    logger.info(f"🏗️ Found {len(element_selectors)} price/total elements in repository: {list(element_selectors.keys())}")
-                    
-                except Exception as e:
-                    logger.error(f" Failed to load data bindings: {e}")
-                    existing_bindings = None
-=======
                     # Cache policy preference for synchronous selector methods
                     try:
                         policy_query = """
@@ -432,7 +433,6 @@ class EnterpriseAIService:
                     except Exception as e:self._cache_policy_preference(True)
                     
                 except Exception as e:existing_bindings = None
->>>>>>> Stashed changes
                 
                 # Process bindings if they were loaded successfully
                 if existing_bindings:
@@ -602,18 +602,12 @@ class EnterpriseAIService:
                         screenshot_url=smart_context.get('screenshot_url')
                     )
                 else:
-<<<<<<< Updated upstream
-                    # Fallback to auto-detection
-                    logger.info(" Smart context not found, using auto-detection...")
-                    element_selectors = [self._get_element_selector(el) for el in prompt_envelope.page_slice.elements]
-=======
                     # Fallback to auto-detection# Use async method to get policy-based selectors
                     element_selectors = []
                     for el in prompt_envelope.page_slice.elements:
                         selector = await self._get_policy_based_element_selector(el)
                         element_selectors.append(selector)
                     
->>>>>>> Stashed changes
                     prompt_envelope.page_context = page_context_service.detect_page_context(
                         page_url=prompt_envelope.page_url,
                         element_selectors=element_selectors
@@ -672,26 +666,6 @@ class EnterpriseAIService:
                 for i, el in enumerate(ranked_elements[:10]):  # Log first 10 ranked elements
                     tag = self._get_element_tag(el)
                     text = self._get_element_text(el)[:50] + "..." if len(self._get_element_text(el)) > 50 else self._get_element_text(el)
-<<<<<<< Updated upstream
-                    selector = self._get_element_selector(el)
-                    logger.info(f"  [ranked {i}] {tag}: '{text}' - {selector}")
-                if len(ranked_elements) > 10:
-                    logger.info(f"  ... and {len(ranked_elements) - 10} more ranked elements")
-            else:
-                logger.info(" No elements after ranking/filtering")
-            
-            # Generate test steps using AI when available, fallback to heuristic
-            if self.client and self.config["openai"]["enabled"]:
-                steps, actual_tokens = await self._generate_ai_plan(prompt_envelope, ranked_elements)
-                method = "ai-powered"
-                model = self.config["openai"]["model"]
-            else:
-                steps, actual_tokens = self._generate_heuristic_plan(prompt_envelope, ranked_elements)
-                method = "heuristic-fallback"
-                model = "rule-based"
-                cache_hits += 1  # Heuristic is essentially cached
-            
-=======
                     selector = self._get_element_selector(el) if len(ranked_elements) > 10 else ranked_elements[-10:]
             else:# Generate test steps using AI when available, fallback to heuristic
                 if self.client and self.config["openai"]["enabled"]:
@@ -704,23 +678,26 @@ class EnterpriseAIService:
                     model = "rule-based"
                     cache_hits += 1  # Heuristic is essentially cached
             
-            # SAFETY POLICY: Validate generated steps for destructive operations
-            if current_user:
+            # SAFETY POLICY: Validate generated steps for destructive operations (if available)
+            try:
                 from core.safety_policy import safety_policy
                 validated_steps = []
                 for step in steps:
                     try:
                         await safety_policy.validate_step_action(
-                            current_user, 
+                            None,  # No current_user available in this context
                             step.action, 
                             step.args
                         )
                         validated_steps.append(step)
-                    except Exception as e:# Skip this step instead of failing the entire request
+                    except Exception as e:
+                        # Skip this step instead of failing the entire request
                         continue
                 steps = validated_steps
+            except ImportError:
+                # Safety policy not available, skip validation
+                pass
             
->>>>>>> Stashed changes
             # Track actual usage
             cost_summary = self.cost_management.track_usage(
                 prompt_envelope.tenant_id,
@@ -748,10 +725,6 @@ class EnterpriseAIService:
                 model=model,
                 cache_used=cache_hits > 0
             )
-<<<<<<< Updated upstream
-            
-            logger.info(f" Generated {len(steps)} steps for {prompt_envelope.tenant_id} in {response.processing_time_ms}ms")
-=======
 
             # Log final response steps for debugging
             for i, step in enumerate(response.steps):
@@ -760,7 +733,6 @@ class EnterpriseAIService:
                     pass
                 elif step.target and '//*[@' in step.target:
                     pass
->>>>>>> Stashed changes
             return response
 
         except Exception as e:
@@ -881,9 +853,6 @@ class EnterpriseAIService:
             
             # Convert to PlanStep objects with variable validation
             steps = []
-<<<<<<< Updated upstream
-            for raw_step in raw_steps[:prompt_envelope.max_steps]:
-=======
             for i, raw_step in enumerate(raw_steps[:prompt_envelope.max_steps]):
                 # Apply policy-based selector transformation to AI-generated target
                 original_target = raw_step.get("target")
@@ -905,7 +874,6 @@ class EnterpriseAIService:
                         element_id = args['selector'][1:]  # Remove #
                         args['selector'] = f"//*[@id='{element_id}']"
                 
->>>>>>> Stashed changes
                 step = PlanStep(
                     action=raw_step.get("action", ""),
                     target=raw_step.get("target"),
@@ -913,11 +881,6 @@ class EnterpriseAIService:
                     confidence=raw_step.get("confidence", 0.8),
                     description=raw_step.get("description")
                 )
-<<<<<<< Updated upstream
-                
-=======
-
->>>>>>> Stashed changes
                 # Validate and correct variables in the step
                 validated_step = self.variable_validator.validate_step_variables(step)
                 if validated_step:  # Only add if validation passed
@@ -966,32 +929,21 @@ class EnterpriseAIService:
             validated_step = self.variable_validator.validate_step_variables(step)
             if validated_step:
                 validated_steps.append(validated_step)
-            else:return validated_steps, {"input": 0, "output": 0}
+            else:
+                return validated_steps, {"input": 0, "output": 0}
 
     # =========================
     # STEP GENERATION HELPERS
     # =========================
     
-<<<<<<< Updated upstream
-    def _generate_login_steps(self, elements: List[Any]) -> List[PlanStep]:
-        """Generate login-specific steps"""
-        steps = []
-        
-        logger.info(f"🔑 Looking for login elements in {len(elements)} available elements")
-=======
     async def _generate_login_steps(self, elements: List[Any]) -> List[PlanStep]:
         """Generate login-specific steps with policy-based selectors"""
         steps = [] 
->>>>>>> Stashed changes
         
         # Find username/email field
         username_el = self._find_element_by_keywords(elements, ["email", "username", "user", "user-name"])
         if username_el:
-<<<<<<< Updated upstream
-            logger.info(f" Found username field: {self._get_element_tag(username_el)} - '{self._get_element_text(username_el)}' - {self._get_element_selector(username_el)}")
-=======
             username_selector = await self._get_policy_based_element_selector(username_el)
->>>>>>> Stashed changes
             steps.append(PlanStep(
                 action="type",
                 target=self._get_element_id(username_el),
@@ -1006,11 +958,7 @@ class EnterpriseAIService:
         else:# Find password field
             password_el = self._find_element_by_keywords(elements, ["password"])
         if password_el:
-<<<<<<< Updated upstream
-            logger.info(f" Found password field: {self._get_element_tag(password_el)} - '{self._get_element_text(password_el)}' - {self._get_element_selector(password_el)}")
-=======
             password_selector = await self._get_policy_based_element_selector(password_el)
->>>>>>> Stashed changes
             steps.append(PlanStep(
                 action="type", 
                 target=self._get_element_id(password_el),
@@ -1025,11 +973,7 @@ class EnterpriseAIService:
         else:# Find submit button
             submit_el = self._find_element_by_keywords(elements, ["submit", "login", "signin"])
         if submit_el:
-<<<<<<< Updated upstream
-            logger.info(f" Found submit button: {self._get_element_tag(submit_el)} - '{self._get_element_text(submit_el)}' - {self._get_element_selector(submit_el)}")
-=======
             submit_selector = await self._get_policy_based_element_selector(submit_el)
->>>>>>> Stashed changes
             steps.append(PlanStep(
                 action="click",
                 target=self._get_element_id(submit_el),
@@ -1683,12 +1627,6 @@ CRITICAL: Adapt completely to the website type. Don't use e-commerce patterns fo
         return element.get("id", f"el_{int(time.time()*1000)}")
     
     def _get_element_selector(self, element: Any) -> str:
-<<<<<<< Updated upstream
-        """Get element CSS selector"""
-        if hasattr(element, 'selector_css'):
-            return element.selector_css or ""
-        return element.get("css_selector", "") or element.get("selector", "")
-=======
         """Get element selector based on current policy preference - uses repository selectors"""
         
         try:
@@ -1836,7 +1774,6 @@ CRITICAL: Adapt completely to the website type. Don't use e-commerce patterns fo
             if hasattr(element, 'selector_css'):
                 return element.selector_css or ""
             return element.get("css_selector", "") or element.get("selector", "")
->>>>>>> Stashed changes
     
     def _get_element_tag(self, element: Any) -> str:
         """Get element tag name"""
@@ -1932,8 +1869,6 @@ CRITICAL: Adapt completely to the website type. Don't use e-commerce patterns fo
             method="budget_check_failed"
         )
     
-<<<<<<< Updated upstream
-=======
     async def generate_minimal_reproduction_steps(
         self,
         execution_id: str,
@@ -2208,7 +2143,6 @@ Return a JSON array of recommendation strings.
         
         return recommendations
 
->>>>>>> Stashed changes
     def _create_error_response(self, error_message: str, start_time: float) -> PlanResponse:
         """Create response for error scenarios"""
         return PlanResponse(
@@ -2597,13 +2531,10 @@ Return JSON with:
             
             elements = []
             for i, el in enumerate(options["availableElements"]):
-<<<<<<< Updated upstream
-=======
                 # Use actual CSS selector as element_id if available
                 css_selector = el.get("css_selector") or el.get("selector")
                 xpath_selector = el.get("xpath_selector") or el.get("xpath")
                 element_id = css_selector if css_selector else f"el_{i}"
->>>>>>> Stashed changes
                 page_element = PageElement(
                     element_id=f"el_{i}",
                     tag=el.get("tag", "div"),
@@ -2768,16 +2699,11 @@ async def plan_endpoint(
         
         return json_response
         
-<<<<<<< Updated upstream
-    except Exception as e:
-        logger.error(f" /v1/plan endpoint error: {e}")
-        raise HTTPException(status_code=500, detail=f"Plan generation failed: {str(e)}")
-=======
     except Exception as e:raise HTTPException(status_code=500, detail=f"Plan generation failed: {str(e)}")
 
 @router.get("/v1/safety-policy")
 async def get_safety_policy(
-    current_user: CurrentUser = Depends(get_current_active_user)
+    current_user: Any = Depends(get_current_active_user)
 ):
     """
     Get the current safety policy configuration.
@@ -2819,7 +2745,7 @@ async def get_safety_policy(
 @router.post("/v1/test-safety-policy")
 async def test_safety_policy(
     request: Dict[str, Any],
-    current_user: CurrentUser = Depends(get_current_active_user)
+    current_user = Depends(get_current_active_user)
 ):
     """
     Test endpoint to validate prompts against the safety policy.
@@ -2853,7 +2779,6 @@ async def test_safety_policy(
             }
         
     except Exception as e:raise HTTPException(status_code=500, detail=f"Safety policy test failed: {str(e)}")
->>>>>>> Stashed changes
 
 @router.get("/v1/catalog/{catalog_id}/v/{version}")
 async def get_catalog_endpoint(
@@ -2891,8 +2816,6 @@ async def get_catalog_endpoint(
         raise
     except Exception as e:raise HTTPException(status_code=500, detail=f"Failed to get catalog: {str(e)}")
 
-<<<<<<< Updated upstream
-=======
 @router.post("/generate-minimal-repro")
 async def generate_minimal_reproduction_steps(
     request: Dict[str, Any],
@@ -3595,7 +3518,6 @@ async def store_elements_in_repository(page_info: dict, elements: list) -> int:
     except Exception as e:
         return 0
 
->>>>>>> Stashed changes
 @router.get("/health")
 async def health_check():
     """Health check endpoint"""

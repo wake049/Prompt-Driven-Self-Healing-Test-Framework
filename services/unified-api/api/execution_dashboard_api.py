@@ -155,19 +155,13 @@ async def get_recent_executions(
     limit: int = 20,
     prompt_id: Optional[str] = None,
     test_case_id: Optional[str] = None,
+    element_id: Optional[str] = None,
+    status: Optional[str] = None,
     db: DatabaseManager = Depends(get_database_manager),
     current_user: CurrentUser = Depends(get_current_active_user)
 ):
-<<<<<<< Updated upstream
-    """Get recent test executions using proper exec.runs table with tenant filtering"""
-    try:
-        logger.info(f" Getting {limit} recent executions from exec.runs for user {current_user.user.email}")
-        
-        # Build WHERE clause for filtering including tenant/project isolation
-=======
     """Get recent test executions using proper exec.runs table with tenant filtering and optional element filtering"""
     try:# Build WHERE clause for filtering including tenant/project isolation
->>>>>>> Stashed changes
         where_conditions = ["1=1"]  # Base condition
         query_params = []
         
@@ -250,11 +244,9 @@ async def get_recent_executions(
                 'failed_steps': failed_steps,
                 'healed_steps': 0  # TODO: Add healing tracking
             }
-<<<<<<< Updated upstream
-=======
             
-            # If this is for failure analysis (elementId or status=failed), include step details
-            if elementId or status == "failed":
+            # If this is for failure analysis (element_id or status=failed), include step details
+            if element_id or status == "failed":
                 try:
                     # Get step details for this execution
                     steps_query = """
@@ -263,7 +255,7 @@ async def get_recent_executions(
                     WHERE test_run_id = $1 
                     ORDER BY step_order ASC
                     """
-                    step_results = await db.execute(steps_query, execution_id)
+                    step_results = await db.execute(steps_query, str(row.get('id')))
                     
                     execution_data['steps'] = [
                         {
@@ -295,7 +287,6 @@ async def get_recent_executions(
                     execution_data['steps'] = []
                     execution_data['failed_steps'] = []
             
->>>>>>> Stashed changes
             executions.append(execution_data)
         return executions
         
@@ -303,8 +294,6 @@ async def get_recent_executions(
         # Return empty list rather than error for dashboard resilience
         return []
 
-<<<<<<< Updated upstream
-=======
 @router.get("/execution/{execution_id}/details")
 async def get_execution_details_for_ui(
     execution_id: str,
@@ -400,7 +389,6 @@ async def get_execution_details_for_ui(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get execution details: {str(e)}")
 
->>>>>>> Stashed changes
 @router.get("/execution/{execution_id}")
 async def get_execution_details(
     execution_id: str,
@@ -559,9 +547,6 @@ async def health_check():
         "status": "healthy",
         "service": "execution_dashboard_api", 
         "timestamp": datetime.now().isoformat()
-<<<<<<< Updated upstream
-    }
-=======
     }
 
 # M7 SCRUM-15: Enhanced Dashboard APIs
@@ -929,4 +914,3 @@ async def cleanup_old_executions(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to cleanup executions: {str(e)}")
->>>>>>> Stashed changes

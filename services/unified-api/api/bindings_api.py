@@ -38,12 +38,7 @@ async def get_prompt_bindings(
             ORDER BY priority DESC, created_at DESC
         """
         
-<<<<<<< Updated upstream
         db_bindings = await db.execute(bindings_query)
-        logger.info(f"Found {len(db_bindings)} active data bindings from datahub")
-=======
-        db_bindings = await db.execute(bindings_query, scope_name)
->>>>>>> Stashed changes
         
         # Convert to frontend format
         bindings = []
@@ -102,23 +97,10 @@ async def get_prompt_bindings(
                 }
             
             bindings.append(frontend_binding)
-<<<<<<< Updated upstream
-        
-        print(f" Returning {len(bindings)} bindings in frontend format")
-        
-        return {"bindings": bindings}
-        
-    except Exception as e:
-        logger.error(f"Failed to get bindings for prompt {prompt_id}: {str(e)}")
-        print(f" Error getting bindings: {str(e)}")
-        import traceback
-        traceback.print_exc()
-=======
 
         return {"bindings": bindings}
         
     except Exception as e:
->>>>>>> Stashed changes
         raise HTTPException(status_code=500, detail="Failed to get bindings")
 
 @router.post("/prompts/{prompt_id}/bindings")
@@ -154,12 +136,6 @@ async def update_prompt_bindings(
             print(f" Created project: {project_id}")
         else:
             project_id = project_result['id']
-<<<<<<< Updated upstream
-            print(f" Using existing project: {project_id}")
-        
-=======
-
->>>>>>> Stashed changes
         # Clear existing bindings for this project and prompt scope
         scope_name = f"prompt_{prompt_id}"
         await db.execute_command("""
@@ -167,12 +143,6 @@ async def update_prompt_bindings(
             SET is_active = false 
             WHERE project_id = $1 AND (scope = $2 OR scope LIKE 'prompt_%' OR scope = 'shopping_cart')
         """, project_id, scope_name)
-<<<<<<< Updated upstream
-        print(f" Deactivated existing bindings for project {project_id} and scope: {scope_name}")
-        
-=======
-
->>>>>>> Stashed changes
         # Insert new bindings
         import time
         timestamp = int(time.time())
@@ -231,15 +201,6 @@ async def update_prompt_bindings(
             100 - i,  # Higher priority for earlier bindings
             True
             )
-<<<<<<< Updated upstream
-            
-            print(f" Created binding: {binding.name} -> {rule_name}")
-        
-        print(f"🎉 Successfully saved {len(bindings.bindings)} bindings to datahub.data_bindings")
-        
-=======
-
->>>>>>> Stashed changes
         # Verify the save by counting active bindings
         verify_query = """
         SELECT COUNT(*) as count
@@ -249,12 +210,6 @@ async def update_prompt_bindings(
         
         verify_result = await db.execute_one(verify_query, scope_name)
         saved_count = verify_result['count'] if verify_result else 0
-<<<<<<< Updated upstream
-        print(f" Verification: Found {saved_count} active bindings after save")
-        
-=======
-
->>>>>>> Stashed changes
         return {
             "success": True,
             "message": f"Successfully saved {len(bindings.bindings)} bindings",
@@ -263,12 +218,6 @@ async def update_prompt_bindings(
         }
         
     except Exception as e:
-<<<<<<< Updated upstream
-        logger.error(f"Failed to update bindings for prompt {prompt_id}: {str(e)}")
-        print(f" Error updating bindings: {str(e)}")
-=======
-
->>>>>>> Stashed changes
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail="Failed to update bindings")
@@ -280,12 +229,6 @@ async def update_prompt_bindings(
         }
 
     except Exception as e:
-<<<<<<< Updated upstream
-        logger.error(f"Failed to update bindings for prompt {prompt_id}: {str(e)}")
-        print(f" Error: {str(e)}")
-=======
-
->>>>>>> Stashed changes
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Failed to update bindings: {str(e)}")
@@ -467,9 +410,4 @@ async def get_binding_templates():
         }
 
     except Exception as e:
-<<<<<<< Updated upstream
-        logger.error(f"Failed to get binding templates: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to get binding templates")
-=======
-        raise HTTPException(status_code=500, detail="Failed to get binding templates")
->>>>>>> Stashed changes
