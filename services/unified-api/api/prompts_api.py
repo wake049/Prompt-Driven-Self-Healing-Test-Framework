@@ -5,13 +5,11 @@ Prompts API - Database-connected implementation for prompt management with multi
 from fastapi import APIRouter, HTTPException, Depends
 from typing import List, Dict, Any, Optional
 from datetime import datetime
-import logging
+
 import json
 from core.database import get_database, DatabaseManager
 from core.auth import get_current_active_user
 from models.auth_models import CurrentUser
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -209,10 +207,7 @@ async def get_prompts(
     current_user: CurrentUser = Depends(get_current_active_user)
 ):
     """Get all prompts from database with tenant filtering"""
-    try:
-        logger.info(f" Getting prompts for user {current_user.user.email}")
-        
-        # Build tenant-aware query
+    try:# Build tenant-aware query
         where_conditions = ["1=1"]
         query_params = []
         
@@ -281,15 +276,12 @@ async def get_prompts(
         
         return {"prompts": prompts, "total": len(prompts)}
         
-    except Exception as e:
-        logger.error(f"Error fetching prompts: {e}")
-        raise HTTPException(status_code=500, detail="Failed to fetch prompts")
+    except Exception as e:raise HTTPException(status_code=500, detail="Failed to fetch prompts")
 
 @router.get("/prompts/{prompt_id}")
 async def get_prompt(prompt_id: str, db: DatabaseManager = Depends(get_db)):
     """Get a specific prompt by ID"""
     try:
-        logger.info(f" Fetching prompt with ID: {prompt_id}")
         query = """
         SELECT 
             p.id,
@@ -314,12 +306,7 @@ async def get_prompt(prompt_id: str, db: DatabaseManager = Depends(get_db)):
         result = await db.execute_one(query, prompt_id)
         
         if not result:
-            logger.warning(f" Prompt not found for ID: {prompt_id}")
             raise HTTPException(status_code=404, detail="Prompt not found")
-        
-        logger.info(f" Found prompt: {result['title']}, starting_url: {result['starting_url']}")
-        logger.info(f" Raw result starting_url type: {type(result['starting_url'])}")
-        logger.info(f" Raw result starting_url repr: {repr(result['starting_url'])}")
         
         # Use the dedicated title column, fallback to extracting from text if empty
         title = result["title"]
@@ -344,24 +331,16 @@ async def get_prompt(prompt_id: str, db: DatabaseManager = Depends(get_db)):
             "estimated_duration": str(result["estimated_duration"]) if result["estimated_duration"] else None,
             "dateModified": result["created_at"].isoformat() + "Z" if result["created_at"] else None,
         }
-        
-        logger.info(f"📤 Returning prompt with starting_url: {prompt['starting_url']}")
-        
         return prompt
         
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"Error fetching prompt {prompt_id}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to fetch prompt")
+    except Exception as e:raise HTTPException(status_code=500, detail="Failed to fetch prompt")
 
 @router.post("/prompts")
 async def create_prompt(prompt_data: Dict[str, Any], db: DatabaseManager = Depends(get_db)):
     """Create a new prompt"""
-    try:
-        logger.info(f"Creating prompt with data: {prompt_data}")
-        
-        # Insert the new prompt into the correct schema
+    try:# Insert the new prompt into the correct schema
         # Use the actual planner.prompts table structure with explicit IDs
         insert_query = """
         INSERT INTO planner.prompts (
@@ -400,11 +379,7 @@ async def create_prompt(prompt_data: Dict[str, Any], db: DatabaseManager = Depen
                 minutes = int(prompt_data["estimated_duration"])
                 estimated_duration = f"{minutes} minutes"
             except (ValueError, TypeError):
-                estimated_duration = None
-        
-        logger.info(f"Inserting: text={content}, intent={intent_field}, title={title}")
-        
-        # Execute the insert with all the new fields
+                estimated_duration = None# Execute the insert with all the new fields
         result = await db.execute_one(
             insert_query,
             content,  # text field ($1)
@@ -421,11 +396,7 @@ async def create_prompt(prompt_data: Dict[str, Any], db: DatabaseManager = Depen
         )
         
         if not result:
-            raise HTTPException(status_code=500, detail="Failed to create prompt")
-        
-        logger.info(f"Created prompt with result: {result}")
-        
-        # Handle tags if provided (simplified since we don't have tags table in schema)
+            raise HTTPException(status_code=500, detail="Failed to create prompt")# Handle tags if provided (simplified since we don't have tags table in schema)
         tags = []
         
         # Format response to match frontend expectations
@@ -449,18 +420,13 @@ async def create_prompt(prompt_data: Dict[str, Any], db: DatabaseManager = Depen
         
         return new_prompt
         
-    except Exception as e:
-        logger.error(f"Error creating prompt: {e}")
-        # Return the actual error for debugging
+    except Exception as e:# Return the actual error for debugging
         raise HTTPException(status_code=500, detail=f"Failed to create prompt: {str(e)}")
 
 @router.put("/prompts/{prompt_id}")
 async def update_prompt(prompt_id: str, prompt_data: Dict[str, Any], db: DatabaseManager = Depends(get_db)):
     """Update an existing prompt"""
-    try:
-        logger.info(f"🔄 Updating prompt {prompt_id} with data: {prompt_data}")
-        
-        # Update the prompt in the correct schema
+    try:# Update the prompt in the correct schema
         update_query = """
         UPDATE planner.prompts 
         SET text = $2, intent = $3, title = $4, category = $5, tags = $6, 
@@ -484,8 +450,6 @@ async def update_prompt(prompt_id: str, prompt_data: Dict[str, Any], db: Databas
         # Extract and log the actual values being used
         content_value = prompt_data.get("content", "")
         description_value = prompt_data.get("description", "")
-        logger.info(f"📝 Updating prompt with content: '{content_value}' and description: '{description_value}'")
-        
         result = await db.execute_one(
             update_query,
             prompt_id,
@@ -502,22 +466,13 @@ async def update_prompt(prompt_id: str, prompt_data: Dict[str, Any], db: Databas
             estimated_duration  # estimated_duration
         )
         
-        if not result:
-            logger.error(f" No rows affected when updating prompt {prompt_id}")
-            raise HTTPException(status_code=404, detail="Prompt not found")
-        
-        logger.info(f" Successfully updated prompt {prompt_id}")
-        
-        # Get the updated prompt with tags
+        if not result:raise HTTPException(status_code=404, detail="Prompt not found")# Get the updated prompt with tags
         updated_prompt = await get_prompt(prompt_id, db)
-        logger.info(f" Returning updated prompt: {updated_prompt}")
         return updated_prompt
         
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"Error updating prompt {prompt_id}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to update prompt")
+    except Exception as e:raise HTTPException(status_code=500, detail="Failed to update prompt")
 
 @router.get("/generated-test-plans/by-prompt/{prompt_id}")
 async def get_test_plans_by_prompt(prompt_id: str, db: DatabaseManager = Depends(get_db)):
@@ -564,9 +519,7 @@ async def get_test_plans_by_prompt(prompt_id: str, db: DatabaseManager = Depends
         
         return {"test_plans": plans, "total": len(plans)}
         
-    except Exception as e:
-        logger.error(f"Error fetching test plans for prompt {prompt_id}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to fetch test plans")
+    except Exception as e:raise HTTPException(status_code=500, detail="Failed to fetch test plans")
 
 @router.post("/generated-test-plans")
 async def create_or_update_test_plan(test_plan_data: Dict[str, Any], db: DatabaseManager = Depends(get_db)):
@@ -577,6 +530,16 @@ async def create_or_update_test_plan(test_plan_data: Dict[str, Any], db: Databas
             raise HTTPException(status_code=400, detail="prompt_id is required")
         
         steps = test_plan_data.get("generated_steps", test_plan_data.get("steps", []))
+<<<<<<< Updated upstream
+=======
+        
+        # Convert steps to dual selector format for better policy support
+        try:
+            steps_with_dual_selectors = convert_steps_to_dual_selector_format(steps)
+        except Exception as e:
+            steps_with_dual_selectors = steps  # Use original steps if conversion fails
+        
+>>>>>>> Stashed changes
         plan_json = {
             "steps": steps,
             "metadata": {
@@ -588,8 +551,11 @@ async def create_or_update_test_plan(test_plan_data: Dict[str, Any], db: Databas
             }
         }
         
+<<<<<<< Updated upstream
         logger.info(f" Saving test plan with {len(steps)} steps for prompt {prompt_id}")
         
+=======
+>>>>>>> Stashed changes
         # Check if a plan already exists for this prompt_id
         check_query = "SELECT id FROM planner.plans WHERE prompt_id = $1 ORDER BY created_at DESC LIMIT 1"
         existing_plan = await db.execute_one(check_query, prompt_id)
@@ -608,8 +574,6 @@ async def create_or_update_test_plan(test_plan_data: Dict[str, Any], db: Databas
                 "draft",
                 existing_plan["id"]
             )
-            logger.info(f" Updated existing test plan {existing_plan['id']} with {len(steps)} steps")
-        else:
             # Insert new plan
             insert_query = """
             INSERT INTO planner.plans (prompt_id, status, plan_json)
@@ -622,7 +586,6 @@ async def create_or_update_test_plan(test_plan_data: Dict[str, Any], db: Databas
                 "draft",
                 json.dumps(plan_json)
             )
-            logger.info(f" Created new test plan with {len(steps)} steps")
         
         if not result:
             raise HTTPException(status_code=500, detail="Failed to create test plan")
@@ -640,9 +603,7 @@ async def create_or_update_test_plan(test_plan_data: Dict[str, Any], db: Databas
         }
         
         return new_plan
-    except Exception as e:
-        logger.error(f"Error creating test plan: {e}")
-        raise HTTPException(status_code=500, detail="Failed to create test plan")
+    except Exception as e:raise HTTPException(status_code=500, detail="Failed to create test plan")
 
 @router.get("/elements")
 async def get_elements(limit: int = 100, db: DatabaseManager = Depends(get_db)):
@@ -697,56 +658,47 @@ async def get_elements(limit: int = 100, db: DatabaseManager = Depends(get_db)):
         return {"elements": elements, "total": len(elements)}
         
     except Exception as e:
-        logger.error(f"Error fetching elements: {e}")
-        logger.error(f"Error type: {type(e)}")
         
         # Try a simpler query to check if table exists
         try:
             simple_query = "SELECT COUNT(*) FROM repo.elements"
             count = await db.execute_scalar(simple_query)
-            logger.info(f"Found {count} elements in database")
-        except Exception as table_error:
-            logger.error(f"Table check failed: {table_error}")
-            # Try alternative table
+        except Exception as table_error:# Try alternative table
             try:
                 simple_query = "SELECT COUNT(*) FROM recorded_elements"
                 count = await db.execute_scalar(simple_query)
-                logger.info(f"Found {count} elements in recorded_elements table")
-            except Exception as alt_error:
-                logger.error(f"Alternative table check failed: {alt_error}")
-        
-        # Fallback to mock data if database fails
-        mock_elements = [
-            {
-                "id": "el_1",
-                "tag": "input",
-                "type": "text",
-                "name": "username",
-                "placeholder": "Enter username",
-                "xpath": "//input[@name='username']",
-                "css_selector": "input[name='username']",
-                "page": "login"
-            },
-            {
-                "id": "el_2",
-                "tag": "input",
-                "type": "password",
-                "name": "password",
-                "placeholder": "Enter password",
-                "xpath": "//input[@name='password']",
-                "css_selector": "input[name='password']",
-                "page": "login"
-            },
-            {
-                "id": "el_3",
-                "tag": "button",
-                "type": "submit",
-                "text": "Login",
-                "name": "login_button",
-                "xpath": "//button[@type='submit']",
-                "css_selector": "button[type='submit']",
-                "page": "login"
-            }
+            except Exception as alt_error:# Fallback to mock data if database fails
+                mock_elements = [
+                {
+                    "id": "el_1",
+                    "tag": "input",
+                    "type": "text",
+                    "name": "username",
+                    "placeholder": "Enter username",
+                    "xpath": "//input[@name='username']",
+                    "css_selector": "input[name='username']",
+                    "page": "login"
+                },
+                {
+                    "id": "el_2",
+                    "tag": "input",
+                    "type": "password",
+                    "name": "password",
+                    "placeholder": "Enter password",
+                    "xpath": "//input[@name='password']",
+                    "css_selector": "input[name='password']",
+                    "page": "login"
+                },
+                {
+                    "id": "el_3",
+                    "tag": "button",
+                    "type": "submit",
+                    "text": "Login",
+                    "name": "login_button",
+                    "xpath": "//button[@type='submit']",
+                    "css_selector": "button[type='submit']",
+                    "page": "login"
+                }
         ]
         
         # Apply limit

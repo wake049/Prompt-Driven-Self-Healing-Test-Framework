@@ -8,7 +8,9 @@ from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
 import json
-import logging
+
+from core.auth import get_current_active_user
+from models.auth_models import CurrentUser
 
 from schemas.enterprise import PageContext
 from services.page_context_service import page_context_service
@@ -17,8 +19,6 @@ from repositories.page_context_repository import PageContextRepository
 from core.database import get_database
 
 router = APIRouter()
-logger = logging.getLogger(__name__)
-
 
 class PageContextRequest(BaseModel):
     """Request to create page context"""
@@ -26,7 +26,6 @@ class PageContextRequest(BaseModel):
     page_title: Optional[str] = None
     element_selectors: Optional[List[str]] = None
     user_context: Optional[Dict[str, Any]] = None
-
 
 class ManualPageContextRequest(BaseModel):
     """Request to create manual page context"""
@@ -38,12 +37,10 @@ class ManualPageContextRequest(BaseModel):
     domain_name: Optional[str] = None
     user_notes: Optional[str] = None
 
-
 async def get_page_context_repository():
     """Dependency to get page context repository"""
     db = await get_database()
     return PageContextRepository(db)
-
 
 @router.post("/upload", response_model=Dict[str, Any])
 async def upload_page_context(
@@ -114,10 +111,7 @@ async def upload_page_context(
         
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON in primary_actions field")
-    except Exception as e:
-        logger.error(f"Error uploading page context: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to upload page context: {str(e)}")
-
+    except Exception as e:raise HTTPException(status_code=500, detail=f"Failed to upload page context: {str(e)}")
 
 @router.post("/detect", response_model=PageContext)
 async def detect_page_context(request: PageContextRequest):
@@ -134,7 +128,6 @@ async def detect_page_context(request: PageContextRequest):
         return context
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to detect page context: {str(e)}")
-
 
 @router.post("/manual", response_model=PageContext)
 async def create_manual_context(request: ManualPageContextRequest):
@@ -155,7 +148,6 @@ async def create_manual_context(request: ManualPageContextRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to create page context: {str(e)}")
 
-
 @router.get("/from-url", response_model=PageContext)
 async def context_from_url(url: str):
     """
@@ -166,7 +158,6 @@ async def context_from_url(url: str):
         return context
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to create context from URL: {str(e)}")
-
 
 @router.get("/list")
 async def get_page_contexts(
@@ -205,7 +196,7 @@ async def get_page_contexts(
                 # Convert relative URL to full URL
                 from fastapi import Request
                 # For now, use a simple approach - we'll enhance this if needed
-                screenshot_url = f"http://localhost:8000{screenshot_url}"
+                screenshot_url = f"https://testhelix.com{screenshot_url}"
             
             result.append({
                 "id": str(ctx["id"]),
@@ -227,10 +218,7 @@ async def get_page_contexts(
             "count": len(result)
         }
         
-    except Exception as e:
-        logger.error(f"Error getting page contexts: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get page contexts: {str(e)}")
-
+    except Exception as e:raise HTTPException(status_code=500, detail=f"Failed to get page contexts: {str(e)}")
 
 @router.get("/{context_id}")
 async def get_page_context(
@@ -260,7 +248,7 @@ async def get_page_context(
         # Convert relative screenshot URL to full URL
         screenshot_url = context.get("screenshot_url")
         if screenshot_url and screenshot_url.startswith("/uploads"):
-            screenshot_url = f"http://localhost:8000{screenshot_url}"
+            screenshot_url = f"https://testhelix.com{screenshot_url}"
         
         return {
             "success": True,
@@ -281,10 +269,7 @@ async def get_page_context(
         
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"Error getting page context {context_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get page context: {str(e)}")
-
+    except Exception as e:raise HTTPException(status_code=500, detail=f"Failed to get page context: {str(e)}")
 
 @router.put("/{context_id}")
 async def update_page_context(
@@ -327,10 +312,7 @@ async def update_page_context(
         
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"Error updating page context {context_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to update page context: {str(e)}")
-
+    except Exception as e:raise HTTPException(status_code=500, detail=f"Failed to update page context: {str(e)}")
 
 @router.put("/{context_id}/upload")
 async def update_page_context_with_files(
@@ -385,7 +367,7 @@ async def update_page_context_with_files(
         # Convert relative screenshot URL to full URL
         result_screenshot_url = result.get("screenshot_url")
         if result_screenshot_url and result_screenshot_url.startswith("/uploads"):
-            result_screenshot_url = f"http://localhost:8000{result_screenshot_url}"
+            result_screenshot_url = f"https://testhelix.com{result_screenshot_url}"
         
         return {
             "success": True,
@@ -403,10 +385,7 @@ async def update_page_context_with_files(
         
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"Error updating page context {context_id} with files: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to update page context: {str(e)}")
-
+    except Exception as e:raise HTTPException(status_code=500, detail=f"Failed to update page context: {str(e)}")
 
 @router.delete("/{context_id}")
 async def delete_page_context(
@@ -429,10 +408,7 @@ async def delete_page_context(
         
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"Error deleting page context {context_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to delete page context: {str(e)}")
-
+    except Exception as e:raise HTTPException(status_code=500, detail=f"Failed to delete page context: {str(e)}")
 
 @router.post("/{context_id}/use")
 async def use_page_context(
@@ -450,10 +426,7 @@ async def use_page_context(
             "message": "Page context usage recorded"
         }
         
-    except Exception as e:
-        logger.error(f"Error recording page context usage {context_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to record usage: {str(e)}")
-
+    except Exception as e:raise HTTPException(status_code=500, detail=f"Failed to record usage: {str(e)}")
 
 @router.get("/user-contexts")
 async def get_user_contexts(
@@ -490,10 +463,7 @@ async def get_user_contexts(
         
         return result
         
-    except Exception as e:
-        logger.error(f"Error getting user contexts: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get user contexts: {str(e)}")
-
+    except Exception as e:raise HTTPException(status_code=500, detail=f"Failed to get user contexts: {str(e)}")
 
 @router.get("/supported-types")
 async def get_supported_page_types():
@@ -544,7 +514,6 @@ async def get_supported_page_types():
             }
         }
     }
-
 
 @router.get("/examples")
 async def get_context_examples():

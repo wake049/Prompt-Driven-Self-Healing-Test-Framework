@@ -37,7 +37,7 @@ export const PageContextAPI = {
 
   // Create a new page context
   create: async (data: FormData) => {
-    const response = await fetch(`${import.meta.env.VITE_UNIFIED_API_URL || "http://localhost:8000"}/api/v1${BASE_PATH}/upload`, {
+    const response = await fetch(`${import.meta.env.VITE_UNIFIED_API_URL || "https://testhelix.com"}/api/v1${BASE_PATH}/upload`, {
       method: "POST",
       body: data,
       headers: {
@@ -70,7 +70,7 @@ export const PageContextAPI = {
 
   // Update a page context with file uploads (like screenshots)
   updateWithFiles: async (id: string, data: FormData) => {
-    const response = await fetch(`${import.meta.env.VITE_UNIFIED_API_URL || "http://localhost:8000"}/api/v1${BASE_PATH}/${id}/upload`, {
+    const response = await fetch(`${import.meta.env.VITE_UNIFIED_API_URL || "https://testhelix.com"}/api/v1${BASE_PATH}/${id}/upload`, {
       method: "PUT",
       body: data,
       headers: {

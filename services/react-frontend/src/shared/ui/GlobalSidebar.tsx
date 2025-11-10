@@ -1,8 +1,36 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import styled from 'styled-components';
 import { useAuth } from '../../contexts/AuthContext';
+<<<<<<< Updated upstream
 
+=======
+import { useTheme } from '../../contexts/ThemeContext';
+import { 
+  BarChart3, 
+  Box, 
+  MessageSquare, 
+  Shield, 
+  Settings, 
+  Globe, 
+  LogOut,
+  Activity,
+  Moon,
+  Sun,
+  TrendingUp,
+  PieChart,
+  ClipboardList,
+  ChevronDown,
+  ChevronRight,
+  Brain,
+  AlertTriangle,
+  Chrome,
+  Download,
+  ExternalLink,
+  Eye,
+  X
+} from 'lucide-react';
+>>>>>>> Stashed changes
 const SidebarContainer = styled.div`
   width: 250px;
   height: 100vh;
@@ -41,17 +69,30 @@ const NavigationList = styled.div`
   padding: 20px 0;
   flex: 1;
 `;
+<<<<<<< Updated upstream
 
 const NavItem = styled.div<{ active?: boolean }>`
+=======
+const NavItem = styled.div<{ $active?: boolean; $isSubmenu?: boolean }>`
+>>>>>>> Stashed changes
   display: flex;
   align-items: center;
   gap: 12px;
   padding: 12px 20px;
+  padding-left: ${props => props.$isSubmenu ? '52px' : '20px'};
   cursor: pointer;
+<<<<<<< Updated upstream
   color: ${props => props.active ? '#0066cc' : '#6c757d'};
   background: ${props => props.active ? '#f0f8ff' : 'transparent'};
   border-right: ${props => props.active ? '3px solid #0066cc' : '3px solid transparent'};
   font-weight: ${props => props.active ? '600' : '500'};
+=======
+  color: ${props => props.$active ? props.theme.colors.primary : props.theme.colors.textSecondary};
+  background: ${props => props.$active ? `${props.theme.colors.primary}15` : 'transparent'};
+  border-right: ${props => props.$active ? `3px solid ${props.theme.colors.primary}` : '3px solid transparent'};
+  font-weight: ${props => props.$active ? '600' : '500'};
+  font-size: ${props => props.$isSubmenu ? '13px' : '14px'};
+>>>>>>> Stashed changes
   transition: all 0.2s ease;
 
   &:hover {
@@ -60,6 +101,25 @@ const NavItem = styled.div<{ active?: boolean }>`
   }
 `;
 
+<<<<<<< Updated upstream
+=======
+const NavItemWithSubmenu = styled(NavItem)<{ $expanded?: boolean }>`
+  &:hover .chevron {
+    color: ${props => props.theme.colors.text};
+  }
+  .chevron {
+    margin-left: auto;
+    transition: transform 0.2s ease;
+    transform: ${props => props.$expanded ? 'rotate(0deg)' : 'rotate(0deg)'};
+  }
+`;
+
+const SubmenuContainer = styled.div<{ $expanded?: boolean }>`
+  max-height: ${props => props.$expanded ? '200px' : '0'};
+  overflow: hidden;
+  transition: max-height 0.3s ease;
+`;
+>>>>>>> Stashed changes
 const NavIcon = styled.div`
   font-size: 16px;
   width: 20px;
@@ -133,6 +193,104 @@ const LogoutButton = styled.button`
   }
 `;
 
+<<<<<<< Updated upstream
+=======
+const ChromeExtensionPromo = styled.div`
+  margin: 16px 20px;
+  padding: 16px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 12px;
+  color: white;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+  
+  &::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+    animation: shimmer 4s infinite;
+  }
+  
+  @keyframes shimmer {
+    0% { left: -100%; }
+    100% { left: 100%; }
+  }
+`;
+
+const PromoHeader = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 8px;
+`;
+
+const PromoTitle = styled.h4`
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: white;
+`;
+
+const PromoText = styled.p`
+  margin: 0 0 12px 0;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.9);
+  line-height: 1.3;
+`;
+
+const PromoButton = styled.button`
+  width: 100%;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 6px;
+  color: white;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  backdrop-filter: blur(10px);
+  
+  &:hover {
+    background: rgba(255, 255, 255, 0.3);
+    border-color: rgba(255, 255, 255, 0.5);
+    transform: translateY(-1px);
+  }
+`;
+
+const PromoCloseButton = styled.button`
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 20px;
+  height: 20px;
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  border-radius: 50%;
+  color: rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  transition: all 0.2s ease;
+  
+  &:hover {
+    background: rgba(255, 255, 255, 0.3);
+    color: white;
+  }
+`;
+>>>>>>> Stashed changes
 interface GlobalSidebarProps {
   className?: string;
 }
@@ -141,6 +299,7 @@ const GlobalSidebar: React.FC<GlobalSidebarProps> = ({ className }) => {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useAuth();
+<<<<<<< Updated upstream
 
   const navigationItems = [
     { path: '/', label: 'Execution Dashboard', icon: '', key: 'execution' },
@@ -149,24 +308,115 @@ const GlobalSidebar: React.FC<GlobalSidebarProps> = ({ className }) => {
     { path: '/policy', label: 'Policy Dashboard', icon: '', key: 'dashboard' },
     { path: '/policy-engine', label: 'Policy Engine', icon: '', key: 'policy-engine' },
     { path: '/page-context', label: 'Page Context', icon: '', key: 'page-context' },
+=======
+  const { isDark, toggleTheme } = useTheme();
+  const [analyticsExpanded, setAnalyticsExpanded] = useState(false);
+  const [showChromeExtensionPromo, setShowChromeExtensionPromo] = useState(true);
+
+  // Check if Chrome extension is installed/connected
+  useEffect(() => {
+    const checkExtensionStatus = () => {
+      // Only show promo for Chrome users
+      if (!window.navigator.userAgent.includes('Chrome')) {
+        setShowChromeExtensionPromo(false);
+        return;
+      }
+
+      // Hide promo if extension is detected
+      const extensionElements = document.querySelectorAll('[data-mcp-extension]');
+      const hasExtensionGlobal = typeof (window as any).mcpExtension !== 'undefined';
+      
+      if (extensionElements.length > 0 || hasExtensionGlobal) {
+        setShowChromeExtensionPromo(false);
+      } else {
+        // Check if user previously dismissed the sidebar promo
+        const isDismissed = localStorage.getItem('sidebarChromeExtensionPromoDismissed') === 'true';
+        setShowChromeExtensionPromo(!isDismissed);
+      }
+    };
+
+    checkExtensionStatus();
+    
+    // Check periodically
+    const interval = setInterval(checkExtensionStatus, 15000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const navigationItems = [
+    { path: '/', label: 'Execution Dashboard', icon: <Activity size={16} />, key: 'execution' },
+    { 
+      path: '/analytics', 
+      label: 'Analytics & Insights', 
+      icon: <TrendingUp size={16} />, 
+      key: 'analytics',
+      hasSubmenu: true,
+      submenu: [
+        { path: '/analytics', label: 'Overview Dashboard', icon: <PieChart size={14} /> },
+        { path: '/analytics/trends', label: 'Trend Analysis', icon: <BarChart3 size={14} /> },
+        { path: '/analytics/ai-insights', label: 'AI Insights', icon: <Brain size={14} /> },
+        { path: '/analytics/healing-success', label: 'Healing Success', icon: <AlertTriangle size={14} /> }
+      ]
+    },
+    { path: '/elements', label: 'Elements', icon: <Box size={16} />, key: 'elements' },
+    { path: '/review', label: 'Review Queue', icon: <ClipboardList size={16} />, key: 'review' },
+    { path: '/prompts', label: 'Prompts', icon: <MessageSquare size={16} />, key: 'prompts' },
+    { path: '/policy', label: 'Policy Dashboard', icon: <Shield size={16} />, key: 'dashboard' },
+    { path: '/policy-engine', label: 'Policy Engine', icon: <Settings size={16} />, key: 'policy-engine' },
+    { path: '/page-context', label: 'Page Context', icon: <Globe size={16} />, key: 'page-context' },
+>>>>>>> Stashed changes
   ];
 
   const handleNavigation = (path: string) => {
     navigate(path);
   };
 
+<<<<<<< Updated upstream
+=======
+  const handleSubmenuToggle = (key: string) => {
+    if (key === 'analytics') {
+      setAnalyticsExpanded(!analyticsExpanded);
+    }
+  };
+
+>>>>>>> Stashed changes
   const handleLogout = () => {
     logout();
     navigate('/login');
   };
 
+<<<<<<< Updated upstream
+=======
+  const handleGetChromeExtension = () => {
+    navigate('/chrome-extension');
+  };
+
+  const handleDismissSidebarPromo = () => {
+    setShowChromeExtensionPromo(false);
+    localStorage.setItem('sidebarChromeExtensionPromoDismissed', 'true');
+  };
+
+>>>>>>> Stashed changes
   const isActive = (path: string) => {
     if (path === '/') {
       return location.pathname === '/' || location.pathname === '/execution';
     }
-    return location.pathname === path || location.pathname.startsWith(path + '/');
+    return location.pathname === path;
   };
 
+<<<<<<< Updated upstream
+=======
+  const isAnalyticsActive = () => {
+    return location.pathname.startsWith('/analytics');
+  };
+
+  // Auto-expand analytics if on analytics page
+  React.useEffect(() => {
+    if (isAnalyticsActive()) {
+      setAnalyticsExpanded(true);
+    }
+  }, [location.pathname]);
+
+>>>>>>> Stashed changes
   const getInitials = (name: string) => {
     return name
       .split(' ')
@@ -185,6 +435,7 @@ const GlobalSidebar: React.FC<GlobalSidebarProps> = ({ className }) => {
       
       <NavigationList>
         {navigationItems.map((item) => (
+<<<<<<< Updated upstream
           <NavItem
             key={item.key}
             active={isActive(item.path)}
@@ -196,6 +447,73 @@ const GlobalSidebar: React.FC<GlobalSidebarProps> = ({ className }) => {
         ))}
       </NavigationList>
 
+=======
+          <div key={item.key}>
+            {item.hasSubmenu ? (
+              <>
+                <NavItemWithSubmenu
+                  $active={isAnalyticsActive()}
+                  $expanded={analyticsExpanded}
+                  onClick={() => handleSubmenuToggle(item.key)}
+                >
+                  <NavIcon>{item.icon}</NavIcon>
+                  {item.label}
+                  <ChevronDown 
+                    size={14} 
+                    className="chevron"
+                    style={{
+                      transform: analyticsExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',
+                      transition: 'transform 0.2s ease'
+                    }}
+                  />
+                </NavItemWithSubmenu>
+                <SubmenuContainer $expanded={analyticsExpanded}>
+                  {item.submenu?.map((subItem) => (
+                    <NavItem
+                      key={subItem.path}
+                      $active={isActive(subItem.path)}
+                      $isSubmenu={true}
+                      onClick={() => handleNavigation(subItem.path)}
+                    >
+                      <NavIcon>{subItem.icon}</NavIcon>
+                      {subItem.label}
+                    </NavItem>
+                  ))}
+                </SubmenuContainer>
+              </>
+            ) : (
+              <NavItem
+                $active={isActive(item.path)}
+                onClick={() => handleNavigation(item.path)}
+              >
+                <NavIcon>{item.icon}</NavIcon>
+                {item.label}
+              </NavItem>
+            )}
+          </div>
+        ))}
+      </NavigationList>
+      
+      {showChromeExtensionPromo && (
+        <ChromeExtensionPromo>
+          <PromoCloseButton onClick={handleDismissSidebarPromo} title="Dismiss">
+            <X size={10} />
+          </PromoCloseButton>
+          <PromoHeader>
+            <Chrome size={16} />
+            <PromoTitle>Chrome Extension</PromoTitle>
+          </PromoHeader>
+          <PromoText>
+            Record elements and run tests directly from any webpage
+          </PromoText>
+          <PromoButton onClick={handleGetChromeExtension}>
+            <Eye size={12} />
+            Learn More
+          </PromoButton>
+        </ChromeExtensionPromo>
+      )}
+      
+>>>>>>> Stashed changes
       {user && (
         <UserSection>
           <UserInfo>

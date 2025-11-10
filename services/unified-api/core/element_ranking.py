@@ -13,7 +13,7 @@ Features:
 from __future__ import annotations
 
 import hashlib
-import logging
+
 import time
 from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime, timedelta
@@ -22,9 +22,6 @@ from schemas.enterprise import (
     PageElement, PageSlice, ElementRankingStrategy, 
     ElementRankingConfig, CacheEntry
 )
-
-logger = logging.getLogger(__name__)
-
 
 class ElementRankingService:
     """Service for ranking and selecting relevant page elements"""
@@ -51,15 +48,10 @@ class ElementRankingService:
             PageSlice with ranked and filtered elements
         """
         start_time = time.time()
-        total_elements = len(elements)
-        
-        logger.info(f" Ranking {total_elements} elements using {config.strategy} strategy")
-        
-        # Check cache first
+        total_elements = len(elements)# Check cache first
         cache_key = self._generate_cache_key(elements, config, prompt_context)
         cached_result = self._get_cached_ranking(cache_key)
         if cached_result:
-            logger.info("💨 Using cached ranking result")
             cached_result.cache_hit = True
             return cached_result
         
@@ -96,8 +88,6 @@ class ElementRankingService:
         
         # Cache the result
         self._cache_ranking(cache_key, result)
-        
-        logger.info(f" Selected {len(selected_elements)} elements in {processing_time}ms")
         return result
     
     def _convert_to_page_element(self, raw_element: Dict[str, Any], index: int) -> PageElement:
@@ -183,8 +173,6 @@ class ElementRankingService:
         
         # Sort by quality score
         high_quality_elements.sort(key=lambda x: x.relevance_score or 0, reverse=True)
-        
-        logger.info(f" Filtered to {len(high_quality_elements)} high-quality elements")
         
         return high_quality_elements
     
@@ -460,8 +448,6 @@ class ElementRankingService:
         
         for key in expired_keys:
             del self.cache[key]
-        
-        logger.info(f" Cleaned up {len(expired_keys)} expired cache entries")
     
     def get_cache_stats(self) -> Dict[str, Any]:
         """Get cache performance statistics"""

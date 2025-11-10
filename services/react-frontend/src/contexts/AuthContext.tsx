@@ -52,10 +52,24 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         const storedToken = localStorage.getItem('auth_token');
         if (storedToken) {
           setToken(storedToken);
-          await fetchUserProfile(storedToken);
+          // Try to fetch user profile, but don't fail auth if it doesn't work
+          try {
+            await fetchUserProfile(storedToken);
+          } catch (profileError) {
+            // Profile fetch failed, but we still have a token
+            // Set a minimal user object so the app knows the user is authenticated
+            setUser({
+              id: 'unknown',
+              email: 'unknown@example.com',
+              full_name: 'Authenticated User',
+              is_active: true,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            });
+          }
         }
       } catch (error) {
-        console.error('Error checking auth state:', error);
+        // Only remove token if there's a parsing error or something fundamentally wrong
         localStorage.removeItem('auth_token');
       } finally {
         setIsLoading(false);
@@ -68,7 +82,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   // Fetch user profile with token
   const fetchUserProfile = async (authToken: string) => {
     try {
-      const response = await fetch('http://localhost:8000/api/v1/auth/me', {
+      const response = await fetch('https://testhelix.com/api/v1/auth/me', {
         headers: {
           'Authorization': `Bearer ${authToken}`,
           'Content-Type': 'application/json',
@@ -78,15 +92,22 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       if (response.ok) {
         const userData = await response.json();
         setUser(userData.user || userData);
+      } else if (response.status === 401 || response.status === 403) {
+        // Only clear auth state for actual authentication failures
+        throw new Error('Authentication failed');
       } else {
-        throw new Error('Failed to fetch user profile');
+        // For other errors (500, network issues, etc.), keep the token but log the error
+        // We could set a minimal user object or leave it null but keep the token
+        // This allows the app to continue working even if the profile endpoint is down
       }
     } catch (error) {
-      console.error('Error fetching user profile:', error);
-      // If profile fetch fails, clear auth state
-      localStorage.removeItem('auth_token');
-      setToken(null);
-      setUser(null);
+      
+      // Only clear auth state if it's an actual authentication error
+      if (error instanceof Error && error.message === 'Authentication failed') {
+        localStorage.removeItem('auth_token');
+        setToken(null);
+        setUser(null);
+      }
     }
   };
 
@@ -95,8 +116,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     try {
       setIsLoading(true);
       setError(null);
-
-      const response = await fetch('http://localhost:8000/api/v1/auth/login', {
+      const response = await fetch('https://testhelix.com/api/v1/auth/login', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -122,7 +142,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         return false;
       }
     } catch (error) {
-      console.error('Login error:', error);
       setError('Network error. Please try again.');
       return false;
     } finally {
@@ -135,8 +154,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     try {
       setIsLoading(true);
       setError(null);
-
-      const response = await fetch('http://localhost:8000/api/v1/auth/register', {
+      const response = await fetch('https://testhelix.com/api/v1/auth/register', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -160,7 +178,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         return false;
       }
     } catch (error) {
-      console.error('Registration error:', error);
       setError('Network error. Please try again.');
       return false;
     } finally {
@@ -179,6 +196,19 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   // Clear error function
   const clearError = () => {
     setError(null);
+  };
+
+  // Refresh auth function - retry fetching user profile
+  const refreshAuth = async () => {
+    const currentToken = token || localStorage.getItem('auth_token');
+    if (currentToken) {
+      try {
+        await fetchUserProfile(currentToken);
+        setError(null);
+      } catch (error) {
+        setError('Unable to verify authentication. You may need to log in again.');
+      }
+    }
   };
 
   const value: AuthContextType = {

@@ -98,7 +98,6 @@ export async function askShard(
 
     // Retry logic for timeouts or server errors
     if (error?.name === 'AbortError' || (typeof error?.message === 'string' && /^(5\d\d|.*500)/.test(error.message))) {
-      console.warn('AI service request failed, retrying with backoff...', error?.message);
 
       // Jittered backoff: 250–750ms
       const delay = 250 + Math.random() * 500;
@@ -169,15 +168,8 @@ export async function askShard(
           candidates: retryCandidates,
         };
       } catch (retryError) {
-        console.error('AI service retry failed:', retryError);
         return { candidates: [] };
       }
-    }
-
-    if (error?.name === 'AbortError') {
-      console.warn('⏰ AI service request timed out after 5000ms');
-    } else {
-      console.error(' AI service request failed:', error);
     }
     return { candidates: [] };
   }

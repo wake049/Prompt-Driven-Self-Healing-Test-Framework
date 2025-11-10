@@ -1,7 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import styled from 'styled-components';
+<<<<<<< Updated upstream
 import sqlApiClient, { RecordedElement } from '../../../shared/utils/sqlApiClient';
+=======
+import { useTheme } from '../../../contexts/ThemeContext';
+import { useMCPContext } from '../../../contexts/MCPContext';
+import { sqlApiClient, RecordedElementDB } from '../../../shared/utils/sqlApiClient';
+import { useElementSelectorSync, useSyncNotifications } from '../../../shared/hooks/useSyncHooks';
+import { SyncIndicator, SyncNotification as SyncNotificationComponent } from '../../../shared/components/SyncVisualIndicators';
+>>>>>>> Stashed changes
 import { 
   detectDynamicContent, 
   isDynamicSelector, 
@@ -10,6 +18,30 @@ import {
   DynamicContentMatch 
 } from '../../../shared/utils/dynamicContentDetection';
 
+<<<<<<< Updated upstream
+=======
+// RecordedElement interface for frontend use
+export interface RecordedElement {
+  id: string;
+  dbId?: number;
+  tag: string;
+  text: string;
+  cssSelector: string;
+  xpath: string;
+  href?: string;
+  src?: string;
+  page: string;
+  isActive: boolean;
+  dynamicContent?: DynamicContentMatch[];
+  lastUpdated?: string;
+  selectors?: string[];
+  attributes?: Record<string, any>;
+  timestamp?: number;
+  element_key?: string;
+  primary_selector?: string;
+}
+
+>>>>>>> Stashed changes
 // ================================
 // Styled Components
 // ================================
@@ -460,6 +492,11 @@ interface ElementReviewPageProps {
 }
 
 const ElementReviewPage: React.FC<ElementReviewPageProps> = ({ elementId, onBack }) => {
+<<<<<<< Updated upstream
+=======
+  const { theme } = useTheme();
+  const { client } = useMCPContext();
+>>>>>>> Stashed changes
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [element, setElement] = useState<RecordedElement | null>(null);
@@ -477,7 +514,11 @@ const ElementReviewPage: React.FC<ElementReviewPageProps> = ({ elementId, onBack
   const [isInReviewQueue, setIsInReviewQueue] = useState(false);
   const [reviewQueueNote, setReviewQueueNote] = useState('');
   const [showReviewQueueDialog, setShowReviewQueueDialog] = useState(false);
+<<<<<<< Updated upstream
 
+=======
+  const [isAddingToQueue, setIsAddingToQueue] = useState(false);
+>>>>>>> Stashed changes
   const targetElementId = elementId || id;
 
   useEffect(() => {
@@ -499,9 +540,20 @@ const ElementReviewPage: React.FC<ElementReviewPageProps> = ({ elementId, onBack
         loadReviewQueueStatus();
       }
     };
+<<<<<<< Updated upstream
 
+=======
+    // Also listen for in-window updates triggered by this app
+    const handleCustomUpdate = () => {
+      if (element) loadReviewQueueStatus();
+    };
+>>>>>>> Stashed changes
     window.addEventListener('storage', handleStorageChange);
-    return () => window.removeEventListener('storage', handleStorageChange);
+    window.addEventListener('reviewQueueUpdated', handleCustomUpdate as EventListener);
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('reviewQueueUpdated', handleCustomUpdate as EventListener);
+    };
   }, [element]);
 
   const loadElement = async (elemId: string) => {
@@ -556,7 +608,26 @@ const ElementReviewPage: React.FC<ElementReviewPageProps> = ({ elementId, onBack
       const frontendElements = elementsData.map((apiElement) => {
         if (apiElement.logical_key && apiElement.timestamp_recorded) {
           // Database format - use existing conversion
+<<<<<<< Updated upstream
           return sqlApiClient.convertElementToFrontend(apiElement);
+=======
+          // Convert database element to frontend format
+          return {
+            id: apiElement.logical_key || apiElement.element_key || apiElement.id,
+            dbId: apiElement.id,
+            tag: apiElement.tag || 'unknown',
+            text: apiElement.text_content || apiElement.text || '',
+            cssSelector: apiElement.css_selector || '',
+            xpath: apiElement.xpath || '',
+            href: apiElement.href || '',
+            src: apiElement.src || '',
+            page: apiElement.page || 'unknown',
+            isActive: apiElement.is_active !== false,
+            selectors: apiElement.selectors || [],
+            attributes: apiElement.attributes || {},
+            timestamp: apiElement.timestamp || Date.now()
+          } as RecordedElement;
+>>>>>>> Stashed changes
         } else {
           // Parse attributes if it's a string
           let parsedAttributes = {};
@@ -576,7 +647,7 @@ const ElementReviewPage: React.FC<ElementReviewPageProps> = ({ elementId, onBack
 
           // Simple API format - convert directly
           return {
-            id: apiElement.id || apiElement.logical_key,
+            id: apiElement.logical_key || apiElement.element_key || apiElement.id,
             dbId: apiElement.id,
             tag: apiElement.tag || 'unknown',
             text: apiElement.text || apiElement.text_content || 'No text',
@@ -590,6 +661,7 @@ const ElementReviewPage: React.FC<ElementReviewPageProps> = ({ elementId, onBack
           };
         }
       });
+<<<<<<< Updated upstream
 
       // Find element by frontend ID (which is the logical_key from database)
       const foundElement = frontendElements.find((el) => el.id === elemId);
@@ -597,6 +669,29 @@ const ElementReviewPage: React.FC<ElementReviewPageProps> = ({ elementId, onBack
       if (!foundElement) {
         console.error('Element not found. Search ID:', elemId, 'Available IDs:', frontendElements.map(el => el.id));
         setError('Element not found');
+=======
+      // Find element by frontend ID, dbId (UUID), or logical key
+      let foundElement = frontendElements.find((el) => el.id === elemId);
+      
+      if (!foundElement) {
+        // Try to find by database UUID (dbId)
+        foundElement = frontendElements.find((el) => el.dbId === elemId);
+      }
+      
+      if (!foundElement) {
+        // Try to find by logical key 
+        foundElement = frontendElements.find((el) => (el as any).logicalKey === elemId);
+      }
+      
+      if (!foundElement) {
+        // Check if there's a similar ID (case-insensitive or partial match)
+        const similarIds = frontendElements.filter(el => 
+          el.id?.toLowerCase().includes(elemId.toLowerCase()) ||
+          elemId.toLowerCase().includes(el.id?.toLowerCase() || '')
+        );
+        
+        setError(`Element not found: ${elemId}`);
+>>>>>>> Stashed changes
         return;
       }
       
@@ -679,6 +774,7 @@ const ElementReviewPage: React.FC<ElementReviewPageProps> = ({ elementId, onBack
     setIsEditing(false);
     setEditForm(null);
   };
+<<<<<<< Updated upstream
 
   // Review Queue Management Functions
   const loadReviewQueueStatus = () => {
@@ -690,9 +786,46 @@ const ElementReviewPage: React.FC<ElementReviewPageProps> = ({ elementId, onBack
     if (isInQueue) {
       const queueItem = reviewQueue.find((item: any) => item.elementId === targetElementId);
       setReviewQueueNote(queueItem?.note || '');
+=======
+  // Helper function to get a meaningful element name for display
+  const getElementDisplayName = (element: RecordedElement): string => {
+    // If we have a meaningful logical key (not a UUID), use it
+    if (element.id && element.id !== 'UNKNOWN' && element.id.trim() !== '') {
+      // Check if it's a UUID pattern (8-4-4-4-12 hex characters with dashes)
+      const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      
+      // If it's not a UUID, it's likely a meaningful element_key from the database
+      if (!uuidPattern.test(element.id)) {
+        return element.id;
+      }
+>>>>>>> Stashed changes
     }
+    
+    // If element.id is a UUID, try to use text content or fallback to tag
+    if (element.text && element.text !== '[null]' && element.text.trim() !== '') {
+      const text = element.text.trim();
+      if (text.length <= 30) {
+        return `${element.tag}: "${text}"`;
+      } else {
+        return `${element.tag}: "${text.substring(0, 27)}..."`;
+      }
+    }
+    
+    // Try to extract meaningful info from selectors
+    if (element.cssSelector || element.xpath) {
+      const selector = element.cssSelector || element.xpath || '';
+      // Extract ID from CSS selector like #item_5_title_link
+      const idMatch = selector.match(/#([a-zA-Z0-9_-]+)/);
+      if (idMatch) {
+        return `${element.tag}#${idMatch[1]}`;
+      }
+    }
+    
+    // Fallback to tag with identifier
+    return `${element.tag} element`;
   };
 
+<<<<<<< Updated upstream
   const addToReviewQueue = async (note: string = '') => {
     if (!element) return;
     
@@ -721,19 +854,158 @@ const ElementReviewPage: React.FC<ElementReviewPageProps> = ({ elementId, onBack
     }
   };
 
+=======
+  // Review Queue Management Functions
+  const loadReviewQueueStatus = async () => {
+    // Skip loading if we're currently adding to queue to prevent race conditions
+    if (isAddingToQueue) {
+      return;
+    }
+      if (client) {
+        const reviewQueue = await client.getPendingReviews();
+        const queueArray = Array.isArray(reviewQueue) ? reviewQueue : (reviewQueue?.data || []);        
+        const isInQueue = queueArray.some((item: any) => {
+          const matches = (
+            item.element_id === targetElementId || 
+            item.elementId === targetElementId ||
+            item.id === targetElementId ||
+            item.element_name === targetElementId ||
+            item.elementName === targetElementId
+          );
+          return matches;
+        });        
+        setIsInReviewQueue(Boolean(isInQueue));
+        
+        if (isInQueue) {
+          const queueItem = queueArray.find((item: any) => 
+            item.element_id === targetElementId || 
+            item.elementId === targetElementId ||
+            item.id === targetElementId ||
+            item.element_name === targetElementId ||
+            item.elementName === targetElementId
+          );
+          setReviewQueueNote(queueItem?.note || queueItem?.suggestion?.note || '');
+        } else {
+          setReviewQueueNote('');
+        }
+        return; // MCP check succeeded, no need to check localStorage
+      }
+    
+    // Fallback to localStorage check
+    try {
+      const reviewQueue = JSON.parse(localStorage.getItem('reviewQueue') || '[]');
+      const isInQueue = Array.isArray(reviewQueue) && reviewQueue.some((item: any) => item.elementId === targetElementId);
+      setIsInReviewQueue(Boolean(isInQueue));
+      if (isInQueue) {
+        const queueItem = reviewQueue.find((item: any) => item.elementId === targetElementId);
+        setReviewQueueNote(queueItem?.note || '');
+      } else {
+        setReviewQueueNote('');
+      }
+    } catch (err) {
+      setIsInReviewQueue(false);
+      setReviewQueueNote('');
+    }
+  };
+
+  const addToReviewQueue = async (note: string = '') => {
+    if (!element || !client) return;
+    
+    // Prevent duplicate additions
+    if (isAddingToQueue) {
+      return;
+    }
+    
+    setIsAddingToQueue(true);
+    
+    try {
+      
+      const healthStatus = getElementHealthStatus(element);
+      
+      // Use element_key from database if available, otherwise create a display name
+      let elementDisplayName = element.element_key || element.text || 'Unnamed Element';
+      
+      // If element_key is not available, create a better display name
+      if (!element.element_key || element.element_key === 'unknown') {
+        if (element.text && element.text.trim() && element.text !== 'unknown') {
+          elementDisplayName = element.text.trim();
+        } else if (element.primary_selector) {
+          // Extract meaningful name from selector
+          const selector = element.primary_selector;
+          if (selector.includes('title_link')) {
+            elementDisplayName = 'Title Link';
+          } else if (selector.includes('checkout')) {
+            elementDisplayName = 'Checkout Button';
+          } else if (selector.includes('summary_container')) {
+            elementDisplayName = 'Summary Container';
+          } else if (selector.includes('@id=')) {
+            // Extract ID from XPath like //*[@id="item_2_title_link"]
+            const idMatch = selector.match(/@id="([^"]+)"/);
+            if (idMatch) {
+              elementDisplayName = idMatch[1].replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase());
+            }
+          } else if (selector.includes('#')) {
+            // Extract from CSS selector like #elementId
+            const cssIdMatch = selector.match(/#([^.\s\[]+)/);
+            if (cssIdMatch) {
+              elementDisplayName = cssIdMatch[1].replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase());
+            }
+          } else if (element.tag && element.tag !== 'unknown') {
+            elementDisplayName = `${element.tag} Element`;
+          }
+        } else if (element.tag && element.tag !== 'unknown') {
+          elementDisplayName = `${element.tag} Element`;
+        }
+      }
+      
+      const result = await client.addToReviewQueue(
+        element.id,
+        elementDisplayName,
+        note,
+        element.page || 'Unknown',
+        healthStatus.label
+      );
+      
+      // Update current UI immediately
+      setIsInReviewQueue(true);
+      setReviewQueueNote(note);
+      window.dispatchEvent(new Event('reviewQueueUpdated'));
+
+      // Reload the status after a short delay to ensure the backend is updated
+      setTimeout(() => {
+        setIsAddingToQueue(false);
+        loadReviewQueueStatus();
+      }, 1500); // 1.5 second delay to allow backend to process
+      
+      try { alert('Element added to review queue!'); } catch (e) { /* ignore */ }
+    } catch (err) {
+      setIsAddingToQueue(false);
+      try { alert('Failed to add element to review queue'); } catch (e) { /* ignore */ }
+    }
+  };
+
+>>>>>>> Stashed changes
   const removeFromReviewQueue = async () => {
     if (!element) return;
     
     try {
-      const reviewQueue = JSON.parse(localStorage.getItem('reviewQueue') || '[]');
+      const existing = JSON.parse(localStorage.getItem('reviewQueue') || '[]');
+      const reviewQueue = Array.isArray(existing) ? existing : [];
       const updatedQueue = reviewQueue.filter((item: any) => item.elementId !== element.id);
       localStorage.setItem('reviewQueue', JSON.stringify(updatedQueue));
       setIsInReviewQueue(false);
       setReviewQueueNote('');
+<<<<<<< Updated upstream
       alert('Element removed from review queue!');
     } catch (err) {
       console.error('Error removing from review queue:', err);
       alert('Failed to remove element from review queue');
+=======
+      try { window.dispatchEvent(new Event('reviewQueueUpdated')); } catch (e) { /* ignore */ }
+      try { alert('Element removed from review queue!'); } catch (e) { /* ignore */ }
+    } catch (err) {
+      try { alert('Failed to remove element from review queue'); } catch (e) { /* ignore */ }
+>>>>>>> Stashed changes
     }
   };
 
@@ -900,12 +1172,18 @@ const ElementReviewPage: React.FC<ElementReviewPageProps> = ({ elementId, onBack
       </BackButton>
       
       <ContentWrapper>
+<<<<<<< Updated upstream
         <Header>
           <Title>
             {(element.id && typeof element.id === 'string' ? element.id : '') || 
              (element.text && typeof element.text === 'string' ? element.text : '') || 
              (element.tag && typeof element.tag === 'string' ? element.tag : '') || 
              'Unnamed Element'}
+=======
+        <Header theme={theme}>
+          <Title theme={theme}>
+            {getElementDisplayName(element)}
+>>>>>>> Stashed changes
           </Title>
           <Subtitle>
             <span>Element Review & Management</span>

@@ -407,7 +407,6 @@ public class ExecutionService {
                 return element;
             }
         } catch (Exception e) {
-            System.out.print("(original failed, attempting healing) ");
             
             // Attempt self-healing
             SelfHealing.HealingResult healingResult = selfHealing.attemptHealing(step);

@@ -4,28 +4,32 @@ export interface ExecutionStats {
   total_executions: number;
   successful_executions: number;
   failed_executions: number;
+  pending_review_executions: number; // NEW: Count of executions needing review
   success_rate: number;
   recent_executions_24h: number;
   avg_execution_time: number;
+  healing_rate?: number; // NEW: Percentage of executions that required healing
 }
 
 export interface ExecutionRecord {
   id: string;
   test_name: string;
-  status: string;
+  status: 'pass' | 'pending_review' | 'failed' | 'completed' | 'running'; // UPDATED: New status types
   success_rate: number;
   started_at: string;
   duration_seconds: number;
   total_steps: number;
   passed_steps: number;
   failed_steps: number;
+  pending_review_steps?: number; // NEW: Steps that passed but required healing
+  healed_steps?: number; // NEW: Total healed steps count
 }
 
 export interface ExecutionStepsData {
   execution: {
     id: string;
     test_case_id: string;
-    status: string;
+    status: 'pass' | 'pending_review' | 'failed' | 'completed' | 'running'; // UPDATED: New status types
     started_at: string;
     finished_at: string;
     duration_seconds: number;
@@ -34,16 +38,21 @@ export interface ExecutionStepsData {
     step_order: number;
     action: string;
     target: string;
-    status: string;
+    status: 'passed' | 'pending_review' | 'failed'; // UPDATED: New step status types
     error_message?: string;
     created_at: string;
+    healed?: boolean; // NEW: Indicates if this step required healing
+    original_locator?: string; // NEW: Original selector before healing
+    healed_locator?: string; // NEW: Selector after healing
   }[];
   summary: {
     total_steps: number;
     passed_steps: number;
     failed_steps: number;
+    pending_review_steps: number; // NEW: Steps that passed but required healing
     pending_steps: number;
     success_rate: number;
+    healing_rate?: number; // NEW: Percentage of steps that required healing
   };
 }
 
@@ -57,7 +66,7 @@ class AuthenticatedApiService {
   }
 
   private async fetchWithAuth<T>(endpoint: string, options?: RequestInit): Promise<T> {
-    const response = await fetch(`http://localhost:8000${endpoint}`, {
+    const response = await fetch(`https://testhelix.com${endpoint}`, {
       headers: this.getAuthHeaders(),
       ...options,
     });

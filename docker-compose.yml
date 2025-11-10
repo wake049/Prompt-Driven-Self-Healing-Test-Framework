@@ -1,14 +1,28 @@
+version: '3.8'
+
 services:
-  planner:
+  unified-api:
     build:
-      context: .
-      dockerfile: docker/python-ai/Dockerfile
-    container_name: ai-planner
+      context: services/unified-api
+      dockerfile: Dockerfile
+    container_name: unified-api
     ports:
       - "8000:8000"
     environment:
-      - PLANNER_ENV=prod
+      - DB_HOST=prompt-qa.choawqiq4n3x.us-east-2.rds.amazonaws.com
+      - DB_PORT=5432
+      - DB_NAME=promptqa
+      - DB_USER=prompt_qa_db
+      - "DB_PASSWORD=St70698!2#4"
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - AI_SERVICE_URL=http://localhost:8000
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
   mcp-server:
     build:
@@ -23,28 +37,57 @@ services:
       - MCP_AUTH_REQUIRED=false
       - MCP_DEBUG=false
       - ENVIRONMENT=production
-      - MCP_DATABASE_URL=postgresql://planner:planner@db:5432/planner
+      - DB_HOST=prompt-qa.choawqiq4n3x.us-east-2.rds.amazonaws.com
+      - DB_PORT=5432
+      - DB_NAME=promptqa
+      - DB_USER=prompt_qa_db
+      - "DB_PASSWORD=St70698!2#4"
+      - DATABASE_OPTIONAL=true
     restart: unless-stopped
-    depends_on:
-      - db
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/api/v1/health"]
+      test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.connect(('localhost', 8001)); s.close()"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
 
-  db:
-    image: postgres:16
-    container_name: planner-db
-    environment:
-      - POSTGRES_USER=planner
-      - POSTGRES_PASSWORD=planner
-      - POSTGRES_DB=planner
+  java-runner:
+    build:
+      context: services/java-runner
+      dockerfile: Dockerfile
+    container_name: java-runner
     ports:
-      - "5432:5432"
+      - "8080:8080"
+    environment:
+      - API_BASE_URL=http://unified-api:8000
+      - SELENIUM_HEADLESS=true
+      - DISPLAY=:99
+    restart: unless-stopped
+    depends_on:
+      - unified-api
     volumes:
-      - planner_pg:/var/lib/postgresql/data
+      - ./services/java-runner/screenshots:/app/screenshots
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  react-frontend:
+    build:
+      context: services/react-frontend
+      dockerfile: Dockerfile
+    container_name: react-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_BASE_URL=http://localhost:8000
+      - REACT_APP_MCP_SERVER_URL=ws://localhost:8001
+    restart: unless-stopped
+    depends_on:
+      - unified-api
+      - mcp-server
 
 volumes:
-  planner_pg:
+  # No local database volume needed since using AWS RDS

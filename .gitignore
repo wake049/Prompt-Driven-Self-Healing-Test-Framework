@@ -69,6 +69,7 @@ chrome-extension/build/
 chrome-extension/popup.js
 chrome-extension/content.js
 chrome-extension/background.js
+chrome-extension/auth-capture.js
 chrome-extension/src/*.js
 chrome-extension/src/*.js.map
 
@@ -87,13 +88,14 @@ services/sql-backend/uploads/
 
 # Environment Variables
 .env
+.env.*
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
-services/sql-backend/.env
-services/ai-service/.env
-services/mcp-server/.env
+.env.production
+services/*/.env
+services/*/.env.*
 
 # Docker
 .dockerignore
@@ -257,4 +259,31 @@ secrets.json
 # Gradle wrapper
 gradle/wrapper/gradle-wrapper.jar
 !gradle/wrapper/gradle-wrapper.properties
+
+# AWS and Cloud
+.aws/
+aws-exports.js
+amplify/
+.amplifyrc
+
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+
+# Local development overrides
+docker-compose.local.yml
+docker-compose.dev.yml
+
+# Build scripts and deployment artifacts
+deploy*.bat
+deploy*.sh
+*.deployment
+
+# Analysis and Reports
+*.analysis
+*.report
+performance_reports/
+audit_reports/
 

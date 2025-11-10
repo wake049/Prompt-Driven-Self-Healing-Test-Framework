@@ -2,9 +2,14 @@
  * Unified API Client for React Frontend
  * Consolidates all MCP services into a single client
  */
+<<<<<<< Updated upstream
 
 const UNIFIED_API_BASE_URL = import.meta.env.VITE_UNIFIED_API_URL || 'http://localhost:8000';
 
+=======
+import { MCPFrontendManager } from '../../services/mcpFrontendClient';
+const UNIFIED_API_BASE_URL = import.meta.env.VITE_UNIFIED_API_URL || 'https://testhelix.com';
+>>>>>>> Stashed changes
 interface ApiResponse<T = any> {
   success: boolean;
   data?: T;
@@ -402,23 +407,43 @@ class UnifiedApiClient {
     data: ReviewQueueItem[];
     count: number;
   }> {
+<<<<<<< Updated upstream
     const params = new URLSearchParams({ status });
     if (page) params.append('page', page);
     
     return this.request(`/api/v1/sql/review-queue?${params}`);
   }
 
+=======
+    const client = await MCPFrontendManager.getInstance();
+    const result = await client.getReviewQueue({ status, page });
+    return {
+      success: true,
+      data: result.data || result,
+      count: (result.data || result).length || 0
+    };
+  }
+  
+>>>>>>> Stashed changes
   async getPendingReviews(): Promise<ReviewQueueItem[]> {
-    return this.request('/api/v1/sql/review/pending');
+    const client = await MCPFrontendManager.getInstance();
+    const result = await client.getPendingReviews();
+    return result.data || result;
   }
+<<<<<<< Updated upstream
 
+=======
+  
+>>>>>>> Stashed changes
   async updateReviewStatus(reviewId: string, status: string, notes?: string): Promise<ReviewQueueItem> {
-    return this.request(`/api/v1/sql/review/${reviewId}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ status, reviewer_notes: notes }),
-    });
+    const client = await MCPFrontendManager.getInstance();
+    return await client.updateReviewStatus(reviewId, status as "approved" | "rejected");
   }
+<<<<<<< Updated upstream
 
+=======
+  
+>>>>>>> Stashed changes
   // Utility Methods
   formatTimestamp(timestamp: string): string {
     const date = new Date(timestamp);

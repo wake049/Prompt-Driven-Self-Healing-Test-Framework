@@ -4,12 +4,9 @@ Handles dynamic value extraction and formula calculation for test bindings
 """
 
 import re
-import logging
+
 from typing import Any, Dict, List, Optional, Union
 from schemas.enterprise import DataBinding, TestBindings, BindingContext
-
-logger = logging.getLogger(__name__)
-
 
 class BindingProcessor:
     """Service for processing data bindings and variable resolution"""
@@ -61,16 +58,10 @@ class BindingProcessor:
                 pattern_match = re.search(binding.regex_pattern, value)
                 if pattern_match:
                     value = pattern_match.group(1) if pattern_match.groups() else pattern_match.group(0)
-                else:
-                    logger.warning(f"Regex pattern '{binding.regex_pattern}' did not match extracted text '{value}'")
-            
-            return value
+                else:return value
             
         except Exception as e:
-            logger.error(f"Failed to extract value for binding '{binding.name}': {str(e)}")
-            if binding.fallback_value is not None:
-                logger.info(f"Using fallback value for binding '{binding.name}': {binding.fallback_value}")
-                return binding.fallback_value
+            if binding.fallback_value is not None:return binding.fallback_value
             raise
     
     def evaluate_formula(self, formula: str) -> Union[int, float]:
@@ -92,7 +83,6 @@ class BindingProcessor:
                 raise ValueError(f"Formula evaluation resulted in non-numeric value: {result}")
                 
         except Exception as e:
-            logger.error(f"Failed to evaluate formula '{formula}': {str(e)}")
             raise
     
     def process_binding(self, binding: DataBinding, dom_data: Dict[str, Any] = None) -> Any:
@@ -124,10 +114,7 @@ class BindingProcessor:
                 raise ValueError(f"Unknown binding type: {binding.type}")
                 
         except Exception as e:
-            logger.error(f"Failed to process binding '{binding.name}': {str(e)}")
-            if binding.fallback_value is not None:
-                logger.info(f"Using fallback value for binding '{binding.name}': {binding.fallback_value}")
-                return binding.fallback_value
+            if binding.fallback_value is not None:return binding.fallback_value
             raise
     
     def process_bindings(self, bindings: TestBindings, dom_data: Dict[str, Any] = None) -> BindingContext:
@@ -142,9 +129,7 @@ class BindingProcessor:
             try:
                 value = self.process_binding(binding, dom_data)
                 self.context.set_variable(binding.name, value)
-                logger.info(f"Resolved binding '{binding.name}' = {value}")
             except Exception as e:
-                logger.error(f"Failed to resolve binding '{binding.name}': {str(e)}")
                 # Set None value to avoid template resolution errors
                 self.context.set_variable(binding.name, None)
         
@@ -159,13 +144,11 @@ class BindingProcessor:
                 try:
                     resolved_params[key] = self.context.resolve_template(value)
                 except Exception as e:
-                    logger.error(f"Failed to resolve template in param '{key}': {str(e)}")
                     resolved_params[key] = value  # Keep original if resolution fails
             else:
                 resolved_params[key] = value
         
         return resolved_params
-
 
 def create_price_verification_bindings(item_selectors: List[str], total_selector: str) -> TestBindings:
     """Helper function to create bindings for price verification"""
@@ -202,7 +185,6 @@ def create_price_verification_bindings(item_selectors: List[str], total_selector
     bindings.add_binding(actual_total_binding)
     
     return bindings
-
 
 def create_cart_verification_bindings() -> TestBindings:
     """Create complete cart verification bindings for SauceDemo"""

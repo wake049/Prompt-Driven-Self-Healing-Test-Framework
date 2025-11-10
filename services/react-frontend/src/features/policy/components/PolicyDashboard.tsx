@@ -3,7 +3,8 @@
  * Real-time visualization of policy execution and outcomes
  */
 import React, { useState, useEffect, useCallback } from 'react';
-import styled from 'styled-components';
+import styled, { ThemeProvider } from 'styled-components';
+import { useTheme } from '../../../contexts/ThemeContext';
 import mcpPolicyApiClient from '../../../shared/utils/mcpPolicyApiClient';
 import unifiedApiClient from '../../../shared/utils/unifiedApiClient';
 import type { 
@@ -58,31 +59,31 @@ interface ActivePolicy {
 
 const Container = styled.div`
   min-height: 100vh;
-  background: #f8f9fa;
+  background: ${props => props.theme.colors.background};
 `;
 
 const MainContent = styled.div`
-  background: #f8f9fa;
+  background: ${props => props.theme.colors.background};
 `;
 
 const Header = styled.div`
   padding: 30px 40px;
-  border-bottom: 1px solid #e9ecef;
+  border-bottom: 1px solid ${props => props.theme.colors.border};
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background: white;
+  background: ${props => props.theme.colors.surface};
 `;
 
 const PageTitle = styled.h1`
   margin: 0;
-  color: #2c3e50;
+  color: ${props => props.theme.colors.text};
   font-size: 2rem;
   font-weight: 600;
 `;
 
 const RefreshButton = styled.button`
-  background: #007bff;
+  background: ${props => props.theme.colors.primary};
   color: white;
   border: none;
   border-radius: 8px;
@@ -92,11 +93,11 @@ const RefreshButton = styled.button`
   transition: background-color 0.2s;
   
   &:hover {
-    background: #0056b3;
+    background: ${props => props.theme.colors.surface === '#2d3748' ? '#5a67d8' : '#0056b3'};
   }
   
   &:disabled {
-    background: #6c757d;
+    background: ${props => props.theme.colors.textSecondary};
     cursor: not-allowed;
   }
 `;
@@ -113,11 +114,11 @@ const MetricsGrid = styled.div`
 `;
 
 const MetricCard = styled.div`
-  background: white;
+  background: ${props => props.theme.colors.surface};
   border-radius: 12px;
   padding: 24px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  border: 1px solid #e9ecef;
+  box-shadow: ${props => props.theme.shadows.medium};
+  border: 1px solid ${props => props.theme.colors.border};
 `;
 
 const MetricHeader = styled.div`
@@ -145,7 +146,7 @@ const MetricIcon = styled.div<{ color: string }>`
 
 const MetricTitle = styled.h3`
   margin: 0;
-  color: #2c3e50;
+  color: ${props => props.theme.colors.text};
   font-size: 1.1rem;
   font-weight: 600;
 `;
@@ -153,19 +154,19 @@ const MetricTitle = styled.h3`
 const MetricValue = styled.div`
   font-size: 2.5rem;
   font-weight: bold;
-  color: #2c3e50;
+  color: ${props => props.theme.colors.text};
   margin-bottom: 8px;
 `;
 
 const MetricDescription = styled.div`
-  color: #6c757d;
+  color: ${props => props.theme.colors.textSecondary};
   font-size: 0.9rem;
 `;
 
 const SectionTitle = styled.h2`
   font-size: 1.5rem;
   font-weight: 600;
-  color: #2c3e50;
+  color: ${props => props.theme.colors.text};
   margin-bottom: 24px;
 `;
 
@@ -181,16 +182,16 @@ const ChartsGrid = styled.div`
 `;
 
 const ChartCard = styled.div`
-  background: white;
+  background: ${props => props.theme.colors.surface};
   border-radius: 12px;
   padding: 24px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  border: 1px solid #e9ecef;
+  box-shadow: ${props => props.theme.shadows.medium};
+  border: 1px solid ${props => props.theme.colors.border};
 `;
 
 const ChartTitle = styled.h3`
   margin: 0 0 20px 0;
-  color: #2c3e50;
+  color: ${props => props.theme.colors.text};
   font-size: 1.2rem;
   font-weight: 600;
 `;
@@ -206,9 +207,9 @@ const PolicyItem = styled.div`
   justify-content: space-between;
   align-items: center;
   padding: 12px 16px;
-  background: #f8f9fa;
+  background: ${props => props.theme.colors.surface === '#2d3748' ? '#1a202c' : '#f8f9fa'};
   border-radius: 8px;
-  border: 1px solid #e9ecef;
+  border: 1px solid ${props => props.theme.colors.border};
 `;
 
 const PolicyName = styled.div`
@@ -455,6 +456,7 @@ const LoadingSpinner = styled.div`
 `;
 
 export const PolicyDashboard: React.FC = () => {
+  const { theme } = useTheme();
   const [policyStats, setPolicyStats] = useState<PolicyStatsLocal | null>(null);
   const [activePolicies, setActivePolicies] = useState<ActivePolicy[]>([]);
   const [recentExecutions, setRecentExecutions] = useState<PolicyExecutionLocal[]>([]);
@@ -708,7 +710,10 @@ export const PolicyDashboard: React.FC = () => {
       console.log(' Real-time policy data updated successfully from MCP server');
       
     } catch (err: any) {
+<<<<<<< Updated upstream
       console.error(' Error fetching real-time policy data:', err);
+=======
+>>>>>>> Stashed changes
       setError(err.message);
       
       // Set empty states when no data is available
@@ -809,7 +814,8 @@ export const PolicyDashboard: React.FC = () => {
   }
 
   return (
-    <Container>
+    <ThemeProvider theme={theme}>
+      <Container>
       <MainContent>
         <Header>
           <PageTitle>Policy Dashboard</PageTitle>
@@ -1058,5 +1064,6 @@ export const PolicyDashboard: React.FC = () => {
         </ContentArea>
       </MainContent>
     </Container>
+    </ThemeProvider>
   );
 };

@@ -6,12 +6,11 @@ Provides AI-powered alternative selector generation for self-healing test framew
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
-import logging
+
 import re
 from datetime import datetime
 
 router = APIRouter()
-logger = logging.getLogger(__name__)
 
 class SelectorRequest(BaseModel):
     """Request for alternative selector generation"""
@@ -405,8 +404,6 @@ async def generate_alternative_selectors(request: SelectorRequest) -> SelectorRe
     Generate alternative selectors for failed elements using universal patterns
     """
     try:
-        logger.info(f" Generating universal alternatives for: {request.original_selector}")
-        
         alternatives = []
         strategy = "universal-pattern-analysis"
         
@@ -444,8 +441,6 @@ async def generate_alternative_selectors(request: SelectorRequest) -> SelectorRe
         # Limit to top 8 alternatives to avoid overwhelming the system
         final_alternatives = unique_alternatives[:8]
         
-        logger.info(f"✓ Generated {len(final_alternatives)} universal alternatives")
-        
         return SelectorResponse(
             original_selector=request.original_selector,
             alternatives=final_alternatives,
@@ -454,7 +449,6 @@ async def generate_alternative_selectors(request: SelectorRequest) -> SelectorRe
         )
         
     except Exception as e:
-        logger.error(f"✗ Error generating universal alternatives: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to generate alternatives: {str(e)}")
 
 @router.get("/health")

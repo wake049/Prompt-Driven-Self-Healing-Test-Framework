@@ -14,7 +14,6 @@ Enhanced Features:
 from __future__ import annotations
 
 import json
-import logging
 import os
 import re
 import time
@@ -22,6 +21,10 @@ from typing import Any, Dict, List, Optional, Tuple
 import asyncio
 from pathlib import Path
 import asyncio
+<<<<<<< Updated upstream
+=======
+from fastapi import Depends, Request, HTTPException
+>>>>>>> Stashed changes
 
 try:
     from openai import OpenAI
@@ -39,9 +42,6 @@ from core.element_ranking import ElementRankingService
 from core.caching import CacheService  
 from core.cost_management import CostManagementService
 from core.database import get_database
-
-logger = logging.getLogger(__name__)
-
 
 class VariableValidationService:
     """Service to validate and correct AI-generated variable names against active data bindings"""
@@ -66,13 +66,8 @@ class VariableValidationService:
             
             var_name = target.get('variable_name') or target.get('name') or binding.get('rule_name', '')
             if var_name:
-                self.allowed_variables.add(var_name)
-                logger.info(f"🔐 Added allowed variable: {var_name}")
-        
-        # Create mapping for common invented variable names to real ones
+                self.allowed_variables.add(var_name)# Create mapping for common invented variable names to real ones
         self._create_variable_mappings()
-        
-        logger.info(f"🔐 Loaded {len(self.allowed_variables)} allowed variables: {sorted(self.allowed_variables)}")
     
     def _create_variable_mappings(self) -> None:
         """Create mappings from common invented names to actual binding variables"""
@@ -99,9 +94,6 @@ class VariableValidationService:
                 'sumTotal': total_vars[0],
                 'finalTotal': total_vars[0]
             })
-        
-        logger.info(f"🔄 Created variable mappings: {self.variable_mappings}")
-    
     def validate_and_correct_variable(self, variable_name: str) -> str:
         """Validate variable name and return corrected version if needed"""
         if not variable_name:
@@ -114,17 +106,13 @@ class VariableValidationService:
         # Check if we have a mapping for this invented name
         if variable_name in self.variable_mappings:
             corrected = self.variable_mappings[variable_name]
-            logger.warning(f" Corrected invented variable: {variable_name} -> {corrected}")
             return corrected
         
         # Try to find the closest allowed variable using fuzzy matching
         closest = self._find_closest_variable(variable_name)
-        if closest:
-            logger.warning(f" Fuzzy matched variable: {variable_name} -> {closest}")
-            return closest
+        if closest:return closest
         
-        # Last resort: reject the variable
-        logger.error(f" Rejected unknown variable: {variable_name}. Allowed: {sorted(self.allowed_variables)}")
+        # Last resort: reject the variable}")
         return None
     
     def _find_closest_variable(self, variable_name: str) -> Optional[str]:
@@ -161,7 +149,6 @@ class VariableValidationService:
                 if corrected:
                     step.args['variable'] = corrected
                 else:
-                    logger.error(f" Removing extract_data step with invalid variable: {step.args.get('variable')}")
                     return None
         
         # Check calculate steps
@@ -171,7 +158,6 @@ class VariableValidationService:
                 if corrected:
                     step.args['result_variable'] = corrected
                 else:
-                    logger.error(f" Removing calculate step with invalid result variable: {step.args.get('result_variable')}")
                     return None
             
             # Also check variables within formulas
@@ -212,19 +198,15 @@ class VariableValidationService:
             corrected = self.validate_and_correct_variable(var_name)
             if corrected:
                 return f"${{{corrected}}}"
-            else:
-                logger.warning(f"🚫 Removing invalid variable reference from text: ${{{var_name}}}")
-                return "[INVALID_VARIABLE]"
+            else:return "[INVALID_VARIABLE]"
         
         return re.sub(r'\$\{([^}]+)\}', replace_var, text)
-
 
 def _bool_env(name: str, default: bool) -> bool:
     v = os.getenv(name)
     if v is None:
         return default
     return v.lower() in ("1", "true", "yes", "on")
-
 
 class EnterpriseAIService:
     """
@@ -270,12 +252,10 @@ class EnterpriseAIService:
             api_key = self.config["openai"]["apiKey"]
             if api_key and OpenAI is not None:
                 self.client = OpenAI(api_key=api_key)
-                logger.info(" OpenAI client initialized successfully")
             else:
-                logger.warning(" OpenAI API key not found - using heuristic fallback only")
+                self.client = None
         except Exception as e:
-            logger.exception(" Failed to initialize OpenAI client: %s", e)
-
+            self.client = None
     def _enforce_rate_limit(self) -> None:
         """Enforce rate limiting between OpenAI API calls"""
         current_time = time.time()
@@ -283,7 +263,6 @@ class EnterpriseAIService:
         
         if time_since_last_call < self.min_call_interval:
             sleep_time = self.min_call_interval - time_since_last_call
-            logger.info(f"⏱️ Rate limiting: waiting {sleep_time:.1f}s before OpenAI call")
             time.sleep(sleep_time)
         
         self.last_openai_call = time.time()
@@ -390,7 +369,6 @@ class EnterpriseAIService:
                         ORDER BY priority DESC, created_at DESC
                     """
                     existing_bindings = await db.execute(bindings_query, scope_name)
-                    logger.info(f"🔗 Raw bindings query returned {len(existing_bindings) if existing_bindings else 0} results for scope: {scope_name}")
                     
                     # If no prompt-specific bindings found, try general active bindings
                     if not existing_bindings:
@@ -402,13 +380,10 @@ class EnterpriseAIService:
                             LIMIT 10
                         """
                         existing_bindings = await db.execute(fallback_query)
-                        logger.info(f"🔗 Fallback: Found {len(existing_bindings) if existing_bindings else 0} general active bindings")
                     
                     # Debug: Log first binding structure
                     if existing_bindings and len(existing_bindings) > 0:
                         first_binding = existing_bindings[0]
-                        logger.info(f" First binding structure: {first_binding}")
-                        logger.info(f" Target field type: {type(first_binding.get('target', 'missing'))}")
                     
                     # Also load element repository data for automatic selector population
                     elements_query = """
@@ -427,27 +402,49 @@ class EnterpriseAIService:
                             if css_selector:
                                 element_selectors[element['element_key']] = css_selector
                     
+<<<<<<< Updated upstream
                     logger.info(f"🏗️ Found {len(element_selectors)} price/total elements in repository: {list(element_selectors.keys())}")
                     
                 except Exception as e:
                     logger.error(f" Failed to load data bindings: {e}")
                     existing_bindings = None
+=======
+                    # Cache policy preference for synchronous selector methods
+                    try:
+                        policy_query = """
+                        SELECT context FROM policy.policy_decisions 
+                        WHERE context->>'config_type' = 'dashboard_config'
+                        ORDER BY created_at DESC
+                        LIMIT 1
+                        """
+                        policy_result = await db.execute_one(policy_query)
+                        
+                        prefer_css = True  # Default
+                        if policy_result and policy_result.get("context"):
+                            import json
+                            config_data = json.loads(policy_result["context"])
+                            locator_healing = config_data.get("configurations", {}).get("locatorHealing", {})
+                            prefer_css = locator_healing.get("preferCssOverXpath", True)
+                        
+                        # Cache the preference for sync methods
+                        self._cache_policy_preference(prefer_css)
+                        
+                    except Exception as e:self._cache_policy_preference(True)
+                    
+                except Exception as e:existing_bindings = None
+>>>>>>> Stashed changes
                 
                 # Process bindings if they were loaded successfully
                 if existing_bindings:
                     
-                    try:
                             # Load allowed variables into the validator
                             self.variable_validator.load_allowed_variables(existing_bindings)
-                            
-                            logger.info(f"🔄 Starting binding analysis for {len(existing_bindings)} bindings")
                             # Analyze bindings to understand relationships
                             binding_names = []
                             price_bindings = []
                             total_bindings = []
                             
                             for binding in existing_bindings:
-                                logger.info(f" Processing binding: {binding.get('rule_name', 'unknown')}")
                                 rule_name = binding.get('rule_name', '')
                                 target = binding.get('target', {})
                                 
@@ -455,9 +452,7 @@ class EnterpriseAIService:
                                 if isinstance(target, str):
                                     try:
                                         target = json.loads(target)
-                                    except json.JSONDecodeError:
-                                        logger.warning(f" Failed to parse target JSON for binding {rule_name}: {target}")
-                                        target = {}
+                                    except json.JSONDecodeError:target = {}
                                 
                                 # Extract variable name from target
                                 if isinstance(target, dict):
@@ -468,17 +463,9 @@ class EnterpriseAIService:
                                 binding_names.append(var_name)
                                 
                                 # Always add to extraction bindings - we extract ALL defined variables
-                                price_bindings.append(binding)
-                                logger.info(f"🏷️ Added for extraction: {var_name}")
-                                
-                                # Also classify by type for additional context
+                                price_bindings.append(binding)# Also classify by type for additional context
                                 if 'total' in var_name.lower() or 'sum' in var_name.lower():
                                     total_bindings.append(binding)
-                                    logger.info(f"🏷️ Also classified as total binding: {var_name}")
-                            
-                            logger.info(f" Binding classification: {len(price_bindings)} price, {len(total_bindings)} total, {len(binding_names)} total bindings")
-                            
-                            logger.info(f" About to build binding context - price_bindings: {len(price_bindings)}")
                             # Build intelligent context based on variable analysis
                             binding_context = f"\n\nIMPORTANT: This test has predefined data bindings: {', '.join(binding_names)}."
                             
@@ -492,7 +479,6 @@ class EnterpriseAIService:
                                 binding_context += f"\nAny step using unlisted variable names will be rejected."
                         
                             if price_bindings:
-                                logger.info(f" ENTERING BINDING CONTEXT GENERATION with {len(price_bindings)} price bindings")
                                 price_names = []
                                 for binding in price_bindings:
                                     target = binding.get('target', {})
@@ -570,25 +556,16 @@ class EnterpriseAIService:
                                 binding_context += f"\n- Calculate step format: action='calculate', data='result_variable_name', text='formula_expression'"
                                 binding_context += f"\n- Formulas can use +, -, *, / operators and reference variables by name or ${{name}} syntax"
                                 binding_context += f"\n- Always use variable syntax in verification steps when dynamic data is involved"
-                                
-                                logger.info(f" About to enhance prompt with binding context (length: {len(binding_context)} chars)")
                                 # Modify the prompt to include intelligent binding context
                                 original_prompt = prompt_envelope.prompt
                                 prompt_envelope.prompt = original_prompt + binding_context
-                                logger.info(f"🔗 Enhanced prompt with intelligent bindings context")
-                                logger.info(f"📝 Final enhanced prompt length: {len(prompt_envelope.prompt)} chars")
                         
-                    except Exception as e:
-                        logger.warning(f" Failed to process existing bindings: {str(e)}")
-                    
-                else:
-                    logger.info("ℹ️ No active data bindings found")
-            
-            # Check budget before processing
-            estimated_tokens, estimated_cost = self.cost_management.estimate_cost(
-                prompt_envelope, 
-                self.config["openai"]["model"]
-            )
+                
+                # Check budget before processing
+                estimated_tokens, estimated_cost = self.cost_management.estimate_cost(
+                    prompt_envelope, 
+                    self.config["openai"]["model"]
+                )
             
             can_proceed, budget_info = self.cost_management.check_budget(
                 prompt_envelope.tenant_id, 
@@ -599,10 +576,7 @@ class EnterpriseAIService:
                 return self._create_budget_exceeded_response(budget_info, start_time)
             
             # Use smart page context system if not provided
-            if not prompt_envelope.page_context and prompt_envelope.page_slice:
-                logger.info(" Using smart page context system...")
-                
-                # Phase 1: Analyze prompt intent
+            if not prompt_envelope.page_context and prompt_envelope.page_slice:# Phase 1: Analyze prompt intent
                 intent_analysis = await self.analyze_prompt_intent(
                     prompt_envelope.prompt, 
                     prompt_envelope.page_slice.elements
@@ -627,21 +601,24 @@ class EnterpriseAIService:
                         domain_name=smart_context.get('domain_name', ''),
                         screenshot_url=smart_context.get('screenshot_url')
                     )
-                    logger.info(f" Applied smart page context: {smart_context.get('page_type', 'unknown')}")
                 else:
+<<<<<<< Updated upstream
                     # Fallback to auto-detection
                     logger.info(" Smart context not found, using auto-detection...")
                     element_selectors = [self._get_element_selector(el) for el in prompt_envelope.page_slice.elements]
+=======
+                    # Fallback to auto-detection# Use async method to get policy-based selectors
+                    element_selectors = []
+                    for el in prompt_envelope.page_slice.elements:
+                        selector = await self._get_policy_based_element_selector(el)
+                        element_selectors.append(selector)
+                    
+>>>>>>> Stashed changes
                     prompt_envelope.page_context = page_context_service.detect_page_context(
                         page_url=prompt_envelope.page_url,
                         element_selectors=element_selectors
                     )
-                    if prompt_envelope.page_context.page_type:
-                        logger.info(f"📍 Detected page type: {prompt_envelope.page_context.page_type}")
-            
-            # Log initial elements received
             if prompt_envelope.page_slice and prompt_envelope.page_slice.elements:
-                logger.info(f" Received {len(prompt_envelope.page_slice.elements)} elements for processing")
                 
                 # Analyze element types for debugging
                 element_types = {}
@@ -654,32 +631,16 @@ class EnterpriseAIService:
                 for i, el in enumerate(prompt_envelope.page_slice.elements[:10]):  # Log first 10 elements
                     tag = self._get_element_tag(el)
                     text = self._get_element_text(el)[:50] + "..." if len(self._get_element_text(el)) > 50 else self._get_element_text(el)
-                    selector = self._get_element_selector(el)
-                    logger.info(f"  [{i}] {tag}: '{text}' - {selector}")
-                    
-                    # Categorize elements
+                    selector = self._get_element_selector(el)# Categorize elements
                     element_types[tag] = element_types.get(tag, 0) + 1
                     if 'password' in selector.lower() or 'user-name' in selector.lower() or 'login' in selector.lower():
                         login_elements.append(selector)
                     if 'remove-' in selector.lower() or 'inventory' in selector.lower() or 'item' in selector.lower():
                         inventory_elements.append(selector)
                 
-                if len(prompt_envelope.page_slice.elements) > 10:
-                    logger.info(f"  ... and {len(prompt_envelope.page_slice.elements) - 10} more elements")
+                if len(prompt_envelope.page_slice.elements) > 10:- 10
                 
-                # Log page state analysis
-                logger.info(f" Element analysis: {element_types}")
-                # form_elements check removed
-                logger.info(f"� Form elements found: {form_elements}")
-                if interactive_elements:
-                    logger.info(f" Interactive elements found: {interactive_elements}")
-                if navigation_elements:
-                    logger.info(f"🧭 Navigation elements found: {navigation_elements}")
-                    
-            else:
-                logger.info(" No elements provided in page_slice")
-            
-            # Rank elements if provided
+                # Log page state analysis# form_elements check removedif interactive_elements:if navigation_elements:else:# Rank elements if provided
             ranked_elements = []
             cache_hits = 0
             
@@ -708,10 +669,10 @@ class EnterpriseAIService:
             
             # Log ranked/filtered elements
             if ranked_elements:
-                logger.info(f" After ranking/filtering: {len(ranked_elements)} elements")
                 for i, el in enumerate(ranked_elements[:10]):  # Log first 10 ranked elements
                     tag = self._get_element_tag(el)
                     text = self._get_element_text(el)[:50] + "..." if len(self._get_element_text(el)) > 50 else self._get_element_text(el)
+<<<<<<< Updated upstream
                     selector = self._get_element_selector(el)
                     logger.info(f"  [ranked {i}] {tag}: '{text}' - {selector}")
                 if len(ranked_elements) > 10:
@@ -730,6 +691,36 @@ class EnterpriseAIService:
                 model = "rule-based"
                 cache_hits += 1  # Heuristic is essentially cached
             
+=======
+                    selector = self._get_element_selector(el) if len(ranked_elements) > 10 else ranked_elements[-10:]
+            else:# Generate test steps using AI when available, fallback to heuristic
+                if self.client and self.config["openai"]["enabled"]:
+                    steps, actual_tokens = await self._generate_ai_plan(prompt_envelope, ranked_elements)
+                    method = "ai-powered"
+                    model = self.config["openai"]["model"]
+                else:
+                    steps, actual_tokens = await self._generate_heuristic_plan(prompt_envelope, ranked_elements)
+                    method = "heuristic-fallback"
+                    model = "rule-based"
+                    cache_hits += 1  # Heuristic is essentially cached
+            
+            # SAFETY POLICY: Validate generated steps for destructive operations
+            if current_user:
+                from core.safety_policy import safety_policy
+                validated_steps = []
+                for step in steps:
+                    try:
+                        await safety_policy.validate_step_action(
+                            current_user, 
+                            step.action, 
+                            step.args
+                        )
+                        validated_steps.append(step)
+                    except Exception as e:# Skip this step instead of failing the entire request
+                        continue
+                steps = validated_steps
+            
+>>>>>>> Stashed changes
             # Track actual usage
             cost_summary = self.cost_management.track_usage(
                 prompt_envelope.tenant_id,
@@ -757,12 +748,22 @@ class EnterpriseAIService:
                 model=model,
                 cache_used=cache_hits > 0
             )
+<<<<<<< Updated upstream
             
             logger.info(f" Generated {len(steps)} steps for {prompt_envelope.tenant_id} in {response.processing_time_ms}ms")
+=======
+
+            # Log final response steps for debugging
+            for i, step in enumerate(response.steps):
+                cached_pref = getattr(self, '_cached_policy_preference', 'unknown')
+                if step.target and '#' in step.target:
+                    pass
+                elif step.target and '//*[@' in step.target:
+                    pass
+>>>>>>> Stashed changes
             return response
-            
+
         except Exception as e:
-            logger.exception(f" Plan generation failed: {e}")
             return self._create_error_response(str(e), start_time)
     
     async def get_action_catalog(
@@ -817,9 +818,6 @@ class EnterpriseAIService:
         input_tokens = len(system_prompt + user_prompt) // 4
         
         try:
-            logger.info(f"🤖 Generating AI plan for: '{prompt_envelope.prompt}' with {len(ranked_elements)} elements")
-            logger.info(f"📤 System prompt length: {len(system_prompt)} chars")
-            logger.info(f"📤 User prompt length: {len(user_prompt)} chars")
             
             response = await self._chat_json(
                 model=self.config["openai"]["model"],
@@ -831,18 +829,10 @@ class EnterpriseAIService:
                 timeout_ms=prompt_envelope.timeout_ms
             )
             
-            logger.info(f"🤖 Raw AI response (first 200 chars): {response[:200]}...")
-            
             # Try to parse JSON with better error handling
             try:
                 parsed = json.loads(response)
-            except json.JSONDecodeError as e:
-                logger.error(f" JSON parsing failed: {e}")
-                logger.error(f" Full response: {response}")
-                
-                # Try to extract and reconstruct JSON from response
-                logger.info(" Attempting to extract JSON from response...")
-                try:
+            except json.JSONDecodeError as e:# Try to extract and reconstruct JSON from responsetry:
                     # Look for JSON array in the response (new format)
                     import re
                     json_match = re.search(r'\[.*', response, re.DOTALL)
@@ -860,10 +850,7 @@ class EnterpriseAIService:
                             
                             # Close the array
                             reconstructed += '\n]'
-                            
-                            logger.info(f" Reconstructed JSON (last 200 chars): ...{reconstructed[-200:]}")
-                            parsed = json.loads(reconstructed)
-                            logger.info(f" Successfully parsed truncated JSON with {len(parsed) if isinstance(parsed, list) else 0} steps")
+                            parsed = json.loads(reconstructed)if isinstance(parsed, list) else 0
                         else:
                             # Fallback: just try to find a complete JSON array
                             json_match = re.search(r'\[.*\]', response, re.DOTALL)
@@ -884,9 +871,7 @@ class EnterpriseAIService:
                         else:
                             raise e
                         
-                except Exception as reconstruction_error:
-                    logger.warning(f" JSON reconstruction failed: {reconstruction_error}")
-                    raise e
+            except Exception as reconstruction_error:raise e
             
             # Handle both array format (new) and object format (legacy)
             if isinstance(parsed, list):
@@ -896,7 +881,31 @@ class EnterpriseAIService:
             
             # Convert to PlanStep objects with variable validation
             steps = []
+<<<<<<< Updated upstream
             for raw_step in raw_steps[:prompt_envelope.max_steps]:
+=======
+            for i, raw_step in enumerate(raw_steps[:prompt_envelope.max_steps]):
+                # Apply policy-based selector transformation to AI-generated target
+                original_target = raw_step.get("target")
+                if original_target and original_target.startswith('#'):
+                    # AI generated CSS selector, apply policy
+                    if getattr(self, '_cached_policy_preference', 'css') == 'xpath':
+                        # Convert CSS ID selector to XPath
+                        element_id = original_target[1:]  # Remove #
+                        policy_target = f"//*[@id='{element_id}']"
+                    else:
+                        policy_target = original_target
+                else:
+                    policy_target = original_target
+                
+                # Apply same policy to args selector if present
+                args = raw_step.get("args", {}).copy()
+                if 'selector' in args and args['selector'].startswith('#'):
+                    if getattr(self, '_cached_policy_preference', 'css') == 'xpath':
+                        element_id = args['selector'][1:]  # Remove #
+                        args['selector'] = f"//*[@id='{element_id}']"
+                
+>>>>>>> Stashed changes
                 step = PlanStep(
                     action=raw_step.get("action", ""),
                     target=raw_step.get("target"),
@@ -904,22 +913,23 @@ class EnterpriseAIService:
                     confidence=raw_step.get("confidence", 0.8),
                     description=raw_step.get("description")
                 )
+<<<<<<< Updated upstream
                 
+=======
+
+>>>>>>> Stashed changes
                 # Validate and correct variables in the step
                 validated_step = self.variable_validator.validate_step_variables(step)
                 if validated_step:  # Only add if validation passed
                     steps.append(validated_step)
                 else:
-                    logger.warning(f"🚫 Skipping step with invalid variables: {step.action}")
-            
-            logger.info(f"🤖 AI generated {len(steps)} valid steps (filtered from {len(raw_steps)} raw steps)")
+                    # Log skipped step due to validation failure
+                    pass
             
             output_tokens = len(response) // 4
             return steps, {"input": input_tokens, "output": output_tokens}
             
-        except Exception as e:
-            logger.error(f" AI generation failed: {e}")
-            raise Exception(f"AI service unavailable: {str(e)}")
+        except Exception as e:raise Exception(f"AI service unavailable: {str(e)}")
 
     def _generate_heuristic_plan(
         self,
@@ -956,27 +966,32 @@ class EnterpriseAIService:
             validated_step = self.variable_validator.validate_step_variables(step)
             if validated_step:
                 validated_steps.append(validated_step)
-            else:
-                logger.warning(f"🚫 Skipping heuristic step with invalid variables: {step.action}")
-        
-        return validated_steps, {"input": 0, "output": 0}
-    
-
+            else:return validated_steps, {"input": 0, "output": 0}
 
     # =========================
     # STEP GENERATION HELPERS
     # =========================
     
+<<<<<<< Updated upstream
     def _generate_login_steps(self, elements: List[Any]) -> List[PlanStep]:
         """Generate login-specific steps"""
         steps = []
         
         logger.info(f"🔑 Looking for login elements in {len(elements)} available elements")
+=======
+    async def _generate_login_steps(self, elements: List[Any]) -> List[PlanStep]:
+        """Generate login-specific steps with policy-based selectors"""
+        steps = [] 
+>>>>>>> Stashed changes
         
         # Find username/email field
         username_el = self._find_element_by_keywords(elements, ["email", "username", "user", "user-name"])
         if username_el:
+<<<<<<< Updated upstream
             logger.info(f" Found username field: {self._get_element_tag(username_el)} - '{self._get_element_text(username_el)}' - {self._get_element_selector(username_el)}")
+=======
+            username_selector = await self._get_policy_based_element_selector(username_el)
+>>>>>>> Stashed changes
             steps.append(PlanStep(
                 action="type",
                 target=self._get_element_id(username_el),
@@ -988,13 +1003,14 @@ class EnterpriseAIService:
                 description="Enter username/email",
                 confidence=0.9
             ))
-        else:
-            logger.warning(" No username/email field found")
-        
-        # Find password field
-        password_el = self._find_element_by_keywords(elements, ["password"])
+        else:# Find password field
+            password_el = self._find_element_by_keywords(elements, ["password"])
         if password_el:
+<<<<<<< Updated upstream
             logger.info(f" Found password field: {self._get_element_tag(password_el)} - '{self._get_element_text(password_el)}' - {self._get_element_selector(password_el)}")
+=======
+            password_selector = await self._get_policy_based_element_selector(password_el)
+>>>>>>> Stashed changes
             steps.append(PlanStep(
                 action="type", 
                 target=self._get_element_id(password_el),
@@ -1006,13 +1022,14 @@ class EnterpriseAIService:
                 description="Enter password",
                 confidence=0.9
             ))
-        else:
-            logger.warning(" No password field found")
-        
-        # Find submit button
-        submit_el = self._find_element_by_keywords(elements, ["submit", "login", "signin"])
+        else:# Find submit button
+            submit_el = self._find_element_by_keywords(elements, ["submit", "login", "signin"])
         if submit_el:
+<<<<<<< Updated upstream
             logger.info(f" Found submit button: {self._get_element_tag(submit_el)} - '{self._get_element_text(submit_el)}' - {self._get_element_selector(submit_el)}")
+=======
+            submit_selector = await self._get_policy_based_element_selector(submit_el)
+>>>>>>> Stashed changes
             steps.append(PlanStep(
                 action="click",
                 target=self._get_element_id(submit_el),
@@ -1023,10 +1040,6 @@ class EnterpriseAIService:
                 description="Click login button",
                 confidence=0.95
             ))
-        else:
-            logger.warning(" No submit/login button found")
-        
-        logger.info(f"🔑 Login step generation complete: {len(steps)} steps created")
         return steps
     
     def _generate_search_steps(self, elements: List[Any], search_term: str) -> List[PlanStep]:
@@ -1182,11 +1195,7 @@ class EnterpriseAIService:
                         },
                         description=f"Extract {var_name} from element {i + 1}",
                         confidence=0.8
-                    ))
-                    
-                    logger.info(f" Generated extraction step for {var_name}: {specific_selector}")
-            
-            # Add calculation step if we have multiple price variables
+                    ))# Add calculation step if we have multiple price variables
             if len(price_vars) > 1 and total_vars:
                 formula = f"{total_vars[0]} = {' + '.join(price_vars)}"
                 steps.append(PlanStep(
@@ -1214,8 +1223,6 @@ class EnterpriseAIService:
                     description=f"Verify displayed total matches calculated {total_vars[0]}",
                     confidence=0.7
                 ))
-        
-        logger.info(f" Generated {len(steps)} data extraction steps")
         return steps
 
     def _analyze_page_context(self, elements: List[Any]) -> str:
@@ -1525,11 +1532,8 @@ Generate comprehensive workflow with EXTENSIVE VERIFICATION of all relevant elem
                 page_context += f"\n- Notes: {ctx.user_notes}"
             if ctx.screenshot_url:
                 page_context += f"\n- Screenshot Available: Use visual context at {ctx.screenshot_url}"
-                logger.info(f"📸 Including screenshot in AI prompt: {ctx.screenshot_url}")
             else:
-                logger.info("📸 No screenshot available for this page context")
-        
-        return f"""Request: {prompt_envelope.prompt}
+                return f"""Request: {prompt_envelope.prompt}
 {url_context}
 {page_context}
 {elements_context}
@@ -1644,7 +1648,6 @@ CRITICAL: Adapt completely to the website type. Don't use e-commerce patterns fo
     
     def _find_element_by_keywords(self, elements: List[Any], keywords: List[str], tag_filter: Optional[str] = None) -> Any:
         """Find element by keywords in text/attributes/selector"""
-        logger.info(f" Searching for keywords {keywords} in {len(elements)} elements (tag_filter: {tag_filter})")
         
         for i, el in enumerate(elements):
             text = self._get_element_text(el).lower()
@@ -1657,16 +1660,10 @@ CRITICAL: Adapt completely to the website type. Don't use e-commerce patterns fo
                 
             for keyword in keywords:
                 # Search in text, attributes, AND selector
-                if keyword in text or keyword in attrs or keyword in selector:
-                    logger.info(f" Found match for '{keyword}': {tag} - text:'{text[:30]}' - selector:{selector}")
-                    return el
+                if keyword in text or keyword in attrs or keyword in selector:return el
             
             # Log elements being checked (first 5 only to avoid spam)
-            if i < 5:
-                logger.debug(f"  Checking [{i}] {tag}: text:'{text[:20]}' selector:'{selector[:30]}' attrs:{attrs[:30]}")
-        
-        logger.info(f" No match found for keywords {keywords}")
-        return None
+            if i < 5:return None
     
     def _find_element_by_text(self, elements: List[Any], target_text: str) -> Any:
         """Find element containing specific text"""
@@ -1686,10 +1683,160 @@ CRITICAL: Adapt completely to the website type. Don't use e-commerce patterns fo
         return element.get("id", f"el_{int(time.time()*1000)}")
     
     def _get_element_selector(self, element: Any) -> str:
+<<<<<<< Updated upstream
         """Get element CSS selector"""
         if hasattr(element, 'selector_css'):
             return element.selector_css or ""
         return element.get("css_selector", "") or element.get("selector", "")
+=======
+        """Get element selector based on current policy preference - uses repository selectors"""
+        
+        try:
+            # Get both selectors from element repository
+            css_selector = None
+            xpath_selector = None
+            
+            # Extract CSS selector
+            if hasattr(element, 'selector_css') and element.selector_css:
+                css_selector = element.selector_css
+            elif hasattr(element, 'css_selector') and element.css_selector:
+                css_selector = element.css_selector
+            elif isinstance(element, dict):
+                css_selector = element.get('css_selector') or element.get('selector')
+            
+            # Extract XPath selector  
+            if hasattr(element, 'selector_xpath') and element.selector_xpath:
+                xpath_selector = element.selector_xpath
+            elif hasattr(element, 'xpath_selector') and element.xpath_selector:
+                xpath_selector = element.xpath_selector
+            elif isinstance(element, dict):
+                xpath_selector = element.get('xpath_selector') or element.get('xpath')
+            
+            # Apply policy preference
+            cached_preference = getattr(self, '_cached_policy_preference', 'css')
+            prefer_css = (cached_preference == 'css')
+            
+            # Choose selector based on policy and availability
+            if prefer_css and css_selector: 
+                {css_selector}
+                return css_selector
+            elif not prefer_css and xpath_selector: 
+                {xpath_selector}
+                return xpath_selector
+            elif css_selector:  # Fallback to available CSS
+                return css_selector
+            elif xpath_selector:  # Fallback to available XPath
+                return xpath_selector
+            else:
+                # Last resort fallback
+                element_id = getattr(element, 'element_id', 'unknown')
+                fallback_selector = f"#{element_id}" if prefer_css else f"//*[@id='{element_id}']"
+                return fallback_selector
+                
+        except Exception as e:return f"[data-testid='unknown']"
+    
+    def _css_to_xpath_simple(self, css_selector: str) -> str:
+        """Simple CSS to XPath conversion for policy compliance"""
+        try:
+            if css_selector.startswith('#'):
+                # ID selector: #id -> //*[@id='id']
+                element_id = css_selector[1:]
+                return f"//*[@id='{element_id}']"
+            elif css_selector.startswith('.'):
+                # Class selector: .class -> //*[contains(@class,'class')]
+                class_name = css_selector[1:]
+                return f"//*[contains(@class,'{class_name}')]"
+            elif css_selector.startswith('[data-testid='):
+                # Data testid: [data-testid='value'] -> //*[@data-testid='value']
+                testid = css_selector.split("'")[1]
+                return f"//*[@data-testid='{testid}']"
+            else:
+                # For other selectors, wrap in generic XPath
+                return f"//*[@data-testid='{css_selector}']"
+        except Exception:
+            return f"//*[@data-testid='{css_selector}']"
+    
+    def _cache_policy_preference(self, prefer_css: bool):
+        """Cache the policy preference for sync selector generation"""
+        self._cached_policy_preference = "css" if prefer_css else "xpath"
+    
+    async def _get_policy_based_element_selector(self, element: Any) -> str:
+        """Get element selector respecting CSS vs XPath policy preference"""
+        try:
+            # Get current policy configuration
+            from core.database import get_database
+            db = await get_database()
+            
+            policy_query = """
+            SELECT context FROM policy.policy_decisions 
+            WHERE context->>'config_type' = 'dashboard_config'
+            ORDER BY created_at DESC
+            LIMIT 1
+            """
+            policy_result = await db.execute_one(policy_query)
+            
+            # Default to CSS preference
+            prefer_css = True
+            
+            if policy_result and policy_result.get("context"):
+                import json
+                config_data = json.loads(policy_result["context"])
+                locator_healing = config_data.get("configurations", {}).get("locatorHealing", {})
+                prefer_css = locator_healing.get("preferCssOverXpath", True)
+            
+            # Get both selectors if available
+            css_selector = ""
+            xpath_selector = ""
+            
+            if hasattr(element, 'selector_css'):
+                css_selector = element.selector_css or ""
+            else:
+                css_selector = element.get("css_selector", "") or element.get("selector", "")
+            
+            if hasattr(element, 'selector_xpath'):
+                xpath_selector = element.selector_xpath or ""
+            else:
+                xpath_selector = element.get("xpath_selector", "") or element.get("xpath", "")
+            
+            # Apply policy preference
+            if prefer_css and css_selector:
+                return css_selector
+            elif not prefer_css and xpath_selector:
+                return xpath_selector
+            elif css_selector:
+                return css_selector
+            elif not prefer_css and xpath_selector:
+                return xpath_selector
+            elif css_selector:
+                return css_selector
+            elif xpath_selector:
+                return xpath_selector
+            elif css_selector:
+                return css_selector
+            elif xpath_selector:
+                return xpath_selector
+            else:
+                # Generate basic selectors if none exist
+                if prefer_css:
+                    element_id = self._get_element_id(element)
+                    if element_id:
+                        return f"#{element_id}"
+                    else:
+                        tag = self._get_element_tag(element)
+                        return f"{tag}"
+                else:
+                    element_id = self._get_element_id(element)
+                    if element_id:
+                        return f"//*[@id='{element_id}']"
+                    else:
+                        tag = self._get_element_tag(element)
+                        return f"//{tag}"
+                        
+        except Exception as e:# Fallback to original logic
+            if hasattr(element, 'selector_css'):
+                return element.selector_css or ""
+            return element.get("css_selector", "") or element.get("selector", "")
+>>>>>>> Stashed changes
     
     def _get_element_tag(self, element: Any) -> str:
         """Get element tag name"""
@@ -1785,6 +1932,283 @@ CRITICAL: Adapt completely to the website type. Don't use e-commerce patterns fo
             method="budget_check_failed"
         )
     
+<<<<<<< Updated upstream
+=======
+    async def generate_minimal_reproduction_steps(
+        self,
+        execution_id: str,
+        execution_context: Dict[str, Any],
+        all_steps: List[Any],
+        failed_steps: List[Any],
+        optimization_level: str = "moderate",
+        preserve_context: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Generate minimal reproduction steps using AI analysis.
+        Analyzes the execution flow and identifies the minimum steps needed to reproduce the failure.
+        """
+        try:
+            # Build context for AI analysis
+            context_prompt = f"""
+Analyze this failed test execution and identify which ORIGINAL steps are essential for reproducing the failure:
+
+EXECUTION CONTEXT:
+- Test Purpose: {execution_context.get('prompt_text', 'Unknown')}
+- Total Steps: {execution_context.get('total_steps', 0)}
+- Failed Steps: {execution_context.get('failed_steps_count', 0)}
+
+OPTIMIZATION LEVEL: {optimization_level}
+PRESERVE CONTEXT: {preserve_context}
+
+ALL STEPS EXECUTED (WITH ORIGINAL SELECTORS):
+"""
+            
+            for i, step in enumerate(all_steps):
+                status_indicator = "❌" if step.get("status") == "failed" else "✅" if step.get("status") == "passed" else "⏸️"
+                context_prompt += f"\n{i+1}. {status_indicator} [{step.get('step_order')}] {step.get('action', 'unknown')} on '{step.get('target', 'unknown')}'"
+                if step.get("error_message") and step.get("status") == "failed":
+                    context_prompt += f" - ERROR: {step.get('error_message')}"
+            
+            context_prompt += f"""
+
+CRITICAL REQUIREMENT: You must return the EXACT ORIGINAL STEPS (step_order numbers) that are essential for reproducing the failure.
+DO NOT generate new steps or modify the action/target values - only identify which existing steps are needed.
+
+ANALYSIS TASK:
+1. Identify the critical path that leads to the failure
+2. Remove unnecessary steps (redundant navigation, non-essential assertions)
+3. Keep only steps that are essential for reproducing the failure state
+4. Maintain logical flow and necessary setup steps
+5. Optimization level "{optimization_level}": 
+   - conservative: Keep more context steps (70-80% reduction)
+   - moderate: Balance between context and efficiency (50-70% reduction) 
+   - aggressive: Minimal steps only (30-50% reduction)
+
+Generate a JSON response with:
+{{
+  "essentialStepOrders": [1, 3, 5, 7],
+  "analysisReport": {{
+    "criticalPath": ["step types that are essential"],
+    "removedSteps": ["step types that were removed"],
+    "reasoning": "explanation of why these specific steps reproduce the failure"
+  }}
+}}
+
+IMPORTANT: Return only the step_order numbers of the original steps that are essential. The original step data will be preserved exactly as-is.
+"""
+            
+            # Use AI to analyze and generate minimal steps
+            if not self.client:
+                # Fallback to heuristic approach if AI is not available
+                return self._generate_heuristic_minimal_repro(all_steps, failed_steps, optimization_level)
+            
+            response = await self._chat_json(
+                model=self.config["openai"]["model"],
+                system="You are an expert test automation engineer specializing in failure analysis and test optimization. You select which original test steps are essential for reproducing failures.",
+                user=context_prompt,
+                max_tokens=2000,
+                temperature=0.1,
+                retries=3,
+                timeout_ms=30000
+            )
+            
+            analysis_result = json.loads(response)
+            essential_step_orders = analysis_result.get("essentialStepOrders", [])
+            analysis_report = analysis_result.get("analysisReport", {})
+            
+            # Extract the original steps that were identified as essential
+            essential_steps = []
+            step_order_to_step = {step.get("step_order"): step for step in all_steps}
+            
+            for step_order in essential_step_orders:
+                if step_order in step_order_to_step:
+                    original_step = step_order_to_step[step_order]
+                    
+                    # Create the essential step with all necessary data preserved
+                    essential_step = {
+                        "step_order": original_step.get("step_order"),
+                        "action": original_step.get("action"),
+                        "target": original_step.get("target"),
+                        "text_value": original_step.get("text_value", ""),  # Include text values for typing
+                        "status": original_step.get("status"),
+                        "originalStepId": str(original_step.get("id", ""))
+                    }
+                    
+                    # Log for debugging
+                    if essential_step["action"] == "type" and essential_step["text_value"]:
+                        essential_steps.append(essential_step)
+                    elif essential_step["action"] == "type":
+                        essential_steps.append(essential_step)
+            
+            # Calculate metrics
+            original_count = len(all_steps)
+            reduced_count = len(essential_steps)
+            reduction_percentage = (1 - reduced_count / original_count) if original_count > 0 else 0
+            
+            # Estimate reproduction guarantee based on steps included
+            confidence = min(0.95, 0.6 + (reduced_count / original_count) * 0.35)
+            
+            return {
+                "success": True,
+                "minimalSteps": essential_steps,
+                "originalStepsCount": original_count,
+                "reducedStepsCount": reduced_count,
+                "reproductionGuarantee": confidence,
+                "analysisReport": analysis_report
+            }
+            
+        except Exception as e:
+            return self._generate_heuristic_minimal_repro(all_steps, failed_steps, optimization_level)
+    
+    def _generate_heuristic_minimal_repro(
+        self,
+        all_steps: List[Any],
+        failed_steps: List[Any],
+        optimization_level: str
+    ) -> Dict[str, Any]:
+        """
+        Fallback heuristic approach for minimal reproduction when AI is unavailable.
+        Returns original steps based on heuristic rules.
+        """
+        failed_step_numbers = {step.get("step_order", 0) for step in failed_steps}
+        
+        # Heuristic rules based on optimization level
+        essential_actions = {"open_url", "click", "type", "select"}
+        setup_actions = {"wait", "navigate", "wait_for"}
+        verification_actions = {"assert", "verify", "check"}
+        
+        essential_steps = []
+        
+        for step in all_steps:
+            step_number = step.get("step_order", 0)
+            action = step.get("action", "").lower()
+            
+            include_step = False
+            
+            # Always include failed steps and preceding setup
+            if step_number in failed_step_numbers:
+                include_step = True
+            
+            # Include essential actions (navigation, input)
+            elif any(essential_action in action for essential_action in essential_actions):
+                include_step = True
+            
+            # Include setup steps based on optimization level
+            elif any(setup_action in action for setup_action in setup_actions):
+                if optimization_level == "conservative":
+                    include_step = True
+                elif optimization_level == "moderate" and step_number <= max(failed_step_numbers):
+                    include_step = True
+            
+            # Skip most verification steps unless conservative
+            elif any(verify_action in action for verify_action in verification_actions):
+                if optimization_level == "conservative":
+                    include_step = True
+            
+            if include_step:
+                essential_steps.append({
+                    "step_order": step.get("step_order"),
+                    "action": step.get("action"),
+                    "target": step.get("target"),
+                    "text_value": step.get("text_value", ""),  # Include text values for typing
+                    "status": step.get("status"),
+                    "originalStepId": str(step.get("id", ""))
+                })
+        
+        return {
+            "success": True,
+            "minimalSteps": essential_steps,
+            "originalStepsCount": len(all_steps),
+            "reducedStepsCount": len(essential_steps),
+            "reproductionGuarantee": 0.75,
+            "analysisReport": {
+                "criticalPath": ["heuristic analysis"],
+                "removedSteps": ["verification steps", "redundant navigation"],
+                "reasoning": f"Heuristic approach using {optimization_level} optimization level"
+            }
+        }
+    
+    async def generate_element_failure_recommendations(
+        self,
+        element_id: str,
+        failure_data: Dict[str, Any]
+    ) -> List[str]:
+        """
+        Generate AI-powered recommendations for element failure patterns.
+        """
+        try:
+            if not self.client:
+                return self._generate_heuristic_failure_recommendations(failure_data)
+            
+            context_prompt = f"""
+Analyze failure patterns for UI element "{element_id}" and provide specific recommendations:
+
+FAILURE ANALYSIS DATA:
+- Total Failures: {failure_data.get('total_failures', 0)} over {failure_data.get('time_period_days', 30)} days
+- Error Patterns: {list(failure_data.get('error_patterns', {}).keys())[:5]}
+- Action Patterns: {list(failure_data.get('action_patterns', {}).keys())}
+
+TOP ERRORS:
+"""
+            
+            for error, count in list(failure_data.get('error_patterns', {}).items())[:3]:
+                context_prompt += f"\n- {error} (occurred {count} times)"
+            
+            context_prompt += """
+
+Generate 3-6 specific, actionable recommendations to improve element stability and reduce failures.
+Focus on practical solutions like:
+- Selector improvements (if selectors are weak)
+- Wait strategies (if timing issues)
+- Error handling (if environmental issues)
+- Test design changes (if test logic issues)
+- Element identification improvements
+
+Return a JSON array of recommendation strings.
+"""
+            
+            response = await self._chat_json(
+                model=self.config["openai"]["model"],
+                system="You are a senior QA automation engineer providing specific technical recommendations to fix test failures.",
+                user=context_prompt,
+                max_tokens=800,
+                temperature=0.2
+            )
+            
+            recommendations = json.loads(response)
+            if isinstance(recommendations, list):
+                return recommendations[:6]  # Limit to 6 recommendations
+            else:
+                return ["AI analysis completed but returned unexpected format"]
+                
+        except Exception as e:
+            return self._generate_heuristic_failure_recommendations(failure_data)
+    
+    def _generate_heuristic_failure_recommendations(self, failure_data: Dict[str, Any]) -> List[str]:
+        """Fallback heuristic recommendations when AI is unavailable."""
+        recommendations = []
+        total_failures = failure_data.get('total_failures', 0)
+        
+        if total_failures > 10:
+            recommendations.append("🔧 High failure rate detected - consider reviewing element selector stability")
+        
+        error_patterns = failure_data.get('error_patterns', {})
+        if any("timeout" in error.lower() for error in error_patterns.keys()):
+            recommendations.append("⏱️ Timeout errors detected - add explicit wait conditions before interacting with this element")
+        
+        if any("not found" in error.lower() or "no such element" in error.lower() for error in error_patterns.keys()):
+            recommendations.append("🎯 Element not found errors - verify selector stability and consider alternative locator strategies")
+        
+        action_patterns = failure_data.get('action_patterns', {})
+        if "click" in action_patterns and action_patterns["click"]["count"] > 5:
+            recommendations.append("🖱️ Click action failures detected - ensure element is visible and clickable before interaction")
+        
+        if len(recommendations) == 0:
+            recommendations.append("📊 Monitor element stability and consider adding additional error handling")
+        
+        return recommendations
+
+>>>>>>> Stashed changes
     def _create_error_response(self, error_message: str, start_time: float) -> PlanResponse:
         """Create response for error scenarios"""
         return PlanResponse(
@@ -1893,10 +2317,8 @@ Return JSON with:
   "key_elements": ["element", "types", "needed"]
 }}
 '''
-        
+
         try:
-            logger.info(f" Analyzing prompt intent: '{prompt[:50]}...'")
-            
             response = await self._chat_json(
                 model=self.config["openai"]["model"],
                 system="You are a test analysis expert. Analyze test requests to identify required pages and elements.",
@@ -1906,15 +2328,12 @@ Return JSON with:
                 retries=2,
                 timeout_ms=10000
             )
-            
+
             intent = json.loads(response)
-            logger.info(f" Identified pages: {intent.get('target_pages', [])} (primary: {intent.get('primary_page', 'unknown')})")
-            
+
             return intent
             
-        except Exception as e:
-            logger.warning(f" Intent analysis failed: {e}, using fallback")
-            return {
+        except Exception as e:return {
                 "target_pages": list(element_pages),
                 "primary_page": list(element_pages)[0] if element_pages else "unknown",
                 "workflow": "Standard test workflow",
@@ -1940,10 +2359,7 @@ Return JSON with:
             contexts = await db.execute(contexts_query)
             
             if not contexts:
-                logger.info(" No saved page contexts found")
                 return None
-            
-            logger.info(f" Found {len(contexts)} saved page contexts")
             
             # Smart matching logic
             target_pages = intent_analysis.get('target_pages', [])
@@ -1980,8 +2396,7 @@ Return JSON with:
                     best_score = score
                     best_match = ctx
             
-            if best_match and best_score > 3:  # Minimum threshold
-                logger.info(f" Found matching page context: '{best_match.get('category')}' (score: {best_score})")
+            if best_match and best_score > 3:  # Minimum threshold}' (score: {best_score})")
                 
                 # Convert to PageContext format
                 return {
@@ -1995,13 +2410,10 @@ Return JSON with:
                     'screenshot_url': best_match.get('screenshot_url').replace('\\', '/') if best_match.get('screenshot_url') else None
                 }
             else:
-                logger.info(f" No good page context match found (best score: {best_score})")
                 return None
                 
         except Exception as e:
-            logger.error(f" Error fetching smart page context: {e}")
             return None
-
 
 # =========================
 # FASTAPI ROUTER INTEGRATION
@@ -2015,7 +2427,6 @@ router = APIRouter(tags=["ai"])
 
 # Global service instance
 enterprise_ai_service = EnterpriseAIService()
-
 
 # =========================
 # LEGACY AI SERVICE FOR BACKWARD COMPATIBILITY  
@@ -2065,8 +2476,6 @@ Return JSON with:
 '''
         
         try:
-            logger.info(f" Analyzing prompt intent: '{prompt[:50]}...'")
-            
             response = await self._chat_json(
                 model=self.config["openai"]["model"],
                 system="You are a test analysis expert. Analyze test requests to identify required pages and elements.",
@@ -2078,13 +2487,10 @@ Return JSON with:
             )
             
             intent = json.loads(response)
-            logger.info(f" Identified pages: {intent.get('target_pages', [])} (primary: {intent.get('primary_page', 'unknown')})")
             
             return intent
             
-        except Exception as e:
-            logger.warning(f" Intent analysis failed: {e}, using fallback")
-            return {
+        except Exception as e:return {
                 "target_pages": list(element_pages),
                 "primary_page": list(element_pages)[0] if element_pages else "unknown",
                 "workflow": "Standard test workflow",
@@ -2110,10 +2516,7 @@ Return JSON with:
             contexts = await db.execute(contexts_query)
             
             if not contexts:
-                logger.info(" No saved page contexts found")
-                return None
-            
-            logger.info(f" Found {len(contexts)} saved page contexts")
+                return None  # No saved page contexts")
             
             # Smart matching logic
             target_pages = intent_analysis.get('target_pages', [])
@@ -2157,8 +2560,7 @@ Return JSON with:
                     best_score = score
                     best_match = ctx
             
-            if best_match and best_score > 3:  # Minimum threshold
-                logger.info(f" Found matching page context: '{best_match.get('page_title')}' (score: {best_score})")
+            if best_match and best_score > 3:  # Minimum threshold}' (score: {best_score})")
                 
                 # Convert to PageContext format
                 return {
@@ -2171,11 +2573,9 @@ Return JSON with:
                     'domain_name': best_match.get('page_url', '').split('/')[-1] if best_match.get('page_url') else None
                 }
             else:
-                logger.info(f" No good page context match found (best score: {best_score})")
                 return None
                 
         except Exception as e:
-            logger.error(f" Error fetching smart page context: {e}")
             return None
         
     async def generate_test_steps(self, prompt: str, options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -2197,6 +2597,13 @@ Return JSON with:
             
             elements = []
             for i, el in enumerate(options["availableElements"]):
+<<<<<<< Updated upstream
+=======
+                # Use actual CSS selector as element_id if available
+                css_selector = el.get("css_selector") or el.get("selector")
+                xpath_selector = el.get("xpath_selector") or el.get("xpath")
+                element_id = css_selector if css_selector else f"el_{i}"
+>>>>>>> Stashed changes
                 page_element = PageElement(
                     element_id=f"el_{i}",
                     tag=el.get("tag", "div"),
@@ -2278,7 +2685,6 @@ Return JSON with:
             "reasoning": "Enterprise heuristic element analysis"
         }
 
-
 @router.post("/analyze-intent")
 async def analyze_intent_endpoint(request: Dict[str, Any]):
     """Phase 1: Analyze prompt intent to identify required pages"""
@@ -2297,7 +2703,6 @@ async def analyze_intent_endpoint(request: Dict[str, Any]):
         }
         
     except Exception as e:
-        logger.error(f"Error in intent analysis: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Intent analysis failed: {str(e)}")
 
 @router.post("/smart-page-context")
@@ -2318,7 +2723,6 @@ async def smart_page_context_endpoint(request: Dict[str, Any]):
         }
         
     except Exception as e:
-        logger.error(f"Error fetching smart page context: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Smart page context failed: {str(e)}")
 
 @router.post("/v1/plan")
@@ -2364,9 +2768,92 @@ async def plan_endpoint(
         
         return json_response
         
+<<<<<<< Updated upstream
     except Exception as e:
         logger.error(f" /v1/plan endpoint error: {e}")
         raise HTTPException(status_code=500, detail=f"Plan generation failed: {str(e)}")
+=======
+    except Exception as e:raise HTTPException(status_code=500, detail=f"Plan generation failed: {str(e)}")
+
+@router.get("/v1/safety-policy")
+async def get_safety_policy(
+    current_user: CurrentUser = Depends(get_current_active_user)
+):
+    """
+    Get the current safety policy configuration.
+    Shows what destructive operations are blocked for non-admin users.
+    """
+    try:
+        from core.safety_policy import safety_policy
+        
+        policy_summary = safety_policy.get_policy_summary()
+        
+        # Add user-specific information
+        is_admin = await safety_policy.check_user_admin_status(current_user)
+        
+        return {
+            "policy": policy_summary,
+            "user_status": {
+                "email": current_user.user.email,
+                "is_admin": is_admin,
+                "can_perform_destructive_operations": is_admin
+            },
+            "examples": {
+                "blocked_for_non_admin": [
+                    "delete all test data",
+                    "remove all elements from page",
+                    "cleanup database records", 
+                    "purge old test results"
+                ],
+                "allowed_for_all": [
+                    "click login button",
+                    "type username in field",
+                    "verify page title",
+                    "extract price values"
+                ]
+            }
+        }
+        
+    except Exception as e:raise HTTPException(status_code=500, detail=f"Safety policy retrieval failed: {str(e)}")
+
+@router.post("/v1/test-safety-policy")
+async def test_safety_policy(
+    request: Dict[str, Any],
+    current_user: CurrentUser = Depends(get_current_active_user)
+):
+    """
+    Test endpoint to validate prompts against the safety policy.
+    Use this to check if a prompt would be blocked before submitting to /v1/plan.
+    """
+    try:
+        from core.safety_policy import safety_policy
+        
+        prompt_text = request.get("prompt", "")
+        if not prompt_text:
+            raise HTTPException(status_code=400, detail="Missing 'prompt' field in request")
+        
+        # Test the prompt
+        try:
+            await safety_policy.validate_prompt_content(current_user, prompt_text)
+            
+            return {
+                "prompt": prompt_text,
+                "safety_check": "PASSED",
+                "message": "Prompt is allowed and will be processed normally",
+                "user_is_admin": await safety_policy.check_user_admin_status(current_user)
+            }
+            
+        except HTTPException as safety_error:
+            return {
+                "prompt": prompt_text,
+                "safety_check": "BLOCKED",
+                "message": safety_error.detail,
+                "user_is_admin": await safety_policy.check_user_admin_status(current_user),
+                "status_code": safety_error.status_code
+            }
+        
+    except Exception as e:raise HTTPException(status_code=500, detail=f"Safety policy test failed: {str(e)}")
+>>>>>>> Stashed changes
 
 @router.get("/v1/catalog/{catalog_id}/v/{version}")
 async def get_catalog_endpoint(
@@ -2402,10 +2889,713 @@ async def get_catalog_endpoint(
         
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f" Catalog endpoint error: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get catalog: {str(e)}")
+    except Exception as e:raise HTTPException(status_code=500, detail=f"Failed to get catalog: {str(e)}")
 
+<<<<<<< Updated upstream
+=======
+@router.post("/generate-minimal-repro")
+async def generate_minimal_reproduction_steps(
+    request: Dict[str, Any],
+    db: DatabaseManager = Depends(get_database_manager)
+):
+    """
+    Generate minimal reproduction steps for a failed test execution using AI analysis.
+    Analyzes failed steps and creates an optimized test path that reproduces the failure
+    with the minimum number of steps necessary.
+    """
+    try:
+        execution_id = request.get("execution_id")
+        failed_steps = request.get("failed_steps", [])
+        optimization_level = request.get("optimization_level", "moderate")
+        preserve_context = request.get("preserve_context", True)
+        
+        if not execution_id or not failed_steps:
+            raise HTTPException(status_code=400, detail="execution_id and failed_steps are required")
+        
+        # Get execution details and original plan data
+        # Follow the relationship: exec.runs -> tests.test_cases -> planner.prompts -> planner.plans
+        execution_query = """
+        SELECT r.*, 
+               p.text as prompt_text, 
+               p.intent as prompt_title, 
+               pl.plan_json
+        FROM exec.runs r
+        LEFT JOIN tests.test_cases tc ON r.test_case_id = tc.id
+        LEFT JOIN planner.prompts p ON tc.source_ref_id = p.id
+        LEFT JOIN planner.plans pl ON p.id = pl.prompt_id
+        WHERE r.id = $1
+        """
+        execution = await db.execute_one(execution_query, execution_id)
+        
+        if not execution:
+            raise HTTPException(status_code=404, detail=f"Execution {execution_id} not found")
+        
+        # Parse the original plan to get step data with text values
+        original_plan_steps = []
+        if execution.get('plan_json'):
+            import json
+            plan_data = json.loads(execution['plan_json'])
+            original_plan_steps = plan_data.get('steps', [])
+        else:
+            # Get all steps for this execution with full step data
+            steps_query = """
+                SELECT id, step_order, action, target, status, error_message, created_at
+                FROM exec.step_results 
+                WHERE test_run_id = $1 
+                ORDER BY step_order ASC
+                """
+        all_steps = await db.execute(steps_query, execution_id)
+        
+        # Enrich step data with original plan information (including text values)
+        enriched_steps = []
+        for step in all_steps:
+            step_order = step.get('step_order', 0)
+            enriched_step = dict(step)
+            
+            # Try to find the corresponding plan step (plan steps are 1-indexed)
+            if step_order <= len(original_plan_steps):
+                plan_step = original_plan_steps[step_order - 1]
+                params = plan_step.get('params', {})
+                
+                # Add the text value from the original plan
+                text_value = params.get('text', '')
+                enriched_step['text_value'] = text_value
+                enriched_step['selector'] = params.get('selector', step.get('target', ''))
+                enriched_step['description'] = params.get('description', '')
+                
+            else:
+                enriched_step['text_value'] = ''
+                enriched_step['selector'] = step.get('target', '')
+                enriched_step['description'] = ''
+            
+            enriched_steps.append(enriched_step)
+        
+        all_steps = enriched_steps
+        
+        # Use AI to analyze and generate minimal reproduction steps
+        response = await enterprise_ai_service.generate_minimal_reproduction_steps(
+            execution_id=execution_id,
+            execution_context={
+                "prompt_text": execution.get("prompt_text", ""),
+                "prompt_title": execution.get("prompt_title", ""),
+                "total_steps": len(all_steps),
+                "failed_steps_count": len(failed_steps)
+            },
+            all_steps=all_steps,
+            failed_steps=failed_steps,
+            optimization_level=optimization_level,
+            preserve_context=preserve_context
+        )
+        
+        return response
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate minimal reproduction: {str(e)}")
+
+@router.get("/analyze-element-failures/{element_id}")
+async def analyze_element_failure_patterns(
+    element_id: str,
+    days: int = 30,
+    db: DatabaseManager = Depends(get_database_manager)
+):
+    """
+    Analyze failure patterns for a specific element over the specified time period.
+    Provides insights into common errors, failure trends, and AI-generated recommendations.
+    """
+    try:# Get failures involving this element
+        failure_query = """
+        SELECT 
+            sr.error_message,
+            sr.action,
+            sr.step_order,
+            sr.created_at,
+            r.id as execution_id,
+            tc.prompt_text,
+            tc.prompt_title
+        FROM exec.step_results sr
+        JOIN exec.runs r ON sr.test_run_id = r.id
+        LEFT JOIN tests.test_cases tc ON r.test_case_id = tc.id
+        WHERE sr.status = 'failed' 
+        AND sr.target LIKE $1
+        AND sr.created_at >= CURRENT_TIMESTAMP - INTERVAL '{} days'
+        ORDER BY sr.created_at DESC
+        """.format(days)
+        
+        # Search for element in target field (could be CSS selector, XPath, or element ID)
+        search_pattern = f"%{element_id}%"
+        failures = await db.execute(failure_query, search_pattern)
+        
+        if not failures:
+            return {
+                "elementId": element_id,
+                "failureAnalysis": {
+                    "totalFailures": 0,
+                    "commonErrors": [],
+                    "failureTrends": [],
+                    "affectedActions": []
+                },
+                "recommendations": [
+                    "No recent failures detected for this element",
+                    "Element appears to be stable and reliable",
+                    "Continue monitoring for any future issues"
+                ]
+            }
+        
+        # Analyze failure patterns
+        error_counts = {}
+        action_failures = {}
+        daily_failures = {}
+        
+        for failure in failures:
+            error_msg = failure.get("error_message", "Unknown error")
+            action = failure.get("action", "unknown")
+            date_key = failure.get("created_at").strftime("%Y-%m-%d")
+            step_order = failure.get("step_order", 0)
+            
+            # Count errors
+            error_counts[error_msg] = error_counts.get(error_msg, 0) + 1
+            
+            # Count action failures
+            if action not in action_failures:
+                action_failures[action] = {"count": 0, "total_steps": 0, "positions": []}
+            action_failures[action]["count"] += 1
+            action_failures[action]["positions"].append(step_order)
+            
+            # Daily trends
+            daily_failures[date_key] = daily_failures.get(date_key, 0) + 1
+        
+        # Generate AI-powered recommendations
+        recommendations = await enterprise_ai_service.generate_element_failure_recommendations(
+            element_id=element_id,
+            failure_data={
+                "total_failures": len(failures),
+                "error_patterns": error_counts,
+                "action_patterns": action_failures,
+                "time_period_days": days
+            }
+        )
+        
+        # Format response
+        common_errors = [
+            {
+                "error": error,
+                "count": count,
+                "firstSeen": min([f.get("created_at") for f in failures if f.get("error_message") == error]).isoformat(),
+                "lastSeen": max([f.get("created_at") for f in failures if f.get("error_message") == error]).isoformat()
+            }
+            for error, count in sorted(error_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+        ]
+        
+        affected_actions = [
+            {
+                "action": action,
+                "failureRate": round(data["count"] / max(data["total_steps"], data["count"]) * 100, 2),
+                "avgStepPosition": round(sum(data["positions"]) / len(data["positions"]), 1)
+            }
+            for action, data in action_failures.items()
+        ]
+        
+        failure_trends = [
+            {"date": date, "failures": count}
+            for date, count in sorted(daily_failures.items())
+        ]
+        
+        result = {
+            "elementId": element_id,
+            "failureAnalysis": {
+                "totalFailures": len(failures),
+                "commonErrors": common_errors,
+                "failureTrends": failure_trends,
+                "affectedActions": affected_actions
+            },
+            "recommendations": recommendations
+        }
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to analyze element failures: {str(e)}")
+
+@router.post("/analyze-page-elements")
+async def analyze_page_elements(request: Request):
+    """
+    Analyze page elements from Chrome extension and store in repository
+    """
+    try:
+        # Parse JSON body
+        request_data = await request.json()
+        
+        page_data = request_data.get("pageData", {})
+        extraction_mode = request_data.get("extractionMode", "full_analysis")
+        include_healing = request_data.get("includeHealing", True)
+        
+        if not page_data:
+            raise HTTPException(status_code=400, detail="pageData is required")
+        
+        # Extract page info and elements
+        page_info = page_data.get("pageInfo", {})
+        elements = page_data.get("elements", [])
+        page_url = page_info.get("url", "")
+        page_title = page_info.get("title", "")
+        
+        # Store elements in database
+        stored_count = await store_elements_in_repository(page_info, elements)
+        
+        # Simple analysis for testing
+        total_elements = len(elements)
+        interactive_elements = sum(1 for el in elements if el.get("isInteractive", False))
+        
+        result = {
+            "summary": {
+                "pageUrl": page_url,
+                "pageTitle": page_title,
+                "totalElements": total_elements,
+                "interactiveElements": interactive_elements,
+                "storedElements": stored_count,
+                "pageType": "test_page",
+                "suggestions": ["Chrome extension is working correctly!", f"Stored {stored_count} elements in repository"]
+            },
+            "processingTime": 50,
+            "status": "success"
+        }
+        return result
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to analyze page elements: {str(e)}")
+
+async def store_elements_in_repository(page_info: dict, elements: list) -> int:
+    """Store page elements in the repository database"""
+    try:
+        from core.database import get_database_manager
+        import uuid
+        from datetime import datetime
+        
+        db = await get_database_manager()
+        
+        # Extract page information
+        page_url = page_info.get("url", "")
+        page_title = page_info.get("title", "")
+        hostname = page_info.get("hostname", "")
+        pathname = page_info.get("pathname", "")
+        
+        # Create or find page record
+        page_query = """
+            INSERT INTO repo.pages (project_id, name, route_hint, tags)
+            VALUES (
+                (SELECT id FROM core.projects LIMIT 1),  -- Use first project for now
+                $1, $2, $3
+            )
+            ON CONFLICT (project_id, name) 
+            DO UPDATE SET 
+                route_hint = EXCLUDED.route_hint,
+                updated_at = NOW()
+            RETURNING id
+        """
+        
+        # Function to get page name from extension data or generate a simple one
+        def get_page_name(page_info: dict) -> str:
+            """Get page name from Chrome extension data or generate a simple one"""
+            
+            # Check if Chrome extension provided a page name
+            current_page = page_info.get("currentPage", "")
+            if current_page and current_page.strip():
+                # Clean up the page name to be a valid identifier
+                clean_name = current_page.strip().lower()
+                clean_name = clean_name.replace(' ', '_').replace('-', '_')
+                clean_name = ''.join(c for c in clean_name if c.isalnum() or c == '_')
+                if clean_name:
+                    return clean_name
+            
+            # Fallback: extract from pathname
+            pathname = page_info.get("pathname", "").strip('/')
+            if pathname:
+                # Clean up the path
+                clean_path = pathname.replace('.html', '').replace('.php', '').replace('.jsp', '')
+                clean_path = clean_path.replace('-', '_').replace('/', '_')
+                clean_path = ''.join(c for c in clean_path if c.isalnum() or c == '_')
+                return clean_path if clean_path else "home"
+            
+            # Final fallback
+            return "home"
+        
+        page_name = get_page_name(page_info)
+        route_hint = pathname or page_url
+        tags = []  # Empty tags array for now
+        
+        page_result = await db.execute_one(page_query, 
+            page_name, route_hint, tags
+        )
+        
+        if page_result:
+            page_id = page_result["id"]
+        else:
+            # Fallback if page creation failed
+            page_id = str(uuid.uuid4())
+        # Store elements
+        stored_count = 0
+        now = datetime.utcnow()
+        element_query = """
+            INSERT INTO repo.elements (
+                page_id, element_key, primary_selector, alt_selectors, 
+                attributes, is_active
+            )
+            VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT (page_id, element_key) DO UPDATE SET
+                primary_selector = EXCLUDED.primary_selector,
+                alt_selectors = EXCLUDED.alt_selectors,
+                attributes = EXCLUDED.attributes,
+                updated_at = NOW()
+        """
+        
+        # Helper function to generate semantic element key
+        def generate_semantic_element_key(element: dict, index: int) -> str:
+            """Generate a semantic element key based on element properties"""
+            tag = element.get("tag", "").lower()
+            text = element.get("text", "").strip()
+            attributes = element.get("attributes", {})
+            
+            # Get useful attributes
+            element_id = attributes.get("id", "")
+            element_class = attributes.get("class", "")
+            name = attributes.get("name", "")
+            placeholder = attributes.get("placeholder", "")
+            type_attr = attributes.get("type", "")
+            title = attributes.get("title", "")
+            aria_label = attributes.get("aria-label", "")
+            
+            # Skip meta tags, style tags, and other non-interactive elements
+            if tag in ["meta", "style", "script", "link", "title", "head"]:
+                return None  # Skip these elements
+            
+            # Skip MCP extension elements and Chrome extension artifacts
+            mcp_indicators = [
+                "mcp", "recording", "notification", "extension", "chrome-extension",
+                "popup", "overlay", "modal" if "mcp" in element_class.lower() or "mcp" in element_id.lower() else ""
+            ]
+            
+            # Check if this is an MCP/extension element
+            element_text = f"{element_id} {element_class} {text}".lower()
+            if any(indicator in element_text for indicator in mcp_indicators if indicator):
+                return None  # Skip MCP/extension elements
+            
+            # Skip elements with Chrome extension specific attributes
+            if ("chrome-extension" in element_id.lower() or 
+                "chrome-extension" in element_class.lower() or
+                "mcp-" in element_id.lower() or
+                "mcp-" in element_class.lower()):
+                return None
+            
+            # Function to clean and format text for key names
+            def clean_text_for_key(text_input: str, max_length: int = 20) -> str:
+                if not text_input:
+                    return ""
+                # Remove special characters, keep only alphanumeric
+                clean = "".join(c for c in text_input if c.isalnum() or c.isspace())
+                # Convert to camelCase
+                words = clean.split()
+                if not words:
+                    return ""
+                result = words[0].lower()
+                for word in words[1:]:
+                    result += word.capitalize()
+                return result[:max_length]
+            
+            # Determine element purpose and generate key
+            if tag == "input":
+                if type_attr == "password" or "password" in name.lower() or "password" in placeholder.lower():
+                    return "passwordField"
+                elif type_attr == "email" or "email" in name.lower() or "email" in placeholder.lower():
+                    return "emailField"
+                elif ("user" in name.lower() or "login" in name.lower() or 
+                      "username" in placeholder.lower() or "user" in placeholder.lower()):
+                    return "usernameField"
+                elif "search" in name.lower() or "search" in placeholder.lower():
+                    return "searchField"
+                elif type_attr == "submit":
+                    return "submitButton"
+                elif type_attr == "button":
+                    if text:
+                        clean_text = clean_text_for_key(text)
+                        return f"{clean_text}Button" if clean_text else "actionButton"
+                    return "actionButton"
+                elif type_attr == "checkbox":
+                    if name:
+                        clean_name = clean_text_for_key(name)
+                        return f"{clean_name}Checkbox" if clean_name else "checkbox"
+                    return "checkbox"
+                elif type_attr == "radio":
+                    if name:
+                        clean_name = clean_text_for_key(name)
+                        return f"{clean_name}Radio" if clean_name else "radioButton"
+                    return "radioButton"
+                elif name:
+                    clean_name = clean_text_for_key(name)
+                    return f"{clean_name}Field" if clean_name else "inputField"
+                elif placeholder:
+                    clean_placeholder = clean_text_for_key(placeholder)
+                    return f"{clean_placeholder}Field" if clean_placeholder else "inputField"
+                else:
+                    return "inputField"
+            
+            elif tag == "button":
+                # Look for common button patterns
+                button_text = text or aria_label or title
+                if not button_text:
+                    # Look in child elements or class names for clues
+                    if "login" in element_class.lower() or "sign-in" in element_class.lower():
+                        return "loginButton"
+                    elif "submit" in element_class.lower():
+                        return "submitButton"
+                    elif "cancel" in element_class.lower():
+                        return "cancelButton"
+                    else:
+                        return "actionButton"
+                
+                button_text_lower = button_text.lower()
+                if "login" in button_text_lower or "sign in" in button_text_lower:
+                    return "loginButton"
+                elif "logout" in button_text_lower or "sign out" in button_text_lower:
+                    return "logoutButton"
+                elif "submit" in button_text_lower:
+                    return "submitButton"
+                elif "cancel" in button_text_lower:
+                    return "cancelButton"
+                elif "save" in button_text_lower:
+                    return "saveButton"
+                elif "delete" in button_text_lower or "remove" in button_text_lower:
+                    return "deleteButton"
+                elif "add" in button_text_lower or "create" in button_text_lower or "new" in button_text_lower:
+                    return "addButton"
+                elif "edit" in button_text_lower or "modify" in button_text_lower:
+                    return "editButton"
+                elif "close" in button_text_lower:
+                    return "closeButton"
+                elif "next" in button_text_lower:
+                    return "nextButton"
+                elif "previous" in button_text_lower or "prev" in button_text_lower:
+                    return "previousButton"
+                else:
+                    clean_text = clean_text_for_key(button_text)
+                    return f"{clean_text}Button" if clean_text else "actionButton"
+            
+            elif tag == "a":
+                link_text = text or aria_label or title
+                if not link_text:
+                    # Check href for clues
+                    href = attributes.get("href", "")
+                    if "home" in href.lower():
+                        return "homeLink"
+                    elif "about" in href.lower():
+                        return "aboutLink"
+                    elif "contact" in href.lower():
+                        return "contactLink"
+                    else:
+                        return "navLink"
+                
+                link_text_lower = link_text.lower()
+                if "home" in link_text_lower:
+                    return "homeLink"
+                elif "about" in link_text_lower:
+                    return "aboutLink"
+                elif "contact" in link_text_lower:
+                    return "contactLink"
+                elif "logout" in link_text_lower or "sign out" in link_text_lower:
+                    return "logoutLink"
+                elif "login" in link_text_lower or "sign in" in link_text_lower:
+                    return "loginLink"
+                else:
+                    clean_text = clean_text_for_key(link_text)
+                    return f"{clean_text}Link" if clean_text else "navLink"
+            
+            elif tag == "select":
+                select_name = name or aria_label or title
+                if not select_name:
+                    return "dropdown"
+                
+                select_name_lower = select_name.lower()
+                if "country" in select_name_lower:
+                    return "countrySelect"
+                elif "state" in select_name_lower or "province" in select_name_lower:
+                    return "stateSelect"
+                elif "category" in select_name_lower:
+                    return "categorySelect"
+                elif "status" in select_name_lower:
+                    return "statusSelect"
+                else:
+                    clean_name = clean_text_for_key(select_name)
+                    return f"{clean_name}Select" if clean_name else "dropdown"
+            
+            elif tag in ["h1", "h2", "h3", "h4", "h5", "h6"]:
+                if text:
+                    clean_text = clean_text_for_key(text, 15)
+                    return f"{clean_text}Heading" if clean_text else "pageHeading"
+                else:
+                    return "pageHeading"
+            
+            elif tag == "img":
+                alt_text = attributes.get("alt", "") or title or aria_label
+                if "logo" in alt_text.lower():
+                    return "companyLogo"
+                elif "avatar" in alt_text.lower() or "profile" in alt_text.lower():
+                    return "profileImage"
+                elif "icon" in alt_text.lower():
+                    return "iconImage"
+                elif alt_text:
+                    clean_alt = clean_text_for_key(alt_text, 15)
+                    return f"{clean_alt}Image" if clean_alt else "contentImage"
+                else:
+                    return "contentImage"
+            
+            elif tag == "div":
+                # Look for semantic clues in class names, IDs, or roles
+                semantic_hints = f"{element_class} {element_id}".lower()
+                role = attributes.get("role", "").lower()
+                
+                if "header" in semantic_hints or role == "banner":
+                    return "pageHeader"
+                elif "footer" in semantic_hints or role == "contentinfo":
+                    return "pageFooter"
+                elif "nav" in semantic_hints or role == "navigation":
+                    return "navigationMenu"
+                elif "menu" in semantic_hints or role == "menu":
+                    return "menuContainer"
+                elif "content" in semantic_hints or "main" in semantic_hints or role == "main":
+                    return "mainContent"
+                elif "sidebar" in semantic_hints or role == "complementary":
+                    return "sidebar"
+                elif "modal" in semantic_hints or "dialog" in semantic_hints or role == "dialog":
+                    return "modalDialog"
+                elif "alert" in semantic_hints or role == "alert":
+                    return "alertMessage"
+                elif "form" in semantic_hints:
+                    return "formContainer"
+                elif "button" in semantic_hints and ("login" in semantic_hints or "signin" in semantic_hints):
+                    return "loginContainer"
+                elif element_id:
+                    clean_id = clean_text_for_key(element_id, 15)
+                    return f"{clean_id}Container" if clean_id else "contentContainer"
+                else:
+                    return "contentContainer"
+            
+            elif tag == "span":
+                span_text = text or aria_label or title
+                if span_text:
+                    clean_text = clean_text_for_key(span_text, 15)
+                    return f"{clean_text}Text" if clean_text else "displayText"
+                else:
+                    return "displayText"
+            
+            elif tag == "label":
+                label_text = text or attributes.get("for", "")
+                if label_text:
+                    clean_text = clean_text_for_key(label_text, 15)
+                    return f"{clean_text}Label" if clean_text else "fieldLabel"
+                else:
+                    return "fieldLabel"
+            
+            elif tag == "textarea":
+                textarea_name = name or placeholder or aria_label
+                if textarea_name:
+                    clean_name = clean_text_for_key(textarea_name, 15)
+                    return f"{clean_name}TextArea" if clean_name else "textArea"
+                else:
+                    return "textArea"
+            
+            elif tag == "table":
+                return "dataTable"
+            elif tag == "form":
+                form_name = name or element_id
+                if form_name:
+                    clean_name = clean_text_for_key(form_name, 15)
+                    return f"{clean_name}Form" if clean_name else "inputForm"
+                else:
+                    return "inputForm"
+            
+            # Skip non-interactive elements entirely
+            elif tag in ["p", "br", "hr", "noscript"]:
+                return None
+            
+            # Fallback for other elements - try to make it meaningful
+            if element_id:
+                clean_id = clean_text_for_key(element_id, 15)
+                return clean_id if clean_id else f"{tag}Element"
+            elif text and tag not in ["div", "span"]:  # Avoid generic text-based names for containers
+                clean_text = clean_text_for_key(text, 15)
+                return f"{clean_text}{tag.capitalize()}" if clean_text else f"{tag}Element"
+            else:
+                return f"{tag}Element"
+        
+        # Track used keys to avoid duplicates
+        used_keys = set()
+        
+        for i, element in enumerate(elements):
+            try:
+                # Generate semantic element key
+                base_key = generate_semantic_element_key(element, i)
+                
+                # Skip elements that shouldn't be stored (meta, style, etc.)
+                if base_key is None:
+                    continue
+                    
+                element_key = base_key
+                
+                # Ensure uniqueness by adding suffix if needed
+                counter = 1
+                while element_key in used_keys:
+                    element_key = f"{base_key}{counter}"
+                    counter += 1
+                used_keys.add(element_key)
+                
+                # Create primary selector from element data
+                selectors = element.get("selectors", {})
+                primary_selector = {
+                    "tag": element.get("tag", ""),
+                    "css": selectors.get("cssPath", ""),
+                    "xpath": selectors.get("xpath", ""),
+                    "name": selectors.get("name", "")
+                }
+                
+                # Alternative selectors with all element metadata
+                alt_selectors = {
+                    "tag": element.get("tag", ""),
+                    "text": element.get("text", "")[:200],  # Limit text length
+                    "id": element.get("attributes", {}).get("id", ""),
+                    "class": element.get("attributes", {}).get("class", ""),
+                    "data-testid": element.get("attributes", {}).get("data-testid", ""),
+                    "position": element.get("position", {}),
+                    "isVisible": element.get("visible", False),
+                    "isInteractive": element.get("isInteractive", False)
+                }
+                
+                # All attributes
+                attributes = element.get("attributes", {})
+                
+                # Import json and serialize the data
+                import json
+                
+                await db.execute_one(element_query,
+                    page_id, element_key, 
+                    json.dumps(primary_selector), 
+                    json.dumps(alt_selectors), 
+                    json.dumps(attributes),
+                    True
+                )
+                
+                stored_count += 1
+                
+            except Exception as e:
+                continue
+        
+        return stored_count
+        
+    except Exception as e:
+        return 0
+
+>>>>>>> Stashed changes
 @router.get("/health")
 async def health_check():
     """Health check endpoint"""

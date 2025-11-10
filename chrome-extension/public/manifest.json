@@ -1,8 +1,12 @@
 {
   "manifest_version": 3,
-  "name": "Prompt-Driven Test Recorder",
-  "version": "0.4.0",
-  "action": { "default_popup": "popup.html" },
+  "name": "Self-Healing Test Framework",
+  "version": "0.6.0",
+  "description": "Chrome extension for automated test element recording and execution with MCP server integration.",
+  "action": { 
+    "default_popup": "popup.html",
+    "default_title": "MCP Test Runner"
+  },
   "permissions": ["activeTab", "scripting", "storage"],
   "host_permissions": ["http://localhost:8000/*", "http://localhost:3000/*", "https://*/*", "http://*/*"],
   "background": { 
@@ -13,6 +17,21 @@
       "matches": ["<all_urls>"],
       "js": ["content.js"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "http://localhost:8000/*",
+        "http://localhost:3000/*",
+        "https://testframework.local/*"
+      ],
+      "js": ["auth-capture.js"],
+      "run_at": "document_end"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["popup.html"],
+      "matches": ["<all_urls>"]
     }
   ]
 }

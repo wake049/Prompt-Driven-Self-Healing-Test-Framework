@@ -1,18 +1,30 @@
 import React from 'react';
-import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import ProtectedRoute from './components/auth/ProtectedRoute';
 import Login from './components/auth/Login';
 import Register from './components/auth/Register';
 import { AppRoutes } from "./app/routes";
 import GlobalSidebar from "./shared/ui/GlobalSidebar";
+import ChromeExtensionNotification from './shared/ui/ChromeExtensionNotification';
 import "./styles/index.css";
 import "./styles/App.css";
 
+<<<<<<< Updated upstream
 // Main app layout for authenticated users
 const AuthenticatedApp: React.FC = () => {
   const location = useLocation();
   
+=======
+// Import development utilities
+if (process.env.NODE_ENV === 'development') {
+  import('./shared/utils/extensionSimulator');
+}
+// Main app layout for authenticated users
+const AuthenticatedApp: React.FC = () => {
+  const location = useLocation();
+  const navigate = useNavigate();
+>>>>>>> Stashed changes
   const appStyle: React.CSSProperties = {
     display: 'flex',
     minHeight: '100vh',
@@ -24,16 +36,36 @@ const AuthenticatedApp: React.FC = () => {
     marginLeft: '250px', // Account for sidebar width
     padding: '0',
     width: 'calc(100% - 250px)',
+<<<<<<< Updated upstream
     backgroundColor: '#ffffff'
+=======
+    backgroundColor: 'transparent',
+    display: 'flex',
+    flexDirection: 'column'
+>>>>>>> Stashed changes
   };
 
   return (
+<<<<<<< Updated upstream
     <div style={appStyle}>
       <GlobalSidebar />
       <main style={mainStyle}>
         <AppRoutes key={location.pathname} />
       </main>
     </div>
+=======
+    <StyledThemeWrapper>
+      <div style={appStyle}>
+        <GlobalSidebar />
+        <main style={mainStyle}>
+          <ChromeExtensionNotification onNavigate={navigate} />
+          <div style={{ flex: 1, overflow: 'auto' }}>
+            <AppRoutes key={location.pathname} />
+          </div>
+        </main>
+      </div>
+    </StyledThemeWrapper>
+>>>>>>> Stashed changes
   );
 };
 

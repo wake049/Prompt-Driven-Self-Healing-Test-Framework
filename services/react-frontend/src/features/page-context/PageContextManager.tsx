@@ -162,7 +162,6 @@ export const PageContextManager: React.FC = () => {
         throw new Error('Failed to delete context');
       }
     } catch (error) {
-      console.error('Error deleting context:', error);
       setError('Failed to delete page context. Please try again.');
     }
   };
@@ -212,7 +211,6 @@ export const PageContextManager: React.FC = () => {
 
       setCurrentView('list');
     } catch (error) {
-      console.error('Error submitting context:', error);
       setError(`Failed to ${currentView === 'edit' ? 'update' : 'create'} page context. Please try again.`);
     }
   };

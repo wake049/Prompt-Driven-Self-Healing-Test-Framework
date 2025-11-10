@@ -3,7 +3,13 @@ import styled from 'styled-components';
 import unifiedApiClient from '../../../shared/utils/unifiedApiClient';
 import ExecutionStepsModal from './ExecutionStepsModal';
 import { executionApiService } from '../api';
+<<<<<<< Updated upstream
 
+=======
+import { useTheme } from '../../../contexts/ThemeContext';
+import EnhancedStatusBadge from '../../../shared/ui/EnhancedStatusBadge';
+import { RefreshCw, TrendingUp, TrendingDown, Clock, CheckCircle, XCircle, Activity, AlertTriangle, Wrench } from 'lucide-react';
+>>>>>>> Stashed changes
 const HistoryContainer = styled.div`
   padding: 16px 0;
 `;
@@ -170,21 +176,25 @@ interface ExecutionStats {
   total_executions: number;
   successful_executions: number;
   failed_executions: number;
+  pending_review_executions: number; // NEW: Count of executions needing review
   success_rate: number;
   recent_executions_24h: number;
   avg_execution_time: number;
+  healing_rate?: number; // NEW: Percentage of executions that required healing
 }
 
 interface ExecutionRecord {
   id: string;
   test_name: string;
-  status: string;
+  status: 'pass' | 'pending_review' | 'failed' | 'completed' | 'running'; // UPDATED: New status types
   success_rate: number;
   started_at: string;
   duration_seconds: number;
   total_steps: number;
   passed_steps: number;
   failed_steps: number;
+  pending_review_steps?: number; // NEW: Steps that passed but required healing
+  healed_steps?: number; // NEW: Total healed steps count
 }
 
 interface TestCaseExecutionHistoryProps {
@@ -237,7 +247,10 @@ const TestCaseExecutionHistory: React.FC<TestCaseExecutionHistoryProps> = ({
       setStats(statsResponse);
       setExecutions(executionsResponse);
     } catch (err: any) {
+<<<<<<< Updated upstream
       console.error('Error fetching execution data:', err);
+=======
+>>>>>>> Stashed changes
       setError('Failed to load execution history');
     } finally {
       setLoading(false);
@@ -298,11 +311,38 @@ const TestCaseExecutionHistory: React.FC<TestCaseExecutionHistoryProps> = ({
             <StatLabel>Total Runs</StatLabel>
             <StatSubtext>{stats.recent_executions_24h} in last 24h</StatSubtext>
           </StatCard>
+<<<<<<< Updated upstream
           
           <StatCard>
             <StatValue>{stats.success_rate}%</StatValue>
             <StatLabel>Success Rate</StatLabel>
             <StatSubtext>{stats.successful_executions}/{stats.total_executions} successful</StatSubtext>
+=======
+          <StatCard variant="success">
+            <StatTitle>
+              <CheckCircle size={16} />
+              Passed (No Healing)
+            </StatTitle>
+            <StatValue>{stats.successful_executions}</StatValue>
+            <StatChange positive={stats.success_rate > 0.7}>
+              <TrendingUp size={14} />
+              {((stats.successful_executions / stats.total_executions) * 100).toFixed(1)}% clean passes
+            </StatChange>
+          </StatCard>
+          <StatCard variant="warning">
+            <StatTitle>
+              <AlertTriangle size={16} />
+              Needs Review
+            </StatTitle>
+            <StatValue>{stats.pending_review_executions || 0}</StatValue>
+            <StatChange positive={false}>
+              <Wrench size={14} />
+              {stats.pending_review_executions > 0 ? 
+                `${((stats.pending_review_executions / stats.total_executions) * 100).toFixed(1)}% required healing` :
+                'No healing needed'
+              }
+            </StatChange>
+>>>>>>> Stashed changes
           </StatCard>
           
           <StatCard>
@@ -310,6 +350,7 @@ const TestCaseExecutionHistory: React.FC<TestCaseExecutionHistoryProps> = ({
             <StatLabel>Failed Runs</StatLabel>
             <StatSubtext>{stats.failed_executions > 0 ? ((stats.failed_executions / stats.total_executions) * 100).toFixed(1) : '0.0'}% failure rate</StatSubtext>
           </StatCard>
+<<<<<<< Updated upstream
           
           <StatCard>
             <StatValue>{formatDuration(stats.avg_execution_time)}</StatValue>
@@ -317,6 +358,9 @@ const TestCaseExecutionHistory: React.FC<TestCaseExecutionHistoryProps> = ({
             <StatSubtext>Average execution time</StatSubtext>
           </StatCard>
         </StatsRow>
+=======
+        </StatsGrid>
+>>>>>>> Stashed changes
       )}
 
       <ExecutionsTable>
@@ -336,6 +380,7 @@ const TestCaseExecutionHistory: React.FC<TestCaseExecutionHistoryProps> = ({
             <p>No test executions have been run for this test case yet.</p>
           </EmptyState>
         ) : (
+<<<<<<< Updated upstream
           executions.map((execution) => (
             <TableRow 
               key={execution.id} 
@@ -358,6 +403,80 @@ const TestCaseExecutionHistory: React.FC<TestCaseExecutionHistoryProps> = ({
               <div>{formatDateTime(execution.started_at)}</div>
             </TableRow>
           ))
+=======
+          <>
+            <ExecutionItem style={{ 
+              background: theme.colors.surface, 
+              fontWeight: 600,
+              color: theme.colors.text,
+              borderBottom: `2px solid ${theme.colors.border}`
+            }}>
+              <div>Run ID</div>
+              <div>Prompt Description</div>
+              <div>Date</div>
+              <div>Duration</div>
+              <div>Steps</div>
+              <div>Passed</div>
+              <div>Healed</div>
+              <div>Status</div>
+              <div>Actions</div>
+            </ExecutionItem>
+            {executions.map((execution, index) => (
+              <ExecutionItem 
+                key={execution.id}
+                clickable={true}
+                onClick={() => handleExecutionClick(execution.id)}
+              >
+                <ExecutionId>
+                  {execution.id ? execution.id.substring(0, 8).toUpperCase() : `RUN-${String(index + 121).padStart(5, '0')}`}
+                </ExecutionId>
+                <ExecutionDescription>
+                  {execution.test_name || 'Test Execution'}
+                  <small>ID: {execution.id}</small>
+                </ExecutionDescription>
+                <DateValue>
+                  {new Date(execution.started_at).toLocaleDateString('en-US', {
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit'
+                  })}
+                </DateValue>
+                <DateValue>
+                  {execution.duration_seconds ? 
+                    new Date(execution.duration_seconds * 1000).toISOString().substr(11, 8) : 
+                    'N/A'}
+                </DateValue>
+                <MetricValue>{execution.total_steps || 0}</MetricValue>
+                <MetricValue type="success">
+                  {execution.passed_steps || 0}
+                </MetricValue>
+                <MetricValue type="neutral">
+                  {execution.healed_steps || execution.pending_review_steps || 0}
+                  {(execution.healed_steps || execution.pending_review_steps) ? (
+                    <small style={{ display: 'block', fontSize: '11px', opacity: 0.7, color: '#ff8c00' }}>
+                      {execution.status === 'pending_review' ? 'Needs Review' : 'Healed'}
+                    </small>
+                  ) : null}
+                </MetricValue>
+                <div>
+                  <EnhancedStatusBadge 
+                    status={execution.status === 'completed' ? 'pass' : execution.status}
+                    healedSteps={execution.healed_steps || execution.pending_review_steps || 0}
+                    size="medium"
+                  />
+                </div>
+                <div>
+                  <ActionButton onClick={(e) => {
+                    e.stopPropagation();
+                    handleExecutionClick(execution.id);
+                  }}>
+                    View Details
+                  </ActionButton>
+                </div>
+              </ExecutionItem>
+            ))}
+          </>
+>>>>>>> Stashed changes
         )}
       </ExecutionsTable>
 

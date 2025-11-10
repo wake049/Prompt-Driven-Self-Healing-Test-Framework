@@ -294,7 +294,10 @@ export const PromptsTable: React.FC = () => {
       
       setPrompts(mappedPrompts);
     } catch (err) {
+<<<<<<< Updated upstream
       console.error('Error fetching prompts:', err);
+=======
+>>>>>>> Stashed changes
       setError(err instanceof Error ? err.message : 'Failed to load prompts');
     } finally {
       setLoading(false);
@@ -344,7 +347,10 @@ export const PromptsTable: React.FC = () => {
       
       return localPrompt;
     } catch (err) {
+<<<<<<< Updated upstream
       console.error('Error creating prompt:', err);
+=======
+>>>>>>> Stashed changes
       throw err;
     } finally {
       setSubmitting(false);

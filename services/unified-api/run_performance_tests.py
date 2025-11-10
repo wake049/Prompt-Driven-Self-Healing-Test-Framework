@@ -24,14 +24,13 @@ logger = logging.getLogger(__name__)
 class PerformanceTestSuite:
     """Comprehensive performance testing for the unified API"""
     
-    def __init__(self, base_url: str = "http://localhost:8000"):
+    def __init__(self, base_url: str = "https://testhelix.com"):
         self.base_url = base_url
         self.profiler = get_global_profiler()
         self.test_results: Dict[str, Any] = {}
         
     async def run_all_tests(self):
         """Run comprehensive performance test suite"""
-        logger.info("Starting Performance Test Suite")
         
         # Start profiling
         self.profiler.capture_snapshot("Test_Suite_Start")
@@ -65,7 +64,6 @@ class PerformanceTestSuite:
     
     async def test_api_endpoint_performance(self):
         """Test API endpoint response times and throughput"""
-        logger.info("Testing API Endpoint Performance")
         
         endpoints_to_test = [
             "/health",
@@ -79,7 +77,6 @@ class PerformanceTestSuite:
         
         async with aiohttp.ClientSession() as session:
             for endpoint in endpoints_to_test:
-                logger.info(f"Testing endpoint: {endpoint}")
                 
                 # Warm up
                 await self._make_request(session, endpoint)
@@ -107,11 +104,9 @@ class PerformanceTestSuite:
                 await asyncio.sleep(0.1)
         
         self.test_results['api_performance'] = results
-        logger.info("API Endpoint Performance Test Complete")
     
     async def test_memory_usage_under_load(self):
         """Test memory usage patterns under sustained load"""
-        logger.info("Testing Memory Usage Under Load")
         
         initial_memory = psutil.Process().memory_info().rss
         self.profiler.capture_snapshot("Memory_Test_Start")
@@ -139,12 +134,9 @@ class PerformanceTestSuite:
             'memory_increase_mb': memory_increase,
             'test_duration_seconds': 30
         }
-        
-        logger.info(f"Memory Load Test Complete - Memory increase: {memory_increase:.2f} MB")
     
     async def test_database_performance(self):
         """Test database connection and query performance"""
-        logger.info("Testing Database Performance")
         
         # Test database-heavy endpoints
         db_endpoints = [
@@ -178,18 +170,15 @@ class PerformanceTestSuite:
                 }
         
         self.test_results['database_performance'] = db_results
-        logger.info("Database Performance Test Complete")
     
     async def test_concurrent_requests(self):
         """Test system performance under high concurrency"""
-        logger.info("Testing Concurrent Request Handling")
         
         # Test different concurrency levels
         concurrency_levels = [10, 25, 50, 100]
         results = {}
         
         for concurrency in concurrency_levels:
-            logger.info(f"Testing concurrency level: {concurrency}")
             
             start_time = time.time()
             
@@ -217,11 +206,9 @@ class PerformanceTestSuite:
             await asyncio.sleep(1)
         
         self.test_results['concurrency_test'] = results
-        logger.info("Concurrent Request Test Complete")
     
     async def test_memory_leak_detection(self):
         """Test for potential memory leaks during extended operation"""
-        logger.info("Testing Memory Leak Detection")
         
         initial_memory = psutil.Process().memory_info().rss
         memory_samples = []
@@ -268,12 +255,9 @@ class PerformanceTestSuite:
                 'test_duration_minutes': 1,
                 'potential_leak': memory_growth_rate > 1.0  # More than 1MB growth per interval
             }
-        
-        logger.info("Memory Leak Detection Test Complete")
     
     async def test_cpu_performance(self):
         """Test CPU performance under computational load"""
-        logger.info("Testing CPU Performance")
         
         # Start CPU profiling
         self.profiler.start_cpu_profiling()
@@ -320,8 +304,6 @@ class PerformanceTestSuite:
             'endpoint_results': cpu_results,
             'cpu_profiling': cpu_profile_results
         }
-        
-        logger.info("CPU Performance Test Complete")
     
     async def _sustained_load_worker(self, session: aiohttp.ClientSession, worker_id: str):
         """Worker function for sustained load testing"""
@@ -348,12 +330,10 @@ class PerformanceTestSuite:
                     return response.status < 400
                     
         except Exception as e:
-            logger.debug(f"Request failed for {endpoint}: {e}")
             return False
     
     async def generate_performance_report(self):
         """Generate comprehensive performance report"""
-        logger.info("Generating Performance Report")
         
         # Get profiler report
         profiler_report = self.profiler.generate_comprehensive_report()
@@ -380,8 +360,6 @@ class PerformanceTestSuite:
         report_filename = f"performance_report_{int(time.time())}.json"
         with open(report_filename, 'w') as f:
             json.dump(final_report, f, indent=2, default=str)
-        
-        logger.info(f"Performance report saved to: {report_filename}")
         
         # Print summary to console
         self.print_performance_summary(final_report)

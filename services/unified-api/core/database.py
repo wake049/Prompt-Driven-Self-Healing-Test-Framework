@@ -27,16 +27,26 @@ class DatabaseManager:
             "command_timeout": int(os.getenv("DB_TIMEOUT", "60"))
         }
         
-        # Debug logging to see what values are being used
-        logger.info(f" Database config: host={self._connection_config['host']}, "
-                   f"port={self._connection_config['port']}, "
-                   f"database={self._connection_config['database']}, "
-                   f"user={self._connection_config['user']}")
+        # Debug logging to see what configuration is being used
+        logger.info(f"Database configuration:")
+        logger.info(f"  Host: {self._connection_config['host']}")
+        logger.info(f"  Port: {self._connection_config['port']}")
+        logger.info(f"  Database: {self._connection_config['database']}")
+        logger.info(f"  User: {self._connection_config['user']}")
+        logger.info(f"  Password: {'*' * len(str(self._connection_config['password']))}")
     
     async def initialize(self) -> None:
         """Initialize database connection pool"""
         try:
-            logger.info("🔌 Initializing database connection pool...")
+            # AWS RDS requires SSL connections
+            ssl_context = None
+            if self._connection_config["host"] != "localhost":
+                # Use SSL for remote connections (like AWS RDS)
+                import ssl
+                ssl_context = ssl.create_default_context()
+                ssl_context.check_hostname = False
+                ssl_context.verify_mode = ssl.CERT_NONE
+                logger.info("Using SSL connection for remote database")
             
             self.pool = await asyncpg.create_pool(
                 host=self._connection_config["host"],
@@ -46,26 +56,24 @@ class DatabaseManager:
                 password=self._connection_config["password"],
                 min_size=self._connection_config["min_size"],
                 max_size=self._connection_config["max_size"],
-                command_timeout=self._connection_config["command_timeout"]
+                command_timeout=self._connection_config["command_timeout"],
+                ssl=ssl_context
             )
             
             # Test connection
             async with self.pool.acquire() as conn:
                 await conn.execute("SELECT 1")
-            
-            logger.info(" Database connection pool initialized successfully")
-            
+                
+            logger.info("Database pool initialized successfully")
         except Exception as e:
-            logger.error(f" Failed to initialize database pool: {e}")
+            logger.error(f"Failed to initialize database pool: {e}")
             raise
     
     async def close(self) -> None:
         """Close database connection pool"""
         if self.pool:
-            logger.info("🔌 Closing database connection pool...")
             await self.pool.close()
             self.pool = None
-            logger.info(" Database connection pool closed")
     
     @asynccontextmanager
     async def get_connection(self):
@@ -140,21 +148,19 @@ async def get_database_manager() -> DatabaseManager:
     global _db_manager
     
     if _db_manager is None or _db_manager.pool is None:
-        logger.info("🔌 Database manager not initialized, creating new instance...")
         _db_manager = DatabaseManager()
         await _db_manager.initialize()
-        logger.info(" Database manager initialized")
     else:
+        await _db_manager.initialize()
         # Test if the pool is still working
         try:
             async with _db_manager.pool.acquire() as conn:
                 await conn.execute("SELECT 1")
         except Exception as e:
-            logger.info(f"🔌 Database pool test failed ({e}), reinitializing...")
+            logger.warning(f"Database pool error: {e}, reinitializing...")
             _db_manager = DatabaseManager()
             await _db_manager.initialize()
-            logger.info(" Database manager reinitialized")
-    
+            
     return _db_manager
 
 async def get_database():

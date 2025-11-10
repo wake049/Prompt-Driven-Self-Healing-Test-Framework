@@ -8,7 +8,6 @@ from typing import Dict, List, Optional
 from urllib.parse import urlparse
 from schemas.enterprise import PageContext
 
-
 class PageContextService:
     """Service to automatically detect and provide page context information"""
     
@@ -248,7 +247,6 @@ class PageContextService:
             testing_focus=testing_focus,
             **kwargs
         )
-
 
 # Global instance for easy import
 page_context_service = PageContextService()

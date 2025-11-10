@@ -5,6 +5,7 @@ Password hashing, JWT token management, and user verification functions
 
 import os
 import secrets
+import json
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 
@@ -61,9 +62,7 @@ class AuthenticationManager:
     def verify_token(self, token: str) -> Optional[TokenData]:
         """Verify and decode a JWT token"""
         try:
-            print(f" Verifying token: {token[:20]}...")
             payload = jwt.decode(token, self.secret_key, algorithms=[self.algorithm])
-            print(f" Token decoded successfully. Payload: {payload}")
             
             email: str = payload.get("sub")
             user_id: str = payload.get("user_id")
@@ -71,7 +70,6 @@ class AuthenticationManager:
             project_id: str = payload.get("project_id")
             
             if email is None:
-                print(" No email found in token payload")
                 return None
             
             token_data = TokenData(
@@ -80,13 +78,10 @@ class AuthenticationManager:
                 tenant_id=tenant_id,
                 project_id=project_id
             )
-            print(f" Token validation successful for user: {email}")
             return token_data
         except JWTError as e:
-            print(f" JWT Error during token verification: {str(e)}")
             return None
         except Exception as e:
-            print(f" Unexpected error during token verification: {str(e)}")
             return None
     
     # User Authentication
@@ -296,6 +291,9 @@ class AuthenticationManager:
             str(user["id"]), assigned_tenant_id, str(default_role["id"])
         )
         
+        # Create sample project and data for new user
+        await self._create_sample_project_for_user(str(user["id"]), assigned_tenant_id)
+        
         return user
     
     async def get_user_with_context(self, user_id: str) -> Optional[CurrentUser]:
@@ -360,6 +358,130 @@ class AuthenticationManager:
             permissions=[]  # TODO: Implement role-based permissions
         )
 
+    async def _create_sample_project_for_user(self, user_id: str, tenant_id: str) -> None:
+        """Create a sample project with demo test data for new user"""
+        db = await get_database_manager()
+        
+        try:
+            # Create sample project
+            project = await db.execute_one(
+                """
+                INSERT INTO core.projects (id, name, slug, description, tenant_id, is_active, created_at, updated_at)
+                VALUES (gen_random_uuid(), 'Sample Project', 'sample-project', 
+                        'A sample project with demo test cases to help you get started', 
+                        $1, true, NOW(), NOW())
+                RETURNING id
+                """,
+                tenant_id
+            )
+            
+            project_id = str(project["id"])
+            
+            # Create sample elements
+            elements_data = [
+                ('username_field', 'login', '#username', '//input[@id="username"]', 'input', 'Username input field'),
+                ('password_field', 'login', '#password', '//input[@id="password"]', 'input', 'Password input field'),
+                ('login_button', 'login', '#login-btn', '//button[@id="login-btn"]', 'button', 'Login submit button'),
+                ('dashboard_title', 'dashboard', '.dashboard-title', '//h1[@class="dashboard-title"]', 'heading', 'Dashboard page title'),
+                ('search_box', 'main', '#search', '//input[@placeholder="Search..."]', 'input', 'Main search box'),
+                ('user_menu', 'main', '.user-menu', '//div[@class="user-menu"]', 'menu', 'User dropdown menu')
+            ]
+            
+            for name, page_name, css_selector, xpath_selector, element_type, description in elements_data:
+                await db.execute_one(
+                    """
+                    INSERT INTO core.elements (id, project_id, name, page_name, css_selector, xpath_selector, 
+                                             element_type, description, is_active, created_at, updated_at)
+                    VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, true, NOW(), NOW())
+                    """,
+                    project_id, name, page_name, css_selector, xpath_selector, element_type, description
+                )
+            
+            # Create sample test session with AI-generated plan
+            ai_plan = {
+                "steps": [
+                    {
+                        "step": 1,
+                        "action": "navigate",
+                        "target": "login_page",
+                        "url": "https://demo.testapp.com/login",
+                        "description": "Navigate to the login page"
+                    },
+                    {
+                        "step": 2,
+                        "action": "fill",
+                        "target": "username_field",
+                        "value": "demo_user",
+                        "description": "Enter username in the username field"
+                    },
+                    {
+                        "step": 3,
+                        "action": "fill",
+                        "target": "password_field",
+                        "value": "demo_password",
+                        "description": "Enter password in the password field"
+                    },
+                    {
+                        "step": 4,
+                        "action": "click",
+                        "target": "login_button",
+                        "description": "Click the login button to submit credentials"
+                    },
+                    {
+                        "step": 5,
+                        "action": "verify",
+                        "target": "dashboard_title",
+                        "expected": "Dashboard",
+                        "description": "Verify that the dashboard page loads and shows the correct title"
+                    }
+                ],
+                "metadata": {
+                    "estimated_duration": "30 seconds",
+                    "complexity": "low",
+                    "browser_required": "chrome",
+                    "ai_confidence": 0.95
+                }
+            }
+            
+            session = await db.execute_one(
+                """
+                INSERT INTO core.test_sessions (id, project_id, user_id, session_name, prompt, ai_generated_plan, 
+                                              status, total_steps, successful_steps, created_at, updated_at)
+                VALUES (gen_random_uuid(), $1, $2, 'Login Test - Demo', 
+                        'Test the login functionality with valid credentials and verify the user reaches the dashboard',
+                        $3, 'ready', 5, 0, NOW(), NOW())
+                RETURNING id
+                """,
+                project_id, user_id, json.dumps(ai_plan)
+            )
+            
+            session_id = str(session["id"])
+            
+            # Create sample test steps
+            steps_data = [
+                (1, 'navigate', 'login_page', 'https://demo.testapp.com/login', None, 'Page loads successfully'),
+                (2, 'fill', 'username_field', '#username', 'demo_user', 'Username entered successfully'),
+                (3, 'fill', 'password_field', '#password', 'demo_password', 'Password entered successfully'),
+                (4, 'click', 'login_button', '#login-btn', None, 'Login button clicked'),
+                (5, 'verify', 'dashboard_title', '.dashboard-title', None, 'Dashboard title is visible')
+            ]
+            
+            for step_number, action_type, element_name, element_selector, input_value, expected_result in steps_data:
+                await db.execute_one(
+                    """
+                    INSERT INTO core.test_steps (id, session_id, step_number, action_type, element_name, 
+                                               element_selector, input_value, expected_result, status, 
+                                               created_at, updated_at)
+                    VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, 'pending', NOW(), NOW())
+                    """,
+                    session_id, step_number, action_type, element_name, element_selector, input_value, expected_result
+                )
+                
+        except Exception as e:
+            # Log the error but don't fail user creation
+            print(f"Warning: Failed to create sample project for user {user_id}: {str(e)}")
+
+
 # Global authentication manager instance
 auth_manager = AuthenticationManager()
 
@@ -374,45 +496,32 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     )
     
     try:
-        print(f"🔐 Received credentials: {credentials.credentials[:20] if credentials.credentials else 'None'}...")
         token = credentials.credentials
         token_data = auth_manager.verify_token(token)
         
         if token_data is None or token_data.user_id is None:
-            print(" Token verification failed or no user_id")
             raise credentials_exception
-        
-        print(f" Token verified for user_id: {token_data.user_id}")
-        
         # Get user with full context
         current_user = await auth_manager.get_user_with_context(token_data.user_id)
         
         if current_user is None:
-            print(f" User not found in database for user_id: {token_data.user_id}")
             raise credentials_exception
-        
-        print(f" User authenticated successfully: {current_user.user.email}")
         return current_user
     
     except HTTPException:
-        print(" HTTPException raised during authentication")
         raise
     except Exception as e:
-        print(f" Unexpected error during authentication: {str(e)}")
         raise credentials_exception
 
 async def get_current_active_user(current_user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
     """FastAPI dependency to ensure user is active"""
-    print(f" Checking if user is active: {current_user.user.email}, is_active: {current_user.user.is_active}")
     
     if not current_user.user.is_active:
-        print(f" User {current_user.user.email} is not active")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Inactive user"
         )
     
-    print(f" User {current_user.user.email} is active")
     return current_user
 
 # Optional auth dependency (doesn't fail if no token)

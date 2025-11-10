@@ -1,14 +1,21 @@
 {
+<<<<<<< Updated upstream
   "name": "mcp-test-runner-extension",
   "version": "1.0.0",
   "description": "Chrome Extension with MCP-style tools for test automation",
+=======
+  "name": "self-healing-test-framework-extension",
+  "version": "2.0.0",
+  "description": "Chrome Extension for automated test element recording and execution with MCP server integration",
+>>>>>>> Stashed changes
   "type": "module",
   "scripts": {
     "dev": "vite build --watch --mode development",
-    "build": "tsc --noEmit && npm run build:background && npm run build:content && npm run build:popup",
-    "build:background": "vite build --config vite.config.ts",
+    "build": "tsc --noEmit && npm run build:background && npm run build:content && npm run build:popup && npm run build:auth-capture",
+    "build:background": "vite build --config vite.background.config.ts",
     "build:content": "vite build --config vite.content.config.ts",
     "build:popup": "vite build --config vite.popup.config.ts",
+    "build:auth-capture": "vite build --config vite.auth-capture.config.ts",
     "type-check": "tsc --noEmit"
   },
   "devDependencies": {

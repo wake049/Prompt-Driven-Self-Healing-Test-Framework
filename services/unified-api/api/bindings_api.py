@@ -4,7 +4,7 @@ Bindings API - Manage data bindings for test plans
 
 from fastapi import APIRouter, HTTPException, Depends
 from typing import List, Dict, Any, Optional
-import logging
+
 import json
 import uuid
 from core.database import get_database, DatabaseManager
@@ -13,13 +13,11 @@ from schemas.enterprise import DataBinding, TestBindings, BindingContext
 from core.auth import get_current_active_user
 from models.auth_models import CurrentUser
 
-logger = logging.getLogger(__name__)
 router = APIRouter()
 
 async def get_db() -> DatabaseManager:
     """Get database dependency"""
     return await get_database()
-
 
 @router.get("/prompts/{prompt_id}/bindings")
 async def get_prompt_bindings(
@@ -40,8 +38,12 @@ async def get_prompt_bindings(
             ORDER BY priority DESC, created_at DESC
         """
         
+<<<<<<< Updated upstream
         db_bindings = await db.execute(bindings_query)
         logger.info(f"Found {len(db_bindings)} active data bindings from datahub")
+=======
+        db_bindings = await db.execute(bindings_query, scope_name)
+>>>>>>> Stashed changes
         
         # Convert to frontend format
         bindings = []
@@ -49,16 +51,10 @@ async def get_prompt_bindings(
             # Parse JSON fields if they're strings
             import json
             
-            logger.debug(f"Processing binding: {binding.get('rule_name', 'unknown')}")
-            
             source_ref = binding.get('source_ref', {})
             if isinstance(source_ref, str):
                 try:
                     source_ref = json.loads(source_ref)
-                    logger.debug(f"Parsed source_ref from string: {source_ref}")
-                except (json.JSONDecodeError, TypeError):
-                    logger.warning(f"Failed to parse source_ref: {source_ref}")
-                    source_ref = {}
                 except (json.JSONDecodeError, TypeError):
                     source_ref = {}
             
@@ -106,6 +102,7 @@ async def get_prompt_bindings(
                 }
             
             bindings.append(frontend_binding)
+<<<<<<< Updated upstream
         
         print(f" Returning {len(bindings)} bindings in frontend format")
         
@@ -116,8 +113,13 @@ async def get_prompt_bindings(
         print(f" Error getting bindings: {str(e)}")
         import traceback
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail="Failed to get bindings")
+=======
 
+        return {"bindings": bindings}
+        
+    except Exception as e:
+>>>>>>> Stashed changes
+        raise HTTPException(status_code=500, detail="Failed to get bindings")
 
 @router.post("/prompts/{prompt_id}/bindings")
 async def update_prompt_bindings(
@@ -152,8 +154,12 @@ async def update_prompt_bindings(
             print(f" Created project: {project_id}")
         else:
             project_id = project_result['id']
+<<<<<<< Updated upstream
             print(f" Using existing project: {project_id}")
         
+=======
+
+>>>>>>> Stashed changes
         # Clear existing bindings for this project and prompt scope
         scope_name = f"prompt_{prompt_id}"
         await db.execute_command("""
@@ -161,8 +167,12 @@ async def update_prompt_bindings(
             SET is_active = false 
             WHERE project_id = $1 AND (scope = $2 OR scope LIKE 'prompt_%' OR scope = 'shopping_cart')
         """, project_id, scope_name)
+<<<<<<< Updated upstream
         print(f" Deactivated existing bindings for project {project_id} and scope: {scope_name}")
         
+=======
+
+>>>>>>> Stashed changes
         # Insert new bindings
         import time
         timestamp = int(time.time())
@@ -221,11 +231,15 @@ async def update_prompt_bindings(
             100 - i,  # Higher priority for earlier bindings
             True
             )
+<<<<<<< Updated upstream
             
             print(f" Created binding: {binding.name} -> {rule_name}")
         
         print(f"🎉 Successfully saved {len(bindings.bindings)} bindings to datahub.data_bindings")
         
+=======
+
+>>>>>>> Stashed changes
         # Verify the save by counting active bindings
         verify_query = """
         SELECT COUNT(*) as count
@@ -235,8 +249,12 @@ async def update_prompt_bindings(
         
         verify_result = await db.execute_one(verify_query, scope_name)
         saved_count = verify_result['count'] if verify_result else 0
+<<<<<<< Updated upstream
         print(f" Verification: Found {saved_count} active bindings after save")
         
+=======
+
+>>>>>>> Stashed changes
         return {
             "success": True,
             "message": f"Successfully saved {len(bindings.bindings)} bindings",
@@ -245,27 +263,32 @@ async def update_prompt_bindings(
         }
         
     except Exception as e:
+<<<<<<< Updated upstream
         logger.error(f"Failed to update bindings for prompt {prompt_id}: {str(e)}")
         print(f" Error updating bindings: {str(e)}")
+=======
+
+>>>>>>> Stashed changes
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail="Failed to update bindings")
-        
-        logger.info(f" Updated bindings for prompt {prompt_id}: {len(bindings.bindings)} bindings")
         
         return {
             "success": True,
             "message": f"Updated {len(bindings.bindings)} bindings",
             "bindings": bindings.dict()
         }
-        
+
     except Exception as e:
+<<<<<<< Updated upstream
         logger.error(f"Failed to update bindings for prompt {prompt_id}: {str(e)}")
         print(f" Error: {str(e)}")
+=======
+
+>>>>>>> Stashed changes
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Failed to update bindings: {str(e)}")
-
 
 @router.post("/prompts/{prompt_id}/bindings/generate-cart-verification")
 async def generate_cart_verification_bindings(
@@ -319,8 +342,6 @@ async def generate_cart_verification_bindings(
         
         await db.execute(update_query, json.dumps(plan_data), prompt_id)
         
-        logger.info(f" Generated cart verification bindings for prompt {prompt_id}: {len(bindings.bindings)} bindings")
-        
         return {
             "success": True,
             "message": f"Generated {len(bindings.bindings)} cart verification bindings",
@@ -329,9 +350,7 @@ async def generate_cart_verification_bindings(
         }
         
     except Exception as e:
-        logger.error(f"Failed to generate cart verification bindings for prompt {prompt_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to generate bindings: {str(e)}")
-
 
 @router.post("/bindings/test")
 async def test_bindings(
@@ -382,9 +401,7 @@ async def test_bindings(
         }
         
     except Exception as e:
-        logger.error(f"Failed to test bindings: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to test bindings: {str(e)}")
-
 
 @router.get("/bindings/templates")
 async def get_binding_templates():
@@ -448,7 +465,11 @@ async def get_binding_templates():
             "success": True,
             "templates": templates
         }
-        
+
     except Exception as e:
+<<<<<<< Updated upstream
         logger.error(f"Failed to get binding templates: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to get binding templates")
+=======
+        raise HTTPException(status_code=500, detail="Failed to get binding templates")
+>>>>>>> Stashed changes

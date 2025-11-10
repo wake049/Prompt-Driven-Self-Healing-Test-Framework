@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import styled from 'styled-components';
+import styled, { ThemeProvider } from 'styled-components';
+import { useTheme } from '../../../contexts/ThemeContext';
 import { http } from '../../../shared/api';
 
 // TypeScript interfaces for styled components
@@ -75,11 +76,11 @@ type PackConfigurations = {
 
 const Container = styled.div`
   min-height: 100vh;
-  background: #f8f9fa;
+  background: ${props => props.theme.colors.background};
 `;
 
 const Header = styled.div`
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, ${props => props.theme.colors.primary} 0%, ${props => props.theme.colors.secondary} 100%);
   color: white;
   padding: 2rem;
   text-align: center;
@@ -111,16 +112,16 @@ const PolicyGrid = styled.div`
 `;
 
 const PolicyCard = styled.div`
-  background: white;
+  background: ${props => props.theme.colors.surface};
   border-radius: 12px;
   padding: 1.5rem;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-  border: 1px solid #e5e7eb;
+  box-shadow: ${props => props.theme.shadows.medium};
+  border: 1px solid ${props => props.theme.colors.border};
 `;
 
 const CardTitle = styled.h3`
   margin: 0 0 1rem 0;
-  color: #1f2937;
+  color: ${props => props.theme.colors.text};
   font-size: 1.25rem;
   font-weight: 600;
   display: flex;
@@ -129,20 +130,20 @@ const CardTitle = styled.h3`
 `;
 
 const PolicySection = styled.div`
-  background: white;
+  background: ${props => props.theme.colors.surface};
   border-radius: 12px;
   padding: 1.5rem;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-  border: 1px solid #e5e7eb;
+  box-shadow: ${props => props.theme.shadows.medium};
+  border: 1px solid ${props => props.theme.colors.border};
   margin-bottom: 2rem;
 `;
 
 const SectionTitle = styled.h2`
   margin: 0 0 1.5rem 0;
-  color: #1f2937;
+  color: ${props => props.theme.colors.text};
   font-size: 1.5rem;
   font-weight: 600;
-  border-bottom: 2px solid #f3f4f6;
+  border-bottom: 2px solid ${props => props.theme.colors.border};
   padding-bottom: 0.5rem;
 `;
 
@@ -151,10 +152,13 @@ const PolicyRule = styled.div<PolicyRuleProps>`
   justify-content: space-between;
   align-items: center;
   padding: 1rem;
-  border: 1px solid #e5e7eb;
+  border: 1px solid ${props => props.theme.colors.border};
   border-radius: 8px;
   margin-bottom: 0.5rem;
-  background: ${props => props.$isActive ? '#f0f9ff' : '#f9fafb'};
+  background: ${props => props.$isActive ? 
+    (props.theme.colors.surface === '#2d3748' ? '#2a4365' : '#f0f9ff') : 
+    (props.theme.colors.surface === '#2d3748' ? '#1a202c' : '#f9fafb')
+  };
 `;
 
 const RuleInfo = styled.div`
@@ -173,12 +177,12 @@ const RuleType = styled.span<RuleTypeProps>`
 
 const RuleDescription = styled.p`
   margin: 0.5rem 0 0 0;
-  color: #6b7280;
+  color: ${props => props.theme.colors.textSecondary};
   font-size: 0.9rem;
 `;
 
 const RuleAction = styled.span`
-  color: #059669;
+  color: ${props => props.theme.colors.success};
   font-weight: 600;
   font-size: 0.9rem;
 `;
@@ -232,7 +236,7 @@ const ThresholdSlider = styled.input`
 
 const ThresholdValue = styled.span`
   font-weight: 600;
-  color: #1f2937;
+  color: ${props => props.theme.colors.text};
   min-width: 60px;
 `;
 
@@ -244,31 +248,32 @@ const PolicyPackSelector = styled.div`
 
 const PolicyPackButton = styled.button<{ $isActive: boolean }>`
   padding: 0.75rem 1.5rem;
-  border: 2px solid ${props => props.$isActive ? '#3b82f6' : '#e5e7eb'};
-  background: ${props => props.$isActive ? '#3b82f6' : 'white'};
-  color: ${props => props.$isActive ? 'white' : '#6b7280'};
+  border: 2px solid ${props => props.$isActive ? props.theme.colors.primary : props.theme.colors.border};
+  background: ${props => props.$isActive ? props.theme.colors.primary : props.theme.colors.surface};
+  color: ${props => props.$isActive ? 'white' : props.theme.colors.textSecondary};
   border-radius: 8px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
   
   &:hover {
-    border-color: #3b82f6;
-    background: ${props => props.$isActive ? '#2563eb' : '#f3f4f6'};
+    border-color: ${props => props.theme.colors.primary};
+    background: ${props => props.$isActive ? props.theme.colors.primary : 
+      (props.theme.colors.surface === '#2d3748' ? '#4a5568' : '#f3f4f6')};
   }
 `;
 
 const AuditLog = styled.div`
   max-height: 300px;
   overflow-y: auto;
-  border: 1px solid #e5e7eb;
+  border: 1px solid ${props => props.theme.colors.border};
   border-radius: 8px;
   padding: 1rem;
 `;
 
 const LogEntry = styled.div`
   padding: 0.5rem;
-  border-bottom: 1px solid #f3f4f6;
+  border-bottom: 1px solid ${props => props.theme.colors.border};
   font-size: 0.875rem;
   
   &:last-child {
@@ -277,21 +282,76 @@ const LogEntry = styled.div`
 `;
 
 const LogTimestamp = styled.span`
-  color: #6b7280;
+  color: ${props => props.theme.colors.textSecondary};
   font-weight: 600;
 `;
 
 const LogAction = styled.span`
-  color: #059669;
+  color: ${props => props.theme.colors.success};
   font-weight: 600;
   margin: 0 0.5rem;
 `;
 
+<<<<<<< Updated upstream
+=======
+const ErrorMessage = styled.div`
+  color: ${props => props.theme.colors.error};
+  margin-top: 12px;
+  font-size: 14px;
+  background-color: ${props => props.theme.colors.surface === '#2d3748' ? 
+    'rgba(252, 129, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)'};
+  padding: 8px 16px;
+  border-radius: 6px;
+  border: 1px solid ${props => props.theme.colors.surface === '#2d3748' ? 
+    'rgba(252, 129, 129, 0.3)' : 'rgba(239, 68, 68, 0.2)'};
+`;
+
+const LoadingMessage = styled.div`
+  color: ${props => props.theme.colors.textSecondary};
+  margin-top: 8px;
+  font-size: 14px;
+`;
+
+const HeaderActions = styled.div`
+  display: flex;
+  gap: 12px;
+  align-items: center;
+`;
+
+const UnsavedChangesIndicator = styled.span`
+  color: ${props => props.theme.colors.warning};
+  font-size: 14px;
+  font-weight: 500;
+`;
+
+const SaveButton = styled.button<{ $hasChanges: boolean; $isSaving: boolean }>`
+  background-color: ${props => props.$hasChanges ? props.theme.colors.success : 
+    (props.theme.colors.surface === '#2d3748' ? '#4a5568' : '#9ca3af')};
+  color: white;
+  border: none;
+  border-radius: 8px;
+  padding: 12px 24px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: ${props => props.$hasChanges ? 'pointer' : 'not-allowed'};
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  
+  &:hover {
+    background-color: ${props => props.$hasChanges ? 
+      (props.theme.colors.surface === '#2d3748' ? '#38a169' : '#059669') : 
+      (props.theme.colors.surface === '#2d3748' ? '#4a5568' : '#9ca3af')};
+  }
+`;
+>>>>>>> Stashed changes
 // ================================
 // Policy Engine Component  
 // ================================
 
 const PolicyEngine: React.FC = () => {
+  const { theme } = useTheme();
   const [activePolicyPack, setActivePolicyPack] = useState('balanced');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -476,41 +536,52 @@ const PolicyEngine: React.FC = () => {
   };
 
   return (
-    <Container>
+    <ThemeProvider theme={theme}>
+      <Container>
       <Header>
         <div>
           <Title> Policy Engine</Title>
           <Subtitle>Governance & Decision Layer for Prompt-Driven Self-Healing Framework</Subtitle>
+<<<<<<< Updated upstream
           {error && <div style={{color: '#ef4444', marginTop: '8px', fontSize: '14px'}}> {error}</div>}
           {loading && <div style={{color: '#6b7280', marginTop: '8px', fontSize: '14px'}}>🔄 Loading policies from server...</div>}
-        </div>
-        <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-          {hasUnsavedChanges && (
-            <span style={{ color: '#f59e0b', fontSize: '14px', fontWeight: 500 }}>
-               Unsaved changes
-            </span>
+=======
+          {error && (
+            <ErrorMessage>
+              ❌ {error}
+            </ErrorMessage>
           )}
+          {loading && <LoadingMessage>🔄 Loading policies from server...</LoadingMessage>}
+>>>>>>> Stashed changes
+        </div>
+        <HeaderActions>
+          {hasUnsavedChanges && (
+            <UnsavedChangesIndicator>
+               Unsaved changes
+            </UnsavedChangesIndicator>
+          )}
+<<<<<<< Updated upstream
           <button
             onClick={() => savePolicyChanges()}
-            disabled={!hasUnsavedChanges || isSaving}
-            style={{
-              backgroundColor: hasUnsavedChanges ? '#10b981' : '#9ca3af',
-              color: 'white',
-              border: 'none',
-              borderRadius: '8px',
-              padding: '12px 24px',
-              fontSize: '14px',
-              fontWeight: 600,
-              cursor: hasUnsavedChanges ? 'pointer' : 'not-allowed',
-              transition: 'all 0.2s',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px'
+=======
+          <SaveButton
+            onClick={() => {
+              savePolicyChanges();
             }}
+>>>>>>> Stashed changes
+            disabled={!hasUnsavedChanges || isSaving}
+            $hasChanges={hasUnsavedChanges}
+            $isSaving={isSaving}
           >
+<<<<<<< Updated upstream
             {isSaving ? ' Saving...' : ' Save Changes'}
           </button>
         </div>
+=======
+            {isSaving ? '🔄 Saving...' : '💾 Save Changes'}
+          </SaveButton>
+        </HeaderActions>
+>>>>>>> Stashed changes
       </Header>
 
       <MainContent>
@@ -743,6 +814,7 @@ const PolicyEngine: React.FC = () => {
         </PolicySection>
       </MainContent>
     </Container>
+    </ThemeProvider>
   );
 };
 

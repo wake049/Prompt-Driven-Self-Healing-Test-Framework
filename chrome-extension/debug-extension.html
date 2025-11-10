@@ -11,21 +11,16 @@
     <a href="#" id="test-link">Test Link</a>
     
     <script>
-        // Add some basic logging
-        console.log('Test page loaded');
         
         // Add click handlers for testing
         document.getElementById('test-button').addEventListener('click', () => {
-            console.log('Test button clicked');
         });
         
         document.getElementById('test-input').addEventListener('input', (e) => {
-            console.log('Test input value:', e.target.value);
         });
         
         document.getElementById('test-link').addEventListener('click', (e) => {
             e.preventDefault();
-            console.log('Test link clicked');
         });
     </script>
 </body>

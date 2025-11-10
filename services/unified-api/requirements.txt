@@ -5,7 +5,8 @@ fastapi==0.104.1
 uvicorn==0.24.0
 
 # Data validation
-pydantic==2.5.0
+pydantic>=2.7.0
+email-validator==2.1.0
 
 # HTTP client for external APIs
 httpx==0.25.2
@@ -30,6 +31,7 @@ psycopg2-binary==2.9.9
 
 # Utilities
 python-dateutil==2.8.2
+psutil==5.9.6
 
 # Development (optional)
 # pytest==7.4.3

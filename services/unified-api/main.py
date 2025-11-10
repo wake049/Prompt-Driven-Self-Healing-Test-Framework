@@ -40,6 +40,8 @@ from api.test_execution import router as test_execution_router
 from api.bindings_api import router as bindings_router
 from api.auth_api import auth_router
 from api.health import router as health_router
+from api.analytics_api import router as analytics_router  # M8: Analytics API
+from api.step_element_relationships_api import router as step_element_relationships_router  # Element-step relationships
 from core.database import get_database_manager, close_database
 
 # Configure logging
@@ -55,43 +57,32 @@ profiler = get_global_profiler()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan management"""
-    logger.info(" Starting Unified MCP API Server")
+    
+    # Debug: Log environment variables
+    logger.info("=== Environment Variables Debug ===")
+    logger.info(f"DB_HOST: {os.getenv('DB_HOST', 'NOT SET')}")
+    logger.info(f"DB_PORT: {os.getenv('DB_PORT', 'NOT SET')}")
+    logger.info(f"DB_NAME: {os.getenv('DB_NAME', 'NOT SET')}")
+    logger.info(f"DB_USER: {os.getenv('DB_USER', 'NOT SET')}")
+    logger.info(f"DB_PASSWORD: {'SET' if os.getenv('DB_PASSWORD') else 'NOT SET'}")
+    logger.info("===================================")
     
     # Start performance monitoring
     profiler.capture_snapshot("Server_Startup")
     profiler.start_continuous_monitoring(interval_seconds=10.0)
-    
-    # Initialize database connection
-    try:
-        logger.info("🔌 Initializing database connection...")
-        await get_database_manager()
-        logger.info(" Database connection initialized")
-    except Exception as e:
-        logger.warning(f" Database initialization failed: {e}")
-        logger.info("📝 Continuing with mock data fallback")
+    await get_database_manager()
     
     profiler.capture_snapshot("Server_Ready")
-    logger.info(" Unified API Server ready")
     
     yield
     
-    # Cleanup
-    logger.info("🛑 Shutting down Unified MCP API Server")
     
     # Stop performance monitoring and generate report
     profiler.stop_continuous_monitoring()
     profiler.capture_snapshot("Server_Shutdown")
     
-    # Generate final performance report
-    logger.info(" Generating final performance report...")
     profiler.print_detailed_report()
-    
-    try:
-        await close_database()
-        logger.info("🔌 Database connection closed")
-    except Exception as e:
-        logger.warning(f" Database cleanup warning: {e}")
-    logger.info(" Cleanup completed")
+    await close_database()
 
 # Create FastAPI application
 app = FastAPI(
@@ -142,12 +133,7 @@ async def performance_monitoring_middleware(request: Request, call_next):
         
         # Add performance headers
         response.headers["X-Process-Time"] = str(process_time)
-        response.headers["X-Memory-Used"] = str(memory_used)
-        
-        # Log slow requests
-        if process_time > 1.0:  # Log requests taking more than 1 second
-            logger.warning(f"🐌 Slow request: {endpoint} took {process_time:.2f}s")
-        
+        response.headers["X-Memory-Used"] = str(memory_used)        
         return response
         
     except Exception as e:
@@ -261,6 +247,20 @@ app.include_router(
     tags=["Data Bindings"]
 )
 
+# M8: Analytics API for dashboard components
+app.include_router(
+    analytics_router,
+    prefix="/api/analytics",
+    tags=["Analytics Dashboard"]
+)
+
+# Step-Element Relationships API for runtime selector resolution
+app.include_router(
+    step_element_relationships_router,
+    prefix="/api/v1",
+    tags=["Step-Element Relationships"]
+)
+
 # Performance monitoring endpoints
 @app.get("/api/v1/performance/metrics")
 async def get_performance_metrics():
@@ -272,7 +272,6 @@ async def get_performance_metrics():
             "data": report
         }
     except Exception as e:
-        logger.error(f"Error generating performance metrics: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/v1/performance/memory")
@@ -290,7 +289,6 @@ async def get_memory_metrics():
             }
         }
     except Exception as e:
-        logger.error(f"Error getting memory metrics: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/v1/performance/gc")
@@ -303,7 +301,6 @@ async def force_garbage_collection():
             "data": gc_result
         }
     except Exception as e:
-        logger.error(f"Error forcing garbage collection: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/v1/performance/snapshot")
@@ -325,7 +322,6 @@ async def capture_performance_snapshot(label: str = "API_Request"):
         else:
             raise HTTPException(status_code=500, detail="Failed to capture snapshot")
     except Exception as e:
-        logger.error(f"Error capturing performance snapshot: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # Add generated test plans endpoints at root for frontend compatibility
@@ -400,8 +396,6 @@ if __name__ == "__main__":
     host = os.getenv("HOST", "0.0.0.0")
     port = int(os.getenv("PORT", "8000"))
     reload = os.getenv("RELOAD", "true").lower() == "true"
-    
-    logger.info(f" Starting server on {host}:{port}")
     
     uvicorn.run(
         "main:app",

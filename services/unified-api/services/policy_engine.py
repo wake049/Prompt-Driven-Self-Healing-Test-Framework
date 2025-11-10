@@ -4,10 +4,7 @@ Core business logic for policy management and execution
 """
 
 from typing import Dict, Any, List
-import logging
 from datetime import datetime
-
-logger = logging.getLogger(__name__)
 
 class PolicyEngine:
     """Policy engine for governance and decision making"""
@@ -22,7 +19,7 @@ class PolicyEngine:
         self.initialized = True
         # Load sample policies
         await self._load_sample_policies()
-        logger.info("Policy Engine initialized")
+        # Policy Engine initialized
     
     async def _load_sample_policies(self):
         """Load sample policies for demonstration"""
@@ -58,9 +55,7 @@ class PolicyEngine:
         try:
             self.policies[policy.id] = policy.dict() if hasattr(policy, 'dict') else policy
             return True
-        except Exception as e:
-            logger.error(f"Error adding policy: {e}")
-            return False
+        except Exception as e:return False
     
     async def update_policy(self, policy: Any) -> bool:
         """Update an existing policy"""
@@ -69,9 +64,7 @@ class PolicyEngine:
                 self.policies[policy.id] = policy.dict() if hasattr(policy, 'dict') else policy
                 return True
             return False
-        except Exception as e:
-            logger.error(f"Error updating policy: {e}")
-            return False
+        except Exception as e:return False
     
     async def remove_policy(self, policy_id: str) -> bool:
         """Remove a policy"""
@@ -80,9 +73,7 @@ class PolicyEngine:
                 del self.policies[policy_id]
                 return True
             return False
-        except Exception as e:
-            logger.error(f"Error removing policy: {e}")
-            return False
+        except Exception as e:return False
     
     async def evaluate_policies(self, context: Any, action_type: str = None, error_info: Dict[str, Any] = None) -> List[Dict[str, Any]]:
         """Evaluate policies for a given context"""
@@ -97,9 +88,7 @@ class PolicyEngine:
                     "evaluation_time_ms": 25
                 }
             ]
-        except Exception as e:
-            logger.error(f"Error evaluating policies: {e}")
-            raise
+        except Exception as e:raise
     
     async def classify_outcome(self, context: Any, action_result: Dict[str, Any], detection_timeout_ms: int = 5000) -> Dict[str, Any]:
         """Classify the outcome of an action"""
@@ -112,9 +101,7 @@ class PolicyEngine:
                 "retry_recommended": False,
                 "detection_time_ms": 100
             }
-        except Exception as e:
-            logger.error(f"Error classifying outcome: {e}")
-            raise
+        except Exception as e:raise
     
     async def execute_retry_policy(self, retry_policy: Any, current_attempt: int, error_type: str) -> Dict[str, Any]:
         """Execute retry logic"""
@@ -124,9 +111,7 @@ class PolicyEngine:
                 "delay_ms": 1000 * (current_attempt + 1),
                 "max_retries_reached": current_attempt >= 3
             }
-        except Exception as e:
-            logger.error(f"Error executing retry policy: {e}")
-            raise
+        except Exception as e:raise
     
     async def log_execution(self, run_id: str, step_index: int, policy_id: str, context: Any, 
                            evaluation_result: Any, outcome_classification: Any = None, 
@@ -146,9 +131,7 @@ class PolicyEngine:
             }
             self.execution_logs.append(log_entry)
             return log_id
-        except Exception as e:
-            logger.error(f"Error logging execution: {e}")
-            raise
+        except Exception as e:raise
     
     async def get_execution_logs(self, run_id: str = None, policy_id: str = None, limit: int = 100) -> List[Dict[str, Any]]:
         """Get execution logs with filtering"""
@@ -162,6 +145,4 @@ class PolicyEngine:
                 logs = [log for log in logs if log.get("policy_id") == policy_id]
             
             return logs[:limit]
-        except Exception as e:
-            logger.error(f"Error getting execution logs: {e}")
-            raise
+        except Exception as e:raise

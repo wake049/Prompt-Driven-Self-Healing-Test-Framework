@@ -1,7 +1,14 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import styled from 'styled-components';
+<<<<<<< Updated upstream
 import sqlApiClient, { RecordedElement } from '../../../shared/utils/sqlApiClient';
+=======
+import { useTheme } from '../../../contexts/ThemeContext';
+import { useMCPContext } from '../../../contexts/MCPContext';
+import { sqlApiClient, RecordedElementDB } from '../../../shared/utils/mcpSqlApiClient';
+import { http } from '../../../shared/api';
+>>>>>>> Stashed changes
 import { 
   detectDynamicContent, 
   isDynamicSelector, 
@@ -14,6 +21,37 @@ import {
 // Styled Components
 // ================================
 
+<<<<<<< Updated upstream
+=======
+import { 
+  RefreshCw, 
+  Plus, 
+  Search, 
+  Filter, 
+  ArrowLeft, 
+  Settings, 
+  Eye, 
+  Edit3,
+  Trash2,
+  AlertTriangle,
+  CheckCircle,
+  XCircle,
+  Clock,
+  Activity,
+  FileText,
+  Database,
+  Layers,
+  MoreVertical,
+  Chrome,
+  Download,
+  ExternalLink,
+  Zap,
+  Shield
+} from 'lucide-react';
+// ================================
+// Modern Styled Components
+// ================================
+>>>>>>> Stashed changes
 const Container = styled.div`
   display: flex;
   flex-direction: column;
@@ -128,10 +166,157 @@ const Table = styled.table`
 const TableHeader = styled.thead`
   background: #f8f9fa;
 `;
+<<<<<<< Updated upstream
 
 const TableHeaderCell = styled.th`
   padding: 16px 20px;
   text-align: left;
+=======
+const LoadingText = styled.span`
+  color: ${props => props.theme.colors.textSecondary};
+  font-size: 16px;
+`;
+const ErrorMessage = styled.div`
+  background: linear-gradient(135deg, #fee2e2, #fecaca);
+  border: 1px solid #f87171;
+  color: #dc2626;
+  padding: 20px;
+  border-radius: 12px;
+  margin: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-shadow: 0 4px 12px rgba(248, 113, 113, 0.2);
+`;
+const EmptyState = styled.div`
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 80px 20px;
+  text-align: center;
+`;
+
+const ChromeExtensionPromo = styled.div`
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 16px;
+  padding: 32px;
+  margin: 24px 0;
+  color: white;
+  text-align: center;
+  box-shadow: 0 8px 32px rgba(102, 126, 234, 0.3);
+  position: relative;
+  overflow: hidden;
+  
+  &::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+    animation: shimmer 3s infinite;
+  }
+  
+  @keyframes shimmer {
+    0% { left: -100%; }
+    100% { left: 100%; }
+  }
+`;
+
+const PromoIcon = styled.div`
+  font-size: 48px;
+  margin-bottom: 16px;
+  opacity: 0.9;
+`;
+
+const PromoTitle = styled.h3`
+  margin: 0 0 12px 0;
+  font-size: 24px;
+  font-weight: 700;
+  color: white;
+`;
+
+const PromoDescription = styled.p`
+  margin: 0 0 24px 0;
+  font-size: 16px;
+  color: rgba(255, 255, 255, 0.9);
+  line-height: 1.5;
+  max-width: 600px;
+  margin-left: auto;
+  margin-right: auto;
+`;
+
+const PromoFeatures = styled.div`
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+  margin: 24px 0;
+  max-width: 800px;
+  margin-left: auto;
+  margin-right: auto;
+`;
+
+const PromoFeature = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.9);
+  font-weight: 500;
+`;
+
+const PromoButtons = styled.div`
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+  flex-wrap: wrap;
+`;
+
+const PromoButton = styled.button<{ $variant?: 'primary' | 'secondary' }>`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 24px;
+  border: none;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  text-decoration: none;
+  
+  ${props => props.$variant === 'primary' ? `
+    background: white;
+    color: #667eea;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    
+    &:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+      background: #f8f9ff;
+    }
+  ` : `
+    background: rgba(255, 255, 255, 0.2);
+    color: white;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    backdrop-filter: blur(10px);
+    
+    &:hover {
+      background: rgba(255, 255, 255, 0.3);
+      border-color: rgba(255, 255, 255, 0.5);
+    }
+  `}
+`;
+const EmptyStateIcon = styled.div`
+  font-size: 64px;
+  margin-bottom: 24px;
+  opacity: 0.5;
+`;
+const EmptyStateTitle = styled.h3`
+  font-size: 24px;
+>>>>>>> Stashed changes
   font-weight: 600;
   color: #6c757d;
   font-size: 0.9rem;
@@ -157,7 +342,117 @@ const TableCell = styled.td`
 
 const ElementName = styled.div`
   font-weight: 600;
+<<<<<<< Updated upstream
   color: #2c3e50;
+=======
+  word-break: break-word;
+`;
+const ElementTag = styled.span`
+  background: ${props => props.theme.colors.primary};
+  color: ${props => props.theme.colors.background};
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  border: 1px solid ${props => props.theme.colors.border};
+  box-shadow: ${props => props.theme.shadows.small};
+  display: inline-block;
+  min-width: 40px;
+  text-align: center;
+`;
+const ElementText = styled.div`
+  margin: 12px 0;
+  padding: 12px;
+  background: ${props => props.theme.colors.background};
+  border-radius: 8px;
+  font-style: italic;
+  color: ${props => props.theme.colors.textSecondary};
+  font-size: 14px;
+  border: 1px solid ${props => props.theme.colors.border};
+  word-break: break-word;
+`;
+const SelectorsSection = styled.div`
+  margin: 16px 0;
+`;
+const SectionLabel = styled.div`
+  font-weight: 600;
+  color: ${props => props.theme.colors.text};
+  margin-bottom: 8px;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+`;
+const SelectorsList = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+`;
+const SelectorItem = styled.div<{ dynamicType?: string }>`
+  background: ${props => {
+    switch(props.dynamicType) {
+      case 'high': return '#fee2e2';
+      case 'medium': return '#fef3c7';
+      case 'low': return '#dbeafe';
+      default: return props.theme.colors.background;
+    }
+  }};
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-family: 'Monaco', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-size: 12px;
+  color: ${props => props.theme.colors.text};
+  word-break: break-all;
+  border-left: 3px solid ${props => {
+    switch(props.dynamicType) {
+      case 'high': return '#dc2626';
+      case 'medium': return '#f59e0b';
+      case 'low': return '#3b82f6';
+      default: return 'transparent';
+    }
+  }};
+  border: 1px solid ${props => {
+    switch(props.dynamicType) {
+      case 'high': return '#fca5a5';
+      case 'medium': return '#fbbf24';
+      case 'low': return '#93c5fd';
+      default: return props.theme.colors.border;
+    }
+  }};
+`;
+const DynamicWarning = styled.div<{ severity?: string }>`
+  font-size: 11px;
+  margin-top: 4px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-weight: 500;
+  background: ${props => {
+    switch(props.severity) {
+      case 'high': return '#fee2e2';
+      case 'medium': return '#fef3c7';
+      case 'low': return '#dbeafe';
+      default: return '#f3f4f6';
+    }
+  }};
+  color: ${props => {
+    switch(props.severity) {
+      case 'high': return '#dc2626';
+      case 'medium': return '#f59e0b';
+      case 'low': return '#3b82f6';
+      default: return '#6b7280';
+    }
+  }};
+  border: 1px solid ${props => {
+    switch(props.severity) {
+      case 'high': return '#fca5a5';
+      case 'medium': return '#fbbf24';
+      case 'low': return '#93c5fd';
+      default: return '#d1d5db';
+    }
+  }};
+>>>>>>> Stashed changes
 `;
 
 const HealthBadge = styled.div<{ status: 'healthy' | 'warning' | 'error' }>`
@@ -808,8 +1103,14 @@ const ErrorMessage = styled.div`
 
 const MCPElementsViewer: React.FC = () => {
   const navigate = useNavigate();
+  const { client } = useMCPContext();
+  
   const [elements, setElements] = useState<RecordedElement[]>([]);
+<<<<<<< Updated upstream
   const [filteredElements, setFilteredElements] = useState<RecordedElement[]>([]);
+=======
+  const [reviewQueue, setReviewQueue] = useState<any[]>([]);
+>>>>>>> Stashed changes
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedPage, setSelectedPage] = useState('all');
   const [needsWorkFilter, setNeedsWorkFilter] = useState('all'); // 'all', 'needs-work', 'stable'
@@ -817,12 +1118,189 @@ const MCPElementsViewer: React.FC = () => {
   const [reviewQueueVersion, setReviewQueueVersion] = useState(0); // Force re-render when queue changes
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+<<<<<<< Updated upstream
   const [editingElement, setEditingElement] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<{id: string; xpath: string} | null>(null);
 
   // Create unique editing key to handle elements with same ID
   const getEditingKey = (element: RecordedElement): string => {
     return `${element.dbId || 'no-db-id'}_${element.id}`;
+=======
+  const [selectorConfig, setSelectorConfig] = useState<PolicyBasedSelectorConfig>({
+    preferCssOverXpath: true,
+    showDynamicWarnings: true,
+    hideWeakSelectors: false,
+    showBothSelectors: false
+  });
+  // Debounce search term to improve performance
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+  // Create a render key to force re-renders when filters change
+  const renderKey = React.useMemo(() => {
+    return `${selectedPage}-${healthFilter}-${debouncedSearchTerm}-${elements.length}`;
+  }, [selectedPage, healthFilter, debouncedSearchTerm, elements.length]);
+  // Filter elements based on search and filters
+  const filteredElements = React.useMemo(() => {
+    // Don't filter if elements haven't loaded yet
+    if (loading || elements.length === 0) {
+      return [];
+    }
+    let filtered = [...elements];
+    // Filter by page - THIS IS THE KEY FILTER
+    if (selectedPage !== 'all') {
+      // Show what pages actually exist
+      const allPages = [...new Set(elements.map(e => e.page))];
+      const beforeCount = filtered.length;
+      filtered = filtered.filter(element => {
+        const elementPage = (element.page || 'unknown').trim();
+        const match = elementPage === selectedPage.trim();
+        // Log first few matches/mismatches for debugging
+        if (beforeCount < 20) {
+        }
+        return match;
+      });
+      // Show which elements passed the filter
+      if (filtered.length <= 10) {
+      }
+    }
+    // Filter by health status
+    if (healthFilter !== 'all') {
+      const beforeHealthFilter = filtered.length;
+      filtered = filtered.filter(element => {
+        const healthStatus = getElementHealthStatus(element);
+        return healthStatus.status === healthFilter;
+      });
+    }
+    // Filter by search term
+    if (debouncedSearchTerm && debouncedSearchTerm.trim()) {
+      const beforeSearchFilter = filtered.length;
+      const term = debouncedSearchTerm.toLowerCase().trim();
+      filtered = filtered.filter(element => {
+        const elementText = element.text || '';
+        const elementTag = element.tag || '';
+        const elementName = (elementText + ' ' + elementTag).toLowerCase();
+        if (elementName.includes(term)) return true;
+        const elementId = element.id || '';
+        if (elementId.toLowerCase().includes(term)) return true;
+        const elementPage = element.page || '';
+        if (elementPage.toLowerCase().includes(term)) return true;
+        const cssSelector = element.cssSelector || '';
+        const xpath = element.xpath || '';
+        if (cssSelector.toLowerCase().includes(term)) return true;
+        if (xpath.toLowerCase().includes(term)) return true;
+        if (element.attributes && typeof element.attributes === 'object') {
+          const attributeMatches = Object.entries(element.attributes).some(([key, value]) => {
+            if (!key || !value) return false;
+            const keyStr = key.toString().toLowerCase();
+            const valueStr = value.toString().toLowerCase();
+            return keyStr.includes(term) || valueStr.includes(term);
+          });
+          if (attributeMatches) return true;
+        }
+        return false;
+      });
+    }
+    return filtered;
+  }, [elements, debouncedSearchTerm, selectedPage, healthFilter, loading]);
+  // Load policy-based selector configuration
+  useEffect(() => {
+    const loadSelectorPolicy = async () => {
+      try {
+        const config = await getPolicyBasedSelectorConfig();
+        setSelectorConfig(config);
+      } catch (error) {
+      }
+    };
+    loadSelectorPolicy();
+  }, []);
+  // Helper function to get a meaningful element name
+  const getElementDisplayName = (element: RecordedElement): string => {
+    // Check if element.id is a meaningful element_key from the database
+    if (element.id && element.id !== 'UNKNOWN' && element.id.trim() !== '') {
+      // Check if it's a UUID pattern (8-4-4-4-12 hex characters with dashes)
+      const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      
+      // If it's not a UUID, it's likely a meaningful element_key from the database
+      if (!uuidPattern.test(element.id)) {
+        return element.id;
+      }
+    }
+    
+    // If the element.id is "UNKNOWN", empty, or a UUID, try to generate a better name
+    if (!element.id || element.id === 'UNKNOWN' || element.id.trim() === '') {
+      // Try to create a meaningful name from available data
+      let name = '';
+      // First, try to use text content if it's meaningful
+      if (element.text && element.text !== '[null]' && element.text.trim() !== '') {
+        const text = element.text.trim();
+        if (text.length <= 30) {
+          name = `${element.tag}: "${text}"`;
+        } else {
+          name = `${element.tag}: "${text.substring(0, 27)}..."`;
+        }
+      }
+      // Try to extract meaningful info from selectors
+      else if (element.cssSelector || element.xpath) {
+        const selector = element.cssSelector || element.xpath || '';
+        // Extract ID from CSS selector like #item_5_title_link
+        const idMatch = selector.match(/#([a-zA-Z0-9_-]+)/);
+        if (idMatch) {
+          name = `${element.tag}#${idMatch[1]}`;
+        }
+        // Extract ID from XPath like [@id="item_5_title_link"]
+        else {
+          const xpathIdMatch = selector.match(/@id\s*=\s*["']([^"']+)["']/);
+          if (xpathIdMatch) {
+            name = `${element.tag}#${xpathIdMatch[1]}`;
+          }
+          // Extract class from selector
+          else {
+            const classMatch = selector.match(/\.([a-zA-Z0-9_-]+)/);
+            if (classMatch) {
+              name = `${element.tag}.${classMatch[1]}`;
+            }
+            // Extract name attribute from XPath
+            else {
+              const xpathNameMatch = selector.match(/@name\s*=\s*["']([^"']+)["']/);
+              if (xpathNameMatch) {
+                name = `${element.tag}[name="${xpathNameMatch[1]}"]`;
+              }
+            }
+          }
+        }
+      }
+      // Try to use meaningful attributes
+      else if (element.attributes) {
+        const attrs = element.attributes;
+        if (attrs.id) {
+          name = `${element.tag}#${attrs.id}`;
+        } else if (attrs.name) {
+          name = `${element.tag}[name="${attrs.name}"]`;
+        } else if (attrs.class) {
+          const classes = attrs.class.split(' ').filter((c: string) => c && !c.startsWith('mcp-'));
+          if (classes.length > 0) {
+            name = `${element.tag}.${classes[0]}`;
+          }
+        } else if (attrs.placeholder) {
+          name = `${element.tag}[placeholder="${attrs.placeholder}"]`;
+        } else if (attrs.type) {
+          name = `${element.tag}[type="${attrs.type}"]`;
+        }
+      }
+      // Fallback to just the tag with a sequential identifier
+      if (!name) {
+        name = `${element.tag} element`;
+      }
+      return name;
+    }
+    
+    // Use the original ID if it's meaningful (fallback case)
+    return element.id;
+>>>>>>> Stashed changes
   };
 
   // Helper function to render selector with dynamic content detection
@@ -1079,8 +1557,20 @@ const MCPElementsViewer: React.FC = () => {
   // Helper function to get health status with score
   const getElementHealthStatus = (element: RecordedElement): { status: 'healthy' | 'warning' | 'error', score: number, label: string } => {
     // First check if element is in review queue - this overrides health score
+<<<<<<< Updated upstream
     const reviewQueue = JSON.parse(localStorage.getItem('reviewQueue') || '[]');
     const isInQueue = reviewQueue.some((item: any) => item.elementId === element.id);
+=======
+    // Ensure reviewQueue is always treated as an array
+    const queueArray = Array.isArray(reviewQueue) ? reviewQueue : [];
+    const isInQueue = queueArray.some((item: any) => {
+      // Check multiple possible field mappings for element identification
+      return item.element_id === element.id || 
+             item.element_key === element.id || 
+             item.elementId === element.id ||
+             item.id === element.id;
+    });
+>>>>>>> Stashed changes
     
     if (isInQueue) {
       return { 
@@ -1156,15 +1646,204 @@ const MCPElementsViewer: React.FC = () => {
     return { status, score: healthScore, label };
   };
 
+<<<<<<< Updated upstream
   // Keep the original boolean function for filtering
   const isElementHealthy = (element: RecordedElement): boolean => {
     return getElementHealthStatus(element).score >= 70;
+=======
+  // Load review queue data from MCP
+  const loadReviewQueue = useCallback(async () => {
+    if (!client) return;
+    
+    try {
+      const result = await client.getPendingReviews();
+      
+      // Ensure result is always an array
+      let queueData = [];
+      if (Array.isArray(result)) {
+        queueData = result;
+      } else if (result && Array.isArray(result.data)) {
+        queueData = result.data;
+      } else if (result && Array.isArray(result.items)) {
+        queueData = result.items;
+      }
+      
+      setReviewQueue(queueData);
+    } catch (error) {
+      setReviewQueue([]);
+    }
+  }, [client]);
+
+  // Load elements from SQL Backend
+  const loadElements = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      // Check if SQL backend is available
+      const isHealthy = await sqlApiClient.healthCheck();
+      if (!isHealthy) {
+        throw new Error('SQL backend is not available - please ensure the backend server is running');
+      }
+      // Load from SQL backend
+      const response = await sqlApiClient.getAllElements({ limit: 1000 });
+      // Handle different response formats
+      let elementsData = [];
+      if (response && typeof response === 'object') {
+        if (response.success && response.data) {
+          // Standard ApiResponse format: {success: true, data: [...]}
+          elementsData = response.data;
+        } else if (Array.isArray(response)) {
+          // Direct array response: [{...}, {...}]
+          elementsData = response;
+        } else {
+          throw new Error(`Unexpected response format: ${JSON.stringify(response).substring(0, 100)}...`);
+        }
+      } else {
+        throw new Error('Invalid response from server');
+      }
+      if (elementsData && elementsData.length > 0) {
+        // Filter out inactive/deleted elements
+        const hasIsActiveField = 'is_active' in elementsData[0];
+        if (hasIsActiveField) {
+          const originalCount = elementsData.length;
+          const activeCount = elementsData.filter(el => el.is_active === true).length;
+          const inactiveCount = elementsData.filter(el => el.is_active === false).length;
+          // Only show active elements
+          elementsData = elementsData.filter(el => el.is_active !== false);
+        }
+        // Convert API elements to frontend format
+        const frontendElements = elementsData.map((apiElement, index) => {
+          try {
+            // Handle both database format and simple API format
+            if (apiElement.logical_key && apiElement.timestamp_recorded) {
+              // Database format - use existing conversion
+              // Convert database element to frontend format
+              return {
+                id: apiElement.logical_key || apiElement.id,
+                dbId: apiElement.id,
+                tag: apiElement.tag || 'unknown',
+                text: apiElement.text_content || apiElement.text || '',
+                cssSelector: apiElement.css_selector || '',
+                xpath: apiElement.xpath || '',
+                href: apiElement.href || '',
+                src: apiElement.src || '',
+                page: apiElement.page || 'unknown',
+                isActive: apiElement.is_active !== false,
+                selectors: apiElement.selectors || [],
+                attributes: apiElement.attributes || {},
+                timestamp: apiElement.timestamp || Date.now()
+              } as RecordedElement;
+            } else {
+              // Simple API format - convert directly
+              return {
+                id: apiElement.id || `element_${index}`,
+                dbId: apiElement.id || `element_${index}`,
+                tag: apiElement.tag || 'unknown',
+                text: apiElement.text || apiElement.text_content || '',
+                cssSelector: apiElement.css_selector || '',
+                xpath: apiElement.xpath || '',
+                href: apiElement.href || '',
+                src: apiElement.src || '',
+                page: apiElement.page || 'unknown',
+                isActive: apiElement.is_active !== false,
+                selectors: apiElement.selectors || [apiElement.css_selector, apiElement.xpath].filter(Boolean),
+                attributes: apiElement.attributes || {},
+                timestamp: apiElement.timestamp_recorded ? 
+                  new Date(apiElement.timestamp_recorded).getTime() : 
+                  Date.now()
+              } as RecordedElement;
+            }
+          } catch (conversionError) {
+            // Return a minimal element to avoid breaking the UI
+            return {
+              id: `error_element_${index}`,
+              dbId: apiElement.id || `error_element_${index}`,
+              tag: 'error',
+              text: 'Error loading element',
+              cssSelector: '',
+              xpath: '',
+              href: '',
+              src: '',
+              page: 'unknown',
+              isActive: true,
+              selectors: [],
+              attributes: {},
+              timestamp: Date.now()
+            } as RecordedElement;
+          }
+        });
+        setElements(frontendElements);
+        // Force immediate filtering after elements are loaded
+        // This will trigger the useEffect above
+        // Log some stats for debugging
+        const pages = new Set(frontendElements.map(e => e.page));
+        const tags = new Set(frontendElements.map(e => e.tag));
+      } else {
+        setElements([]);
+      }
+    } catch (error: any) {setError(`Failed to load elements: ${error.message}`);
+      setElements([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+  // Handle element selection
+  const handleElementClick = (element: RecordedElement) => {
+    // Navigate using the database UUID, not the meaningful name
+    const elementUUID = element.dbId || element.id;
+    navigate(`/review/${elementUUID}`);
+  };
+  // Delete element
+  const deleteElement = async (elementId: string, event: React.MouseEvent) => {
+    event.stopPropagation(); // Prevent card click
+    if (!window.confirm(`Are you sure you want to delete element "${elementId}"?`)) {
+      return;
+    }
+    try {
+      // Find the element in our current list to get the database ID
+      const elementToDelete = elements.find(e => e.id === elementId);
+      if (!elementToDelete) {
+        throw new Error(`Element "${elementId}" not found in current list`);
+      }
+      if (!elementToDelete.dbId) {
+        throw new Error(`Element "${elementId}" is missing database ID (dbId: ${elementToDelete.dbId})`);
+      }
+      // Try to delete from SQL backend first
+      const isHealthy = await sqlApiClient.healthCheck();
+      if (!isHealthy) {
+        throw new Error('SQL backend not available');
+      }
+      const deleteResponse = await sqlApiClient.deleteElement(String(elementToDelete.dbId));
+      if (!deleteResponse.success) {
+        throw new Error(deleteResponse.error || 'Failed to delete from database');
+      }
+      // Only update local state if database deletion succeeded
+      const updatedElements = elements.filter(e => e.id !== elementId);
+      setElements(updatedElements);
+      // Handle sync relationships for deleted element
+      try {
+        const { elementPromptSyncService } = await import('../../../shared/services/elementPromptSyncService');
+        const syncResult = await elementPromptSyncService.handleDeletedElement(elementId);
+        if (syncResult.alternativeFound) {
+          alert(`Element deleted successfully!\n\n${syncResult.message}`);
+        } else if (syncResult.success) {
+          if (syncResult.message.includes('prompts may need manual review')) {
+            alert(`Element deleted.\n\n${syncResult.message}`);
+          }
+        }
+      } catch (syncError) {// Don't block deletion if sync fails
+      }
+    } catch (error: any) {// Show detailed error to user
+      alert(`Failed to delete element "${elementId}": ${error.message}\n\nThe element was not removed to keep UI in sync with database.`);
+    }
+>>>>>>> Stashed changes
   };
 
 
 
   useEffect(() => {
     loadElements();
+<<<<<<< Updated upstream
   }, [loadElements]);
 
   // Listen for review queue changes and force re-render
@@ -1172,6 +1851,22 @@ const MCPElementsViewer: React.FC = () => {
     const handleStorageChange = (e: StorageEvent) => {
       if (e.key === 'reviewQueue') {
         setReviewQueueVersion(prev => prev + 1);
+=======
+    loadReviewQueue();
+  }, [loadElements, loadReviewQueue]);
+  // Get unique pages for filter dropdown with improved handling
+  const allPages = React.useMemo(() => {
+    if (loading || elements.length === 0) {
+      return [];
+    }
+    const pageSet = new Set<string>();
+    elements.forEach(element => {
+      const page = (element.page || 'unknown').trim();
+      if (page) {
+        pageSet.add(page);
+      } else {
+        pageSet.add('unknown');
+>>>>>>> Stashed changes
       }
     };
 
@@ -1241,7 +1936,28 @@ const MCPElementsViewer: React.FC = () => {
 
   const totalElements = elements.length;
   const filteredCount = filteredElements.length;
+<<<<<<< Updated upstream
 
+=======
+  const healthyCount = elements.filter(e => getElementHealthStatus(e).status === 'healthy').length;
+  const warningCount = elements.filter(e => getElementHealthStatus(e).status === 'warning').length;
+  const errorCount = elements.filter(e => getElementHealthStatus(e).status === 'error').length;
+  const clearFilters = () => {
+    setSearchTerm('');
+    setDebouncedSearchTerm('');
+    setSelectedPage('all');
+    setHealthFilter('all');
+    // No need to manually set filteredElements since useMemo will handle it
+  };
+
+  const handleGetChromeExtension = () => {
+    navigate('/chrome-extension');
+  };
+
+  const handleViewExtensionDocs = () => {
+    window.open('https://github.com/wake049/capstone-self-healing/blob/main/chrome-extension/README.md', '_blank');
+  };
+>>>>>>> Stashed changes
   return (
     <Container>
       <MainContent>
@@ -1343,6 +2059,7 @@ const MCPElementsViewer: React.FC = () => {
               </ErrorMessage>
             </div>
           )}
+<<<<<<< Updated upstream
 
           {!loading && filteredElements.length === 0 && !error && (
             <div style={{ padding: '40px', textAlign: 'center', color: '#6c757d' }}>
@@ -1448,6 +2165,192 @@ const MCPElementsViewer: React.FC = () => {
           </EditForm>
         )}
       </MainContent>
+=======
+          {/* Content */}
+          <Content>
+            {activeTab === 'overview' && (
+              <>
+                {loading && (
+                  <LoadingContainer>
+                    <LoadingSpinner />
+                    <LoadingText>Loading elements from database...</LoadingText>
+                  </LoadingContainer>
+                )}
+                {!loading && error && (
+                  <ErrorMessage>
+                    <div>
+                      <strong>Error loading elements:</strong> {error}
+                    </div>
+                    <SecondaryButton onClick={loadElements}>
+                      <RefreshCw size={16} />
+                      Retry
+                    </SecondaryButton>
+                  </ErrorMessage>
+                )}
+                {!loading && filteredElements.length === 0 && !error && (
+                  <EmptyState>
+                    <EmptyStateIcon>🗂️</EmptyStateIcon>
+                    <EmptyStateTitle>
+                      {elements.length === 0 ? 'No Elements Found' : 'No Matching Elements'}
+                    </EmptyStateTitle>
+                    <EmptyStateText>
+                      {elements.length === 0 
+                        ? 'No recorded elements are available. Start recording elements using the Chrome Extension to see them here.'
+                        : 'No elements match your current search and filter criteria. Try adjusting your search terms or clearing filters.'
+                      }
+                    </EmptyStateText>
+                    
+                    {elements.length === 0 && (
+                      <ChromeExtensionPromo>
+                        <PromoIcon>
+                          <Chrome size={48} />
+                        </PromoIcon>
+                        <PromoTitle>Get Started with Our Chrome Extension</PromoTitle>
+                        <PromoDescription>
+                          Install our Chrome extension to easily record UI elements from any webpage 
+                          and build a comprehensive element repository for your test framework. 
+                          The extension captures selectors, attributes, and context automatically.
+                        </PromoDescription>
+                        
+                        <PromoFeatures>
+                          <PromoFeature>
+                            <Activity size={16} />
+                            Record elements with one click
+                          </PromoFeature>
+                          <PromoFeature>
+                            <Zap size={16} />
+                            Generate intelligent selectors
+                          </PromoFeature>
+                          <PromoFeature>
+                            <Shield size={16} />
+                            Multiple selector strategies
+                          </PromoFeature>
+                          <PromoFeature>
+                            <Database size={16} />
+                            Automatic repository sync
+                          </PromoFeature>
+                        </PromoFeatures>
+                        
+                        <PromoButtons>
+                          <PromoButton $variant="primary" onClick={handleGetChromeExtension}>
+                            <Eye size={16} />
+                            Learn About Extension
+                          </PromoButton>
+                          <PromoButton $variant="secondary" onClick={handleViewExtensionDocs}>
+                            <ExternalLink size={16} />
+                            View Documentation
+                          </PromoButton>
+                        </PromoButtons>
+                      </ChromeExtensionPromo>
+                    )}
+                    
+                    {elements.length === 0 && (
+                      <PrimaryButton onClick={loadElements}>
+                        <RefreshCw size={16} />
+                        Refresh Elements
+                      </PrimaryButton>
+                    )}
+                  </EmptyState>
+                )}
+                {!loading && filteredElements.length > 0 && (
+                  <ElementGrid key={renderKey}>
+                    {(() => {
+                      // Log detailed element data for debugging
+                      if (filteredElements.length > 0) {
+                      }
+                      return filteredElements.map((element) => {
+                        const healthStatus = getElementHealthStatus(element);
+                        return (
+                          <ElementCard 
+                            key={element.id} 
+                            onClick={() => handleElementClick(element)}
+                          >
+                            <ElementCardHeader>
+                              <ElementInfo>
+                                {element.id && element.id !== 'UNKNOWN' && (
+                                  <ElementId>
+                                  {getElementDisplayName(element)}
+                                </ElementId>
+                              )}
+                              <ElementTag>{element.tag}</ElementTag>
+                            </ElementInfo>
+                            <HealthBadge status={healthStatus.status} title={`Health Score: ${healthStatus.score}/100`}>
+                              <HealthDot status={healthStatus.status} />
+                              {healthStatus.label}
+                            </HealthBadge>
+                          </ElementCardHeader>
+                          {element.text && element.text !== '[null]' && (
+                            <ElementText>
+                              "{element.text}"
+                            </ElementText>
+                          )}
+                          <SelectorsSection>
+                            <SectionLabel>
+                              <FileText size={12} />
+                              Selector
+                            </SectionLabel>
+                            <SelectorsList>
+                              {renderSelectorWithPolicy(element)}
+                            </SelectorsList>
+                          </SelectorsSection>
+                          <ElementFooter>
+                            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                              <PageBadge>{element.page}</PageBadge>
+                              <Timestamp>{formatTimestamp(element.timestamp || Date.now())}</Timestamp>
+                            </div>
+                            <ActionButtons>
+                              <ActionButton 
+                                variant="primary"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const elementUUID = element.dbId || element.id;
+                                  navigate(`/review/${elementUUID}`);
+                                }}
+                                title="View details"
+                              >
+                                <Eye size={12} />
+                                View
+                              </ActionButton>
+                              <ActionButton 
+                                variant="danger"
+                                onClick={(e) => deleteElement(element.id, e)}
+                                title="Delete element"
+                              >
+                                <Trash2 size={12} />
+                                Delete
+                              </ActionButton>
+                            </ActionButtons>
+                          </ElementFooter>
+                        </ElementCard>
+                      );
+                    });
+                  })()}
+                  </ElementGrid>
+                )}
+              </>
+            )}
+            {activeTab === 'health' && (
+              <EmptyState>
+                <EmptyStateIcon>📊</EmptyStateIcon>
+                <EmptyStateTitle>Health Analysis</EmptyStateTitle>
+                <EmptyStateText>
+                  Detailed health analysis and reports coming soon...
+                </EmptyStateText>
+              </EmptyState>
+            )}
+            {activeTab === 'settings' && (
+              <EmptyState>
+                <EmptyStateIcon>⚙️</EmptyStateIcon>
+                <EmptyStateTitle>Element Settings</EmptyStateTitle>
+                <EmptyStateText>
+                  Element repository settings and configuration coming soon...
+                </EmptyStateText>
+              </EmptyState>
+            )}
+          </Content>
+        </MainContent>
+      </Layout>
+>>>>>>> Stashed changes
     </Container>
   );
 };

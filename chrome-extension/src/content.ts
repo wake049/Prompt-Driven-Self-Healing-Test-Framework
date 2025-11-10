@@ -10,6 +10,55 @@ import type {
 } from './types';
 import apiClient from './api/api-client';
 
+// Signal extension presence to web pages
+// This helps the React frontend detect if the extension is installed
+(function signalExtensionPresence() {
+  // Method 1: Set a global variable
+  (window as any).mcpExtensionInstalled = true;
+  (window as any).mcpExtensionVersion = '0.6.0';
+  
+  // Method 2: Add a data attribute to document
+  document.documentElement.setAttribute('data-mcp-extension', 'installed');
+  document.documentElement.setAttribute('data-mcp-extension-version', '0.6.0');
+  
+  // Method 3: Dispatch a custom event
+  const extensionEvent = new CustomEvent('mcp-extension-loaded', {
+    detail: { 
+      version: '0.6.0',
+      timestamp: Date.now(),
+      extensionId: chrome.runtime?.id || 'unknown'
+    }
+  });
+  document.dispatchEvent(extensionEvent);
+  
+  // Method 4: Listen for detection requests from the web page
+  window.addEventListener('mcp-extension-check', (event) => {
+    const responseEvent = new CustomEvent('mcp-extension-response', {
+      detail: {
+        installed: true,
+        version: '0.6.0',
+        timestamp: Date.now(),
+        originalRequest: (event as CustomEvent).detail
+      }
+    });
+    window.dispatchEvent(responseEvent);
+  });
+  
+  // Method 5: Add to localStorage as a backup
+  try {
+    localStorage.setItem('mcp-extension-status', JSON.stringify({
+      installed: true,
+      version: '0.6.0',
+      timestamp: Date.now(),
+      extensionId: chrome.runtime?.id || 'unknown'
+    }));
+  } catch (e) {
+    // localStorage might not be available
+  }
+  
+  console.log('[MCP Extension] Content script loaded and presence signaled');
+})();
+
 
 // Stable identity + fingerprint helpers (M4)
 // ------------------------------
@@ -35,27 +84,14 @@ function extractIdentity(el: Element): ElementIdentity {
   // Get basic tag from the original element
   ident.tag = el.tagName?.toLowerCase?.();
   
-  // Debug: Let's see what we're actually working with
-  console.log(` DEBUG: Starting identity extraction from element:`, {
-    element: el,
-    tagName: el.tagName,
-    id_property: (el as HTMLElement).id,
-    id_getAttribute: el.getAttribute('id'),
-    dataTest_getAttribute: el.getAttribute('data-test'),
-    dataTestId_getAttribute: el.getAttribute('data-testid'),
-    allAttributes: Array.from(el.attributes).map(attr => `${attr.name}="${attr.value}"`),
-    textContent: el.textContent?.trim()
-  });
+
 
   // Walk up the DOM tree to find a stable identifier
   while (node && node !== document.body) {
-    console.log(` Checking node: ${node.tagName.toLowerCase()} with id="${node.id || 'none'}"`);
-    
     // Priority 1: ID attribute (should be unique)
     const id = node.getAttribute('id') || (node as HTMLElement).id;
     if (id && id.trim()) {
       ident.id = id.trim();
-      console.log(` Found ID in ancestor: ${id} (${node.tagName.toLowerCase()})`);
       break;
     }
     
@@ -63,7 +99,6 @@ function extractIdentity(el: Element): ElementIdentity {
     const dataTest = node.getAttribute('data-test');
     if (dataTest && dataTest.trim()) {
       ident['data-test'] = dataTest.trim();
-      console.log(` Found data-test in ancestor: ${dataTest} (${node.tagName.toLowerCase()})`);
       break;
     }
     
@@ -71,7 +106,6 @@ function extractIdentity(el: Element): ElementIdentity {
     const dataTestId = node.getAttribute('data-testid');
     if (dataTestId && dataTestId.trim()) {
       ident['data-testid'] = dataTestId.trim();
-      console.log(` Found data-testid in ancestor: ${dataTestId} (${node.tagName.toLowerCase()})`);
       break;
     }
     
@@ -79,7 +113,6 @@ function extractIdentity(el: Element): ElementIdentity {
     const name = node.getAttribute('name');
     if (name && name.trim()) {
       ident.name = name.trim();
-      console.log(` Found name in ancestor: ${name} (${node.tagName.toLowerCase()})`);
       break;
     }
     
@@ -87,7 +120,6 @@ function extractIdentity(el: Element): ElementIdentity {
     const ariaLabel = node.getAttribute('aria-label');
     if (ariaLabel && ariaLabel.trim()) {
       ident['aria-label'] = ariaLabel.trim();
-      console.log(` Found aria-label in ancestor: ${ariaLabel} (${node.tagName.toLowerCase()})`);
       break;
     }
     
@@ -99,14 +131,12 @@ function extractIdentity(el: Element): ElementIdentity {
   const role = el.getAttribute('role');
   if (role && role.trim()) {
     ident.role = role.trim();
-    console.log(` Captured role: ${role}`);
   }
   
   // Priority 7: href for links (check original element only)
   const href = el.getAttribute('href');
   if (href && href !== '#' && href.trim()) {
     ident.href = href.trim();
-    console.log(` Captured href: ${href}`);
   }
   
   // Only use text content if we don't have a unique identifier
@@ -114,20 +144,14 @@ function extractIdentity(el: Element): ElementIdentity {
     const text = el.textContent?.trim().split(/\s+/).slice(0,3).join(' ').toLowerCase();
     if (text) {
       ident.text = text;
-      console.log(` Captured text: ${text}`);
     }
     
     // Class hint as fallback
     const cls = (el as HTMLElement).classList?.[0];
     if (cls) {
       ident.class_hint = cls.toLowerCase();
-      console.log(` Captured class_hint: ${cls}`);
     }
-  } else {
-    console.log(`⏭️ Skipping text content - have unique identifier`);
   }
-  
-  console.log(` Final identity object:`, ident);
   
   return ident;
 }
@@ -144,14 +168,6 @@ async function makeLogicalKey(page: string, ident: ElementIdentity): Promise<str
   const enc = new TextEncoder().encode(raw);
   const digest = await crypto.subtle.digest('SHA-1', enc);
   const logicalKey = [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2,'0')).join('');
-  
-  // Debug logging
-  console.log(`🔑 makeLogicalKey:`, {
-    page,
-    identity: ident,
-    rawString: raw,
-    logicalKey: logicalKey.substring(0, 12) + '...' // Show first 12 chars
-  });
   
   return logicalKey;
 }
@@ -475,11 +491,6 @@ function discoverElements(max = 500): Candidate[] {
   // Combine both sets and remove duplicates
   const allElements = new Set([...interactiveElements, ...contentElements]);
   
-  console.log(` Element Discovery Stats:
-    - Interactive elements: ${interactiveElements.length}
-    - Content elements: ${contentElements.length}
-    - Combined unique elements: ${allElements.size}`);
-  
   // Filter out meaningless container elements
   const filteredElements = Array.from(allElements).filter(el => {
     // Always keep interactive elements
@@ -508,14 +519,12 @@ function discoverElements(max = 500): Candidate[] {
           
           // If the child has meaningful attributes, skip the parent container
           if (childHasId || childHasClasses || childHasDataAttrs) {
-            console.log(`🗑️ Skipping meaningless container: ${tag} wrapping ${child.tagName.toLowerCase()}#${(child as HTMLElement).id || 'no-id'}.${(child as HTMLElement).className || 'no-class'}`);
             return false;
           }
         }
         
         // Also skip if it's a container with multiple children but no direct text
         if (childElements.length > 1 && !hasDirectText) {
-          console.log(`🗑️ Skipping generic container: ${tag} with ${childElements.length} children but no direct text or attributes`);
           return false;
         }
       }
@@ -889,16 +898,17 @@ class ElementFinder {
   private elementRepo: Record<string, ElementData> = {};
   constructor() { this.loadElementRepo(); }
   private async loadElementRepo() {
-    try { const response = await safeSendMessage({ type: 'GET_ELEMENT_REPO' });
-      if (response?.success) this.elementRepo = response.data;
-    } catch (e) { console.warn('Failed to load element repository:', e); }
+    const response = await safeSendMessage({ type: 'GET_ELEMENT_REPO' });
+      if (response?.success) 
+        this.elementRepo = response.data;
   }
   public async findElement(elementId: string): Promise<Element | null> {
     const elementData = this.elementRepo[elementId];
     if (!elementData) return null;
     for (const selector of elementData.selectors) {
-      try { const element = document.querySelector(selector); if (element) return element as Element; }
-      catch (e) { console.warn(`Invalid selector for '${elementId}': ${selector}`, e); }
+        const element = document.querySelector(selector); 
+        if (element) 
+          return element as Element; 
     }
     return this.findElementWithFallback(elementData);
   }
@@ -931,8 +941,6 @@ class ElementFinder {
       if (idMatches.length === 1) {
         selectors.push(idSelector);
       } else {
-        // ID is not unique, add warning but still include it
-        console.warn(`Non-unique ID found: ${h.id}, matches ${idMatches.length} elements`);
         selectors.push(idSelector);
       }
     }
@@ -1184,7 +1192,6 @@ class DOMActionExecutor {
   private setupRecording() {
     this.createRecordingIndicator();
     document.addEventListener('click', async (event) => {
-      console.log(' CLICK HANDLER TRIGGERED - Recording:', this.isRecording);
       if (!this.isRecording || !this.recordingCallback) return;
       event.preventDefault();
       event.stopPropagation();
@@ -1208,7 +1215,6 @@ class DOMActionExecutor {
         'a[id],button[id],[data-test],[data-testid],[role="button"],[name],[aria-label],label,input,select,textarea'
       );
       if (promoted) {
-        console.log(`🔄 Promoted element from ${element.tagName.toLowerCase()} to ${promoted.tagName.toLowerCase()} with id="${promoted.id || 'none'}"`);
         element = promoted;
       }
 
@@ -1224,12 +1230,10 @@ class DOMActionExecutor {
       try {
         const testElement = document.querySelector(primaryCssSelector);
         if (testElement !== element) {
-          console.warn(`Primary selector mismatch! Expected element:`, element, `Got:`, testElement);
           // Fall back to a more specific selector
           primaryCssSelector = this.generateUniqueSelector(element);
         }
       } catch (e) {
-        console.warn(`Invalid primary selector: ${primaryCssSelector}`, e);
         primaryCssSelector = this.generateUniqueSelector(element);
       }
 
@@ -1240,11 +1244,9 @@ class DOMActionExecutor {
       try {
         const result = document.evaluate(primaryXPath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
         if (result.singleNodeValue !== element) {
-          console.warn(`XPath mismatch! Expected element:`, element, `Got:`, result.singleNodeValue);
           primaryXPath = this.generateUniqueXPath(element);
         }
       } catch (e) {
-        console.warn(`Invalid XPath: ${primaryXPath}`, e);
         primaryXPath = this.generateUniqueXPath(element);
       }
 
@@ -1265,11 +1267,8 @@ class DOMActionExecutor {
       try {
         const sessionId = await ensureSessionId();
         const pageKey = location.hostname + location.pathname;
-        console.log('🔑 About to call extractIdentity on element:', element);
         const identity = extractIdentity(element);
-        console.log('🔑 extractIdentity returned:', identity);
         const logical_key = await makeLogicalKey(pageKey, identity);
-        console.log('🔑 Generated logical_key:', logical_key.substring(0, 12) + '...');
 
         const backendPayload = {
           id: recordedElement.id,
@@ -1301,7 +1300,7 @@ class DOMActionExecutor {
         }
 
       } catch (e) {
-        console.warn('Backend record failed; will still send to background:', e);
+        // Continue with local recording if backend fails
       }
 
       // Keep your original extension flow & local persistence
@@ -1533,7 +1532,6 @@ class DOMActionExecutor {
   }
 
   private async declareCurrentPage() {
-    try {
       const pageTitle = document.title || 'Untitled Page';
       const currentUrl = window.location.href;
       const pathname = window.location.pathname;
@@ -1559,9 +1557,6 @@ class DOMActionExecutor {
       this.currentPageName = pageName;
       await safeSendMessage({ type: 'PAGE_DECLARE', payload: { page: pageName, url: currentUrl, timestamp: Date.now() } });
       showTemporaryNotification(' Page Context Set', `Recording on: ${pageName}`, '#2196f3', 2000);
-    } catch (e) {
-      console.warn('Failed to declare current page:', e);
-    }
   }
 
   // DOM extraction + AI suggestion helpers (unchanged except tiny comments)
@@ -1611,14 +1606,11 @@ class DOMActionExecutor {
   async suggestOptimizedSelector(intent: string): Promise<void> {
     const startTime = Date.now();
     try {
-      // If no intent provided, just do local discovery without AI service
-      if (!intent || intent.trim() === '') {
-        console.log('No intent provided, performing local element discovery');
-        const allCandidates = discoverElements(500);
-        const removeOverlay = showOverlay(allCandidates);
-        setTimeout(() => { try { removeOverlay(); } catch {} }, 5000);
-        
-        if (allCandidates.length === 0) {
+        // If no intent provided, just do local discovery without AI service
+        if (!intent || intent.trim() === '') {
+          const allCandidates = discoverElements(500);
+          const removeOverlay = showOverlay(allCandidates);
+          setTimeout(() => { try { removeOverlay(); } catch {} }, 5000);        if (allCandidates.length === 0) {
           showTemporaryNotification(' No Elements Found','No interactive elements discovered on this page','#f44336',3000);
           return;
         }
@@ -1656,10 +1648,7 @@ class DOMActionExecutor {
               const pageKey = location.hostname + location.pathname;
               
               // Use extractIdentity on the actual DOM element for proper identity extraction
-              console.log('🤖 Processing AI candidate element:', candidate.element);
               const identity = extractIdentity(candidate.element as Element);
-              
-              console.log('🤖 AI-optimized identity extracted:', identity);
               
               const logical_key = await makeLogicalKey(pageKey, identity);
 
@@ -1681,16 +1670,15 @@ class DOMActionExecutor {
               };
 
               await apiClient.recordElement(backendPayload, sessionId);
-              console.log(` Recorded discovered element: ${recordedElement.id}`);
             } catch (e) {
-              console.warn('Backend record failed for discovered element:', e);
+              // Continue with local storage if backend fails
             }
 
             // Also send to background script for local storage
             await safeSendMessage({ type: 'RECORDING_DATA', payload: recordedElement });
             storedCount++;
           } catch (err) {
-            console.warn('Failed to store candidate:', candidate, err);
+            // Skip elements that fail to process
           }
         }
 
@@ -1735,7 +1723,9 @@ class DOMActionExecutor {
 
             await safeSendMessage({ type: 'RECORDING_DATA', payload: recordedElement });
             storedCount++;
-          } catch (err) { console.warn('Failed to store candidate:', candidate, err); }
+          } catch (err) { 
+            // Skip elements that fail to process
+          }
         }
         if (batchIndex < totalBatches - 1) await new Promise(r => setTimeout(r, 200));
       }
@@ -1744,7 +1734,6 @@ class DOMActionExecutor {
                          : `Found and stored ${storedCount} interactive elements on the page`,
         '#4caf50', 5000);
     } catch (error) {
-      console.error(' Robust discovery failed:', error);
       showTemporaryNotification(' Discovery Failed', `Error during element discovery: ${error instanceof Error ? error.message : String(error)}`, '#f44336', 5000);
     }
   }
@@ -1789,14 +1778,15 @@ class DOMActionExecutor {
               await safeSendMessage({ type: 'RECORDING_DATA', payload: recordedElement });
               ok++;
             }
-          } catch (err) { console.error('Failed to process suggestion:', suggestion, err); }
+          } catch (err) { 
+            // Skip failed suggestions
+          }
         }
         showTemporaryNotification(' AI Elements Stored', `${ok} AI-suggested elements saved to database`, '#2196f3', 3000);
       } else {
         throw new Error(response?.error || 'Failed to get suggestions');
       }
     } catch (error) {
-      console.error('Failed to suggest elements:', error);
       showTemporaryNotification(' AI Suggestion Failed','Could not analyze page structure','#f44336',3000);
     }
   }
@@ -1840,8 +1830,7 @@ chrome.runtime.onMessage.addListener(async (request, _sender, sendResponse) => {
     }
     if (request.type === 'START_RECORDING') {
       await domActionExecutor.startRecording(async (recordedElement) => {
-        try { await safeSendMessage({ type: 'RECORDING_DATA', payload: recordedElement }); } 
-        catch (e) { console.error('Failed to send recording data:', e); }
+        await safeSendMessage({ type: 'RECORDING_DATA', payload: recordedElement });
       });
       sendResponse({ success: true, message: 'Recording started' }); 
       return true;
@@ -1850,6 +1839,23 @@ chrome.runtime.onMessage.addListener(async (request, _sender, sendResponse) => {
       domActionExecutor.stopRecording();
       showTemporaryNotification('⏹️ Recording Stopped','Element recording has been stopped.','#ff9800',2000);
       sendResponse({ success: true, message: 'Recording stopped' }); 
+      return true;
+    }
+    // NEW: Extract all elements for AI analysis
+    if (request.type === 'EXTRACT_ALL_ELEMENTS') {
+      try {
+        const allElements = extractAllElementsForAI();
+        sendResponse({ 
+          success: true, 
+          data: allElements,
+          message: `Extracted ${allElements.elementCount} elements for AI analysis`
+        });
+      } catch (e) {
+        sendResponse({ 
+          success: false, 
+          error: e instanceof Error ? e.message : 'Failed to extract elements'
+        });
+      }
       return true;
     }
     if (request.type === 'SUGGEST_ELEMENTS') {
@@ -1870,6 +1876,473 @@ chrome.runtime.onMessage.addListener(async (request, _sender, sendResponse) => {
     return false;
   }
 });
+
+/**
+ * NEW: Extract all elements for AI analysis
+ * This is the core function that gets all page elements and formats them for AI processing
+ */
+function extractAllElementsForAI(): any {
+  
+  // Get all potentially interesting elements
+  const selectors = [
+    // Interactive elements
+    'button', 'input', 'select', 'textarea', 'a[href]', '[role="button"]', '[onclick]',
+    // Content elements
+    'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'span', 'div',
+    // Form elements
+    'form', 'label', 'fieldset', 'legend',
+    // Lists and tables
+    'ul', 'ol', 'li', 'table', 'tr', 'td', 'th',
+    // Media and embedded content
+    'img', 'video', 'audio', 'iframe', 'embed',
+    // Semantic elements
+    'nav', 'header', 'footer', 'main', 'section', 'article', 'aside',
+    // Special attributes
+    '[data-test]', '[data-testid]', '[id]', '[name]', '[class*="btn"]', '[class*="button"]',
+    '[class*="menu"]', '[class*="nav"]', '[class*="price"]', '[class*="cost"]', '[class*="amount"]'
+  ];
+  
+  const foundElements = document.querySelectorAll(selectors.join(', '));
+  const elements: any[] = [];
+  const elementStats = {
+    total: foundElements.length,
+    interactive: 0,
+    withId: 0,
+    withTestId: 0,
+    withText: 0,
+    forms: 0,
+    buttons: 0,
+    links: 0,
+    inputs: 0
+  };
+
+  // Process each element
+  foundElements.forEach((element, index) => {
+      const elementData = extractElementData(element, index);
+      
+      // Update stats
+      if (elementData.isInteractive) elementStats.interactive++;
+      if (elementData.attributes?.id) elementStats.withId++;
+      if (elementData.attributes?.['data-testid'] || elementData.attributes?.['data-test']) elementStats.withTestId++;
+      if (elementData.text && elementData.text.trim()) elementStats.withText++;
+      if (elementData.tag === 'form') elementStats.forms++;
+      if (elementData.tag === 'button' || elementData.attributes?.role === 'button') elementStats.buttons++;
+      if (elementData.tag === 'a') elementStats.links++;
+      if (elementData.tag === 'input') elementStats.inputs++;
+      
+      elements.push(elementData);
+  });
+
+  const pageInfo = {
+    url: window.location.href,
+    title: document.title,
+    hostname: window.location.hostname,
+    pathname: window.location.pathname,
+    viewport: {
+      width: window.innerWidth,
+      height: window.innerHeight
+    },
+    documentSize: {
+      width: document.documentElement.scrollWidth,
+      height: document.documentElement.scrollHeight
+    }
+  };
+
+  const result = {
+    pageInfo,
+    elements,
+    elementStats,
+    elementCount: elements.length,
+    extractedAt: new Date().toISOString(),
+    extractionType: 'full_page_ai_analysis'
+  };
+
+  return result;
+}
+
+/**
+ * Extract detailed data for a single element
+ */
+function extractElementData(element: Element, index: number): any {
+  const tag = element.tagName.toLowerCase();
+  const rect = (element as HTMLElement).getBoundingClientRect();
+  
+  // Basic element info
+  const elementData: any = {
+    index,
+    tag,
+    visible: isElementVisible(element),
+    position: {
+      x: Math.round(rect.left),
+      y: Math.round(rect.top),
+      width: Math.round(rect.width),
+      height: Math.round(rect.height)
+    }
+  };
+
+  // Attributes
+  const attributes: Record<string, string> = {};
+  const meaningfulAttrs = ['id', 'class', 'name', 'type', 'role', 'data-test', 'data-testid', 
+                          'href', 'src', 'alt', 'title', 'placeholder', 'value', 'for', 
+                          'aria-label', 'aria-labelledby', 'aria-describedby'];
+  
+  meaningfulAttrs.forEach(attr => {
+    const value = element.getAttribute(attr);
+    if (value !== null && value.trim() !== '') {
+      attributes[attr] = value.trim();
+    }
+  });
+  
+  if (Object.keys(attributes).length > 0) {
+    elementData.attributes = attributes;
+  }
+
+  // Text content
+  const text = element.textContent?.trim();
+  if (text && text.length > 0) {
+    elementData.text = text.length > 200 ? text.substring(0, 200) + '...' : text;
+    elementData.textLength = text.length;
+  }
+
+  // Direct text (not from children)
+  const directText = Array.from(element.childNodes)
+    .filter(node => node.nodeType === Node.TEXT_NODE)
+    .map(node => node.textContent?.trim())
+    .filter(text => text && text.length > 0)
+    .join(' ')
+    .trim();
+  
+  if (directText) {
+    elementData.directText = directText.length > 100 ? directText.substring(0, 100) + '...' : directText;
+  }
+
+  // Interactive classification
+  const interactiveElements = ['button', 'input', 'select', 'textarea', 'a'];
+  const hasInteractiveRole = element.getAttribute('role') === 'button' || 
+                           element.hasAttribute('onclick') ||
+                           element.getAttribute('tabindex') !== null;
+  
+  elementData.isInteractive = interactiveElements.includes(tag) || hasInteractiveRole;
+
+  // Special element type classifications
+  if (tag === 'input') {
+    elementData.inputType = element.getAttribute('type') || 'text';
+    elementData.required = element.hasAttribute('required');
+  }
+
+  if (tag === 'form') {
+    elementData.method = element.getAttribute('method') || 'get';
+    elementData.action = element.getAttribute('action') || '';
+  }
+
+  if (tag === 'a') {
+    const href = element.getAttribute('href');
+    elementData.isExternalLink = href && (href.startsWith('http') || href.startsWith('//'));
+    elementData.isInternalLink = href && href.startsWith('/');
+    elementData.isAnchorLink = href && href.startsWith('#');
+  }
+
+  // Generate potential selectors
+  elementData.selectors = generateElementSelectors(element);
+
+  // Semantic analysis
+  elementData.semanticInfo = analyzeElementSemantics(element, text || '', attributes);
+
+  return elementData;
+}
+
+/**
+ * Generate multiple selector options for an element
+ */
+function generateElementSelectors(element: Element): any {
+  const selectors: any = {};
+  
+  // ID selector (highest priority)
+  const id = (element as HTMLElement).id;
+  if (id) {
+    selectors.id = `#${CSS.escape(id)}`;
+  }
+
+  // Test ID selectors
+  const testId = element.getAttribute('data-testid');
+  if (testId) {
+    selectors.testId = `[data-testid="${CSS.escape(testId)}"]`;
+  }
+
+  const dataTest = element.getAttribute('data-test');
+  if (dataTest) {
+    selectors.dataTest = `[data-test="${CSS.escape(dataTest)}"]`;
+  }
+
+  // Name selector
+  const name = element.getAttribute('name');
+  if (name) {
+    selectors.name = `[name="${CSS.escape(name)}"]`;
+  }
+
+  // Class selector
+  const className = (element as HTMLElement).className;
+  if (className && typeof className === 'string' && className.trim()) {
+    const classes = className.trim().split(/\s+/);
+    selectors.class = `.${classes.map(CSS.escape).join('.')}`;
+    
+    // Individual meaningful classes
+    const meaningfulClasses = classes.filter(cls => 
+      cls.length > 2 && 
+      !cls.match(/^[a-z0-9_-]{8,}$/i) && // Avoid generated classes
+      !cls.match(/^\w+\d+$/) // Avoid numbered classes
+    );
+    
+    if (meaningfulClasses.length > 0) {
+      selectors.meaningfulClass = `.${CSS.escape(meaningfulClasses[0])}`;
+    }
+  }
+
+  // XPath
+  selectors.xpath = generateXPath(element);
+
+  // CSS Path
+  selectors.cssPath = generateCSSPath(element);
+
+  return selectors;
+}
+
+/**
+ * Analyze semantic meaning of element
+ */
+function analyzeElementSemantics(element: Element, text: string, attributes: Record<string, string>): any {
+  const semantics: any = {};
+  const tag = element.tagName.toLowerCase();
+  
+  // Purpose classification
+  if (tag === 'button' || attributes.role === 'button') {
+    semantics.purpose = 'action';
+    semantics.actionType = classifyButtonAction(text, attributes);
+  } else if (tag === 'input') {
+    semantics.purpose = 'input';
+    semantics.inputCategory = classifyInputType(attributes);
+  } else if (tag === 'a') {
+    semantics.purpose = 'navigation';
+    semantics.linkType = classifyLinkType(attributes, text);
+  } else if (['h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(tag)) {
+    semantics.purpose = 'heading';
+    semantics.level = parseInt(tag.substring(1));
+  } else if (text && text.length > 0) {
+    semantics.purpose = 'content';
+    semantics.contentType = classifyContentType(text, attributes, element);
+  }
+
+  // Context analysis
+  semantics.context = analyzeElementContext(element);
+
+  return semantics;
+}
+
+/**
+ * Classify button action types
+ */
+function classifyButtonAction(text: string, attributes: Record<string, string>): string {
+  const textLower = text.toLowerCase();
+  
+  if (textLower.includes('submit') || attributes.type === 'submit') return 'submit';
+  if (textLower.includes('save')) return 'save';
+  if (textLower.includes('delete') || textLower.includes('remove')) return 'delete';
+  if (textLower.includes('edit')) return 'edit';
+  if (textLower.includes('cancel')) return 'cancel';
+  if (textLower.includes('close')) return 'close';
+  if (textLower.includes('login') || textLower.includes('sign in')) return 'login';
+  if (textLower.includes('logout') || textLower.includes('sign out')) return 'logout';
+  if (textLower.includes('add') && textLower.includes('cart')) return 'addToCart';
+  if (textLower.includes('buy') || textLower.includes('purchase')) return 'purchase';
+  if (textLower.includes('search')) return 'search';
+  if (textLower.includes('filter')) return 'filter';
+  if (textLower.includes('sort')) return 'sort';
+  if (textLower.includes('menu')) return 'menu';
+  
+  return 'generic';
+}
+
+/**
+ * Classify input types
+ */
+function classifyInputType(attributes: Record<string, string>): string {
+  const type = attributes.type || 'text';
+  const name = attributes.name || '';
+  const placeholder = attributes.placeholder || '';
+  
+  if (type === 'email' || name.includes('email') || placeholder.includes('email')) return 'email';
+  if (type === 'password' || name.includes('password')) return 'password';
+  if (type === 'search' || name.includes('search') || placeholder.includes('search')) return 'search';
+  if (type === 'tel' || name.includes('phone') || name.includes('tel')) return 'phone';
+  if (type === 'url' || name.includes('url') || name.includes('website')) return 'url';
+  if (type === 'number' || name.includes('age') || name.includes('quantity')) return 'number';
+  if (type === 'date' || name.includes('date')) return 'date';
+  if (name.includes('name') && name.includes('first')) return 'firstName';
+  if (name.includes('name') && name.includes('last')) return 'lastName';
+  if (name.includes('address')) return 'address';
+  if (name.includes('city')) return 'city';
+  if (name.includes('state')) return 'state';
+  if (name.includes('zip') || name.includes('postal')) return 'postalCode';
+  
+  return type;
+}
+
+/**
+ * Classify link types
+ */
+function classifyLinkType(attributes: Record<string, string>, text: string): string {
+  const href = attributes.href || '';
+  const textLower = text.toLowerCase();
+  
+  if (href.startsWith('mailto:')) return 'email';
+  if (href.startsWith('tel:')) return 'phone';
+  if (href.includes('facebook') || textLower.includes('facebook')) return 'social_facebook';
+  if (href.includes('twitter') || textLower.includes('twitter')) return 'social_twitter';
+  if (href.includes('linkedin') || textLower.includes('linkedin')) return 'social_linkedin';
+  if (href.includes('instagram') || textLower.includes('instagram')) return 'social_instagram';
+  if (href.startsWith('http') || href.startsWith('//')) return 'external';
+  if (href.startsWith('#')) return 'anchor';
+  if (href.startsWith('/')) return 'internal';
+  
+  return 'generic';
+}
+
+/**
+ * Classify content types
+ */
+function classifyContentType(text: string, attributes: Record<string, string>, element: Element): string {
+  const textLower = text.toLowerCase();
+  const className = attributes.class || '';
+  
+  // Price patterns
+  if (text.match(/^\$?\d+\.?\d*$/) || className.includes('price') || className.includes('cost')) {
+    return 'price';
+  }
+  
+  // Error/success messages
+  if (className.includes('error') || className.includes('alert') || 
+      textLower.includes('error') || textLower.includes('invalid')) {
+    return 'error';
+  }
+  
+  if (className.includes('success') || textLower.includes('success') || textLower.includes('complete')) {
+    return 'success';
+  }
+  
+  // Product/item info
+  if (className.includes('title') || className.includes('name') || 
+      element.closest('.product, .item, [class*="product"], [class*="item"]')) {
+    return 'productInfo';
+  }
+  
+  // Navigation
+  if (element.closest('nav, .nav, [class*="nav"], .menu, [class*="menu"]')) {
+    return 'navigation';
+  }
+  
+  return 'generic';
+}
+
+/**
+ * Analyze element context (parent/sibling elements)
+ */
+function analyzeElementContext(element: Element): any {
+  const context: any = {};
+  
+  // Parent context
+  const parent = element.parentElement;
+  if (parent) {
+    context.parentTag = parent.tagName.toLowerCase();
+    context.parentId = parent.id || null;
+    context.parentClass = parent.className || null;
+    
+    // Check for form context
+    const form = element.closest('form');
+    if (form) {
+      context.inForm = true;
+      context.formId = form.id || null;
+      context.formAction = form.getAttribute('action') || null;
+    }
+    
+    // Check for list context
+    const list = element.closest('ul, ol, dl');
+    if (list) {
+      context.inList = true;
+      context.listType = list.tagName.toLowerCase();
+    }
+    
+    // Check for table context
+    const table = element.closest('table');
+    if (table) {
+      context.inTable = true;
+      const cell = element.closest('td, th');
+      if (cell) {
+        context.tableCell = {
+          type: cell.tagName.toLowerCase(),
+          rowIndex: (cell.parentElement as HTMLTableRowElement)?.rowIndex,
+          cellIndex: (cell as HTMLTableCellElement).cellIndex
+        };
+      }
+    }
+  }
+  
+  // Sibling context
+  const siblings = Array.from(element.parentElement?.children || []);
+  context.siblingCount = siblings.length;
+  context.siblingIndex = siblings.indexOf(element);
+  
+  return context;
+}
+
+/**
+ * Helper function to check if element is visible
+ */
+function isElementVisible(element: Element): boolean {
+  const rect = (element as HTMLElement).getBoundingClientRect();
+  const style = window.getComputedStyle(element as HTMLElement);
+  
+  return rect.width > 0 && 
+         rect.height > 0 && 
+         style.visibility !== 'hidden' && 
+         style.display !== 'none' && 
+         style.opacity !== '0';
+}
+
+/**
+ * Generate CSS path for element
+ */
+function generateCSSPath(element: Element): string {
+  const path: string[] = [];
+  let current: Element | null = element;
+  
+  while (current && current !== document.documentElement) {
+    let selector = current.tagName.toLowerCase();
+    
+    if ((current as HTMLElement).id) {
+      selector += `#${CSS.escape((current as HTMLElement).id)}`;
+      path.unshift(selector);
+      break;
+    }
+    
+    if ((current as HTMLElement).className && typeof (current as HTMLElement).className === 'string') {
+      const classes = (current as HTMLElement).className.trim().split(/\s+/).filter(c => c);
+      if (classes.length > 0) {
+        selector += `.${classes.map(CSS.escape).join('.')}`;
+      }
+    }
+    
+    const siblings = Array.from(current.parentElement?.children || [])
+      .filter(s => s.tagName === current!.tagName);
+    if (siblings.length > 1) {
+      selector += `:nth-child(${siblings.indexOf(current) + 1})`;
+    }
+    
+    path.unshift(selector);
+    current = current.parentElement;
+  }
+  
+  return path.join(' > ');
+}
 
 window.addEventListener('beforeunload', () => {
   if (contextCheckInterval) clearInterval(contextCheckInterval);

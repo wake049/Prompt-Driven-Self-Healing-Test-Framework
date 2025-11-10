@@ -2,9 +2,13 @@
  * API Client for React Frontend to communicate with Unified MCP API Server
  * Updated to use the new unified API endpoint
  */
+<<<<<<< Updated upstream
 
 const API_BASE_URL = import.meta.env.VITE_POLICY_API_URL || 'http://localhost:8000/api/v1/policy';
 
+=======
+const API_BASE_URL = import.meta.env.VITE_POLICY_API_URL || 'https://testhelix.com/api/v1/policy';
+>>>>>>> Stashed changes
 interface ApiResponse<T = any> {
   success: boolean;
   data?: T;
@@ -133,7 +137,11 @@ class McpPolicyApiClient {
       console.log(`MCP Policy API Response:`, data);
       return data;
     } catch (error) {
+<<<<<<< Updated upstream
       console.error(`MCP Policy API Error for ${endpoint}:`, error);
+=======
+      
+>>>>>>> Stashed changes
       throw error;
     }
   }

@@ -421,7 +421,6 @@ export const PageContextList: React.FC<PageContextListProps> = ({
       
       setContexts(transformedData);
     } catch (error) {
-      console.error('Failed to load page contexts:', error);
       setError('Failed to load page contexts. Please try again.');
     } finally {
       setLoading(false);

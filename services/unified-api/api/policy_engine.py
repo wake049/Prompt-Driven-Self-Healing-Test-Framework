@@ -361,7 +361,6 @@ async def delete_policy(policy_id: str):
             raise e
         raise HTTPException(status_code=500, detail=f"Error deleting policy: {str(e)}")
 
-
 # New endpoints for the dedicated policy schema
 
 @router.get("/policy-packs", response_model=List[Dict[str, Any]])
@@ -432,7 +431,6 @@ async def list_policy_packs(project_id: Optional[str] = Query(None)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error listing policy packs: {str(e)}")
 
-
 @router.get("/policy-packs/{pack_id}/active-rules", response_model=Dict[str, Any])
 async def get_active_pack_rules(pack_id: str):
     """Get active rules for a policy pack in a flattened format for easy consumption"""
@@ -458,7 +456,6 @@ async def get_active_pack_rules(pack_id: str):
         if "not found" in str(e):
             raise e
         raise HTTPException(status_code=500, detail=f"Error fetching pack rules: {str(e)}")
-
 
 @router.get("/environments/{environment_id}/active-policies", response_model=Dict[str, Any])
 async def get_environment_active_policies(environment_id: str):
@@ -497,7 +494,6 @@ async def get_environment_active_policies(environment_id: str):
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching environment policies: {str(e)}")
-
 
 @router.post("/policy-decisions", response_model=Dict[str, Any])
 async def log_policy_decision(

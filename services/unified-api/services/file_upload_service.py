@@ -9,10 +9,6 @@ import shutil
 from pathlib import Path
 from typing import Optional, Tuple
 from fastapi import UploadFile, HTTPException
-import logging
-
-logger = logging.getLogger(__name__)
-
 
 class FileUploadService:
     """Service for managing uploaded screenshots and files"""
@@ -80,13 +76,9 @@ class FileUploadService:
             relative_path = file_path.relative_to(self.upload_dir.parent)
             # Convert Windows backslashes to forward slashes for URL compatibility
             access_url = f"/uploads/{str(relative_path).replace(chr(92), '/')}"
-            
-            logger.info(f"📁 Screenshot uploaded: {file.filename} -> {safe_filename}")
-            
             return str(file_path), access_url
             
         except Exception as e:
-            logger.error(f" Failed to upload screenshot: {str(e)}")
             raise HTTPException(status_code=500, detail=f"Failed to upload file: {str(e)}")
     
     def delete_screenshot(self, file_path: str) -> bool:
@@ -103,11 +95,9 @@ class FileUploadService:
             path = Path(file_path)
             if path.exists() and path.is_file():
                 path.unlink()
-                logger.info(f"🗑️ Screenshot deleted: {file_path}")
                 return True
             return False
         except Exception as e:
-            logger.error(f" Failed to delete screenshot: {str(e)}")
             return False
     
     def get_file_info(self, file_path: str) -> Optional[dict]:
@@ -133,7 +123,6 @@ class FileUploadService:
                 }
             return None
         except Exception as e:
-            logger.error(f" Failed to get file info: {str(e)}")
             return None
     
     def list_user_screenshots(self, user_id: str) -> list:
@@ -162,9 +151,7 @@ class FileUploadService:
             
             return screenshots
         except Exception as e:
-            logger.error(f" Failed to list user screenshots: {str(e)}")
             return []
-
 
 # Global instance
 file_upload_service = FileUploadService()

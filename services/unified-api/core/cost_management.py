@@ -12,16 +12,12 @@ Features:
 
 from __future__ import annotations
 
-import logging
 import time
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 from collections import defaultdict
 
 from schemas.enterprise import CostSummary, TenantConfig, PromptEnvelope
-
-logger = logging.getLogger(__name__)
-
 
 class CostManagementService:
     """Service for tracking costs and managing AI usage budgets"""
@@ -70,9 +66,6 @@ class CostManagementService:
         
         # Calculate cost
         cost_usd = self._calculate_cost(input_tokens, output_tokens, model)
-        
-        logger.debug(f"💰 Estimated cost: {total_tokens} tokens, ${cost_usd:.4f} USD")
-        
         return total_tokens, cost_usd
     
     def track_usage(
@@ -142,9 +135,6 @@ class CostManagementService:
             daily_tokens_used=tenant_usage['daily_tokens'],
             daily_budget_remaining=daily_budget_remaining
         )
-        
-        logger.info(f" Tracked usage for {tenant_id}: {total_tokens} tokens, ${cost_usd:.4f}")
-        
         return cost_summary
     
     def check_budget(self, tenant_id: str, estimated_tokens: int) -> Tuple[bool, Dict[str, Any]]:
@@ -180,10 +170,7 @@ class CostManagementService:
             'usage_percentage': (daily_used / daily_limit) * 100 if daily_limit > 0 else 0
         }
         
-        if not can_proceed:
-            logger.warning(f"🚫 Budget exceeded for {tenant_id}: {estimated_tokens} > {remaining} remaining")
-        
-        return can_proceed, budget_info
+        if not can_proceed:return can_proceed, budget_info
     
     def optimize_payload(self, prompt_envelope: PromptEnvelope) -> Dict[str, Any]:
         """
@@ -374,8 +361,6 @@ class CostManagementService:
             tenant_usage['daily_tokens'] = 0
             tenant_usage['daily_requests'] = 0
             tenant_usage['last_reset'] = today
-            logger.info(f"🔄 Reset daily counters for tenant {tenant_id}")
-    
     def _calculate_cache_hit_rate(self, requests: List[Dict[str, Any]]) -> float:
         """Calculate cache hit rate from recent requests"""
         

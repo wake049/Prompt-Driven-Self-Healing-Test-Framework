@@ -112,6 +112,23 @@ public class SqlElementRepository {
                                         }
                                     }
                                     
+<<<<<<< Updated upstream
+=======
+                                    // Add preferred selectors first, then fallback selectors
+                                    alternatives.addAll(preferredSelectors);
+                                    alternatives.addAll(fallbackSelectors);
+                                    
+                                    System.out.println("  Policy-aware selection: " + preferredSelectors.size() + " preferred (" + selectorPolicy + "), " + fallbackSelectors.size() + " fallback");
+                                    
+                                    // Log detailed selector analysis for debugging
+                                    if (preferredSelectors.size() > 0) {
+                                        System.out.println("  ✓ Preferred " + selectorPolicy + " selectors: " + preferredSelectors);
+                                    }
+                                    if (fallbackSelectors.size() > 0) {
+                                        System.out.println("  ⚠ Fallback selectors (policy mismatch): " + fallbackSelectors);
+                                    }
+                                    
+>>>>>>> Stashed changes
                                     break; // Found the element, no need to continue
                                 }
                             }

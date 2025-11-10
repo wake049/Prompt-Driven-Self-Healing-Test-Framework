@@ -12,7 +12,6 @@ import uuid
 
 Base = declarative_base()
 
-
 class PageContextDB(Base):
     """Database model for page contexts"""
     __tablename__ = "page_contexts"
@@ -78,7 +77,6 @@ class PageContextDB(Base):
             updated_at=self.updated_at.isoformat() if self.updated_at else None,
             created_by=self.created_by
         )
-
 
 class PageContextRepository:
     """Repository for page context database operations"""

@@ -3,7 +3,7 @@
  * Handles communication between Chrome Extension and SQL Backend
  */
 
-const API_BASE_URL = 'http://localhost:8000/api/v1';
+const API_BASE_URL = 'https://testhelix.com/api/v1';
 
 interface ApiRequestOptions {
   method?: string;
@@ -36,7 +36,6 @@ class MCPApiClient {
     };
 
     try {
-      console.log(`API Request: ${config.method || 'GET'} ${url}`);
       const response = await fetch(url, config);
       
       if (!response.ok) {
@@ -44,10 +43,8 @@ class MCPApiClient {
       }
 
       const data = await response.json();
-      console.log(`API Response:`, data);
       return data;
     } catch (error) {
-      console.error(`API Error for ${endpoint}:`, error);
       throw error;
     }
   }
@@ -113,8 +110,6 @@ class MCPApiClient {
       }
     };
 
-    console.log(' Sending element data to API:', requestBody);
-
     return this.request('/sql/record-element', {
       method: 'POST',
       body: JSON.stringify(requestBody)
@@ -129,7 +124,6 @@ class MCPApiClient {
         const result = await this.recordElement(element, sessionId);
         results.push(result);
       } catch (error) {
-        console.warn('Failed to record element:', element, error);
         results.push({ success: false, error: error instanceof Error ? error.message : String(error) });
       }
     }

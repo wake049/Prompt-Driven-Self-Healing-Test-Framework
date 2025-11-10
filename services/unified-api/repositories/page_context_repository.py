@@ -3,16 +3,12 @@ Repository for Page Context Database Operations
 Handles all database interactions for page contexts using the new schema
 """
 
-import logging
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 import uuid
 
 from core.database import DatabaseManager
 from schemas.enterprise import PageContext
-
-logger = logging.getLogger(__name__)
-
 
 class PageContextRepository:
     """Repository for page context database operations using the correct schema"""
@@ -80,9 +76,7 @@ class PageContextRepository:
             
             return dict(result) if result else None
             
-        except Exception as e:
-            logger.error(f"Error creating page context: {e}")
-            raise
+        except Exception as e:raise
     
     async def get_context_by_url(self, page_url: str) -> Optional[dict]:
         """Get page context by URL"""
@@ -101,9 +95,7 @@ class PageContextRepository:
             result = await self.db.execute_one(query, page_url)
             return dict(result) if result else None
             
-        except Exception as e:
-            logger.error(f"Error getting page context by URL: {e}")
-            raise
+        except Exception as e:raise
     
     async def get_contexts_by_category(self, category: str) -> List[dict]:
         """Get all contexts for a specific category/page type"""
@@ -117,9 +109,7 @@ class PageContextRepository:
             results = await self.db.execute(query, category)
             return [dict(row) for row in results]
             
-        except Exception as e:
-            logger.error(f"Error getting contexts by category: {e}")
-            raise
+        except Exception as e:raise
     
     async def get_user_contexts(self, user_id: str) -> List[dict]:
         """Get all contexts (mock implementation - no user tracking in current schema)"""
@@ -134,9 +124,7 @@ class PageContextRepository:
             results = await self.db.execute(query)
             return [dict(row) for row in results]
             
-        except Exception as e:
-            logger.error(f"Error getting user contexts: {e}")
-            raise
+        except Exception as e:raise
     
     async def update_context(self, context_id: str, updates: dict) -> Optional[dict]:
         """Update an existing context"""
@@ -173,9 +161,7 @@ class PageContextRepository:
             result = await self.db.execute_one(query, *values)
             return dict(result) if result else None
             
-        except Exception as e:
-            logger.error(f"Error updating context: {e}")
-            raise
+        except Exception as e:raise
     
     async def delete_context(self, context_id: str) -> bool:
         """Delete a context"""
@@ -184,9 +170,7 @@ class PageContextRepository:
             result = await self.db.execute_command(query, context_id)
             return "DELETE 1" in result
             
-        except Exception as e:
-            logger.error(f"Error deleting context: {e}")
-            raise
+        except Exception as e:raise
     
     async def increment_usage(self, context_id: str):
         """Increment usage count for a context"""
@@ -201,9 +185,7 @@ class PageContextRepository:
             
             await self.db.execute_command(query, datetime.utcnow(), context_id)
             
-        except Exception as e:
-            logger.error(f"Error incrementing usage: {e}")
-            raise
+        except Exception as e:raise
     
     async def search_contexts(self, query_text: str, page_type: Optional[str] = None) -> List[dict]:
         """Search contexts by description or website URL"""
@@ -225,9 +207,7 @@ class PageContextRepository:
             results = await self.db.execute(query, *params)
             return [dict(row) for row in results]
             
-        except Exception as e:
-            logger.error(f"Error searching contexts: {e}")
-            raise
+        except Exception as e:raise
     
     async def get_all_contexts(self, limit: int = 100) -> List[dict]:
         """Get all page contexts with optional limit"""
@@ -246,9 +226,7 @@ class PageContextRepository:
             results = await self.db.execute(query, limit)
             return [dict(row) for row in results]
             
-        except Exception as e:
-            logger.error(f"Error getting all contexts: {e}")
-            raise
+        except Exception as e:raise
     
     def _convert_db_row_to_page_context(self, row: dict) -> PageContext:
         """Convert database row to PageContext object"""

@@ -22,6 +22,7 @@ class MCPToolRegistry {
     this.loadStoredData();
   }
 
+<<<<<<< Updated upstream
   private initializeTools() {
     // Register run_action tool
     this.tools.set('run_action', {
@@ -42,6 +43,55 @@ class MCPToolRegistry {
           }
         },
         required: ['action']
+=======
+  /**
+   * Initialize connection to MCP server (required)
+   */
+  private async initializeMCPConnection() {
+    try {
+      this.mcpClient = await MCPClientManager.getInstance();
+      await this.mcpClient.ping();
+      this.isInitialized = true;
+    } catch (error) {
+      this.isInitialized = false;
+      throw new Error("MCP server connection required - no fallback mode available");
+    }
+  }
+
+  /**
+   * Ensure MCP connection is available
+   */
+  private ensureMCPConnection() {
+    if (!this.isInitialized || !this.mcpClient) {
+      throw new Error("MCP server connection required - extension disabled");
+    }
+  }
+
+  /**
+   * Get available tools from MCP server
+   */
+  public async listTools(): Promise<MCPTool[]> {
+    this.ensureMCPConnection();
+    return await this.mcpClient.listTools();
+  }
+
+  /**
+   * Execute tool call via MCP server
+   */
+  public async callTool(name: string, args: Record<string, any>): Promise<ToolResult> {
+    this.ensureMCPConnection();
+    
+    const result = await this.mcpClient.callTool(name, args);
+    
+    // Convert MCP result format to ToolResult format
+    if (result && typeof result === 'object') {
+      if (result.ok !== undefined) {
+        return {
+          success: result.ok,
+          data: result.data,
+          error: result.ok ? undefined : result.error
+        };
+>>>>>>> Stashed changes
       }
     });
 
@@ -216,6 +266,7 @@ class MCPToolRegistry {
             description: 'Maximum number of suggestions to return'
           }
         }
+<<<<<<< Updated upstream
       }
     });
   }
@@ -965,3 +1016,117 @@ chrome.runtime.onStartup.addListener(() => {
 chrome.runtime.onInstalled.addListener(() => {
   console.log('MCP Test Runner extension installed');
 });
+=======
+        break;
+
+      case 'RUN_ACTION':
+        try {
+          const { actionType, elementName, context, parameters } = data;
+          const result = await toolRegistry.runAction(actionType, elementName, context, parameters);
+          sendResponse({ success: true, result });
+        } catch (error) {
+          sendResponse({ 
+            success: false, 
+            error: `MCP action failed: ${error instanceof Error ? error.message : String(error)}` 
+          });
+        }
+        break;
+
+      case 'GET_ELEMENT':
+        try {
+          const result = await toolRegistry.getElement(data.elementId);
+          sendResponse({ success: true, result });
+        } catch (error) {
+          sendResponse({ 
+            success: false, 
+            error: `MCP element get failed: ${error instanceof Error ? error.message : String(error)}` 
+          });
+        }
+        break;
+
+      case 'ADD_ELEMENT':
+        try {
+          const result = await toolRegistry.addElement(data.elementId, data.elementData);
+          sendResponse({ success: true, result });
+        } catch (error) {
+          sendResponse({ 
+            success: false, 
+            error: `MCP element add failed: ${error instanceof Error ? error.message : String(error)}` 
+          });
+        }
+        break;
+
+      case 'VERIFY_SECTION':
+        try {
+          const result = await toolRegistry.verifySection(data.preset);
+          sendResponse({ success: true, result });
+        } catch (error) {
+          sendResponse({ 
+            success: false, 
+            error: `MCP verification failed: ${error instanceof Error ? error.message : String(error)}` 
+          });
+        }
+        break;
+
+      case 'SET_CONTEXT':
+        try {
+          const result = await toolRegistry.setContext(data.key, data.value, data.type);
+          sendResponse({ success: true, result });
+        } catch (error) {
+          sendResponse({ 
+            success: false, 
+            error: `MCP context set failed: ${error instanceof Error ? error.message : String(error)}` 
+          });
+        }
+        break;
+
+      case 'GET_CONTEXT':
+        try {
+          const result = await toolRegistry.getContext(data.key);
+          sendResponse({ success: true, result });
+        } catch (error) {
+          sendResponse({ 
+            success: false, 
+            error: `MCP context get failed: ${error instanceof Error ? error.message : String(error)}` 
+          });
+        }
+        break;
+
+      case 'FETCH_TEST_DATA':
+        try {
+          const result = await toolRegistry.fetchTestData(data.dataType, data.filters, data.limit);
+          sendResponse({ success: true, result });
+        } catch (error) {
+          sendResponse({ 
+            success: false, 
+            error: `MCP test data fetch failed: ${error instanceof Error ? error.message : String(error)}` 
+          });
+        }
+        break;
+
+      case 'GENERATE_LOCATORS':
+        try {
+          const result = await toolRegistry.generateLocators(data.elements, data.strategy);
+          sendResponse({ success: true, result });
+        } catch (error) {
+          sendResponse({ 
+            success: false, 
+            error: `MCP locator generation failed: ${error instanceof Error ? error.message : String(error)}` 
+          });
+        }
+        break;
+
+      default:
+        sendResponse({ 
+          success: false, 
+          error: `Unknown message type: ${type}` 
+        });
+    }
+  } catch (error) {
+    sendResponse({ 
+      success: false, 
+      error: `MCP background error: ${error instanceof Error ? error.message : String(error)}` 
+    });
+  }
+}
+>>>>>>> Stashed changes

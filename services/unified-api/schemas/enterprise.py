@@ -21,7 +21,6 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, validator, model_validator, ConfigDict
 
-
 class BaseEnterpriseModel(BaseModel):
     """Base model with enterprise configuration for JSON serialization"""
     model_config = ConfigDict(
@@ -33,7 +32,6 @@ class BaseEnterpriseModel(BaseModel):
         validate_assignment=True
     )
 
-
 class TenantConfig(BaseEnterpriseModel):
     """Tenant-specific configuration and limits"""
     tenant_id: str = Field(..., description="Unique tenant identifier")
@@ -43,7 +41,6 @@ class TenantConfig(BaseEnterpriseModel):
     enable_caching: bool = Field(default=True, description="Enable response caching")
     enable_compression: bool = Field(default=True, description="Enable gzip compression")
 
-
 class ElementRankingStrategy(str, Enum):
     """Strategy for ranking and selecting page elements"""
     TOP_K = "topK"
@@ -51,7 +48,6 @@ class ElementRankingStrategy(str, Enum):
     HEURISTIC_FILTER = "heuristicFilter"
     VECTOR_SIMILARITY = "vectorSimilarity"  # Future implementation
     HYBRID = "hybrid"
-
 
 class ActionCatalogRef(BaseEnterpriseModel):
     """Reference to a versioned action catalog with caching support"""
@@ -64,7 +60,6 @@ class ActionCatalogRef(BaseEnterpriseModel):
     def cache_key(self) -> str:
         """Generate cache key for this catalog reference"""
         return f"catalog:{self.catalog_id}:v{self.version}"
-
 
 class PageElement(BaseModel):
     """Optimized page element representation for minimal payload size"""
@@ -101,7 +96,6 @@ class PageElement(BaseModel):
             return f"{self.tag}[{self.selector_css[:30]}...]"
         return f"{self.tag}[{self.element_id[:8]}]"
 
-
 class PageSlice(BaseModel):
     """Top-K relevant elements with ranking strategy"""
     slice_strategy: ElementRankingStrategy = Field(..., description="Strategy used for element selection")
@@ -127,7 +121,6 @@ class PageSlice(BaseModel):
         if self.total_elements == 0:
             return 0.0
         return len(self.elements) / self.total_elements
-
 
 class PageContext(BaseModel):
     """Page context information to help AI understand the page type and purpose"""
@@ -158,7 +151,6 @@ class PageContext(BaseModel):
     created_at: Optional[str] = Field(None, description="When this context was created")
     updated_at: Optional[str] = Field(None, description="When this context was last updated")
     created_by: Optional[str] = Field(None, description="User who created this context")
-
 
 class PromptEnvelope(BaseEnterpriseModel):
     """Complete request envelope with enterprise features"""
@@ -206,7 +198,6 @@ class PromptEnvelope(BaseEnterpriseModel):
         content = f"{self.prompt}:{self.tenant_id}:{len(self.page_slice.elements) if self.page_slice else 0}"
         return hashlib.md5(content.encode()).hexdigest()[:16]
 
-
 class ActionDefinition(BaseModel):
     """Definition of an available action with parameters"""
     action_id: str = Field(..., description="Unique action identifier")
@@ -220,7 +211,6 @@ class ActionDefinition(BaseModel):
     def signature(self) -> str:
         """Generate action signature for caching"""
         return f"{self.name}({','.join(self.parameters.keys())})"
-
 
 class ActionCatalog(BaseEnterpriseModel):
     """Versioned catalog of available actions with caching metadata"""
@@ -255,7 +245,6 @@ class ActionCatalog(BaseEnterpriseModel):
         """Get all action signatures for quick reference"""
         return [action.signature for action in self.actions]
 
-
 class PlanStep(BaseModel):
     """Individual step in the generated plan"""
     step_id: str = Field(default_factory=lambda: str(uuid4()), description="Unique step identifier")
@@ -268,7 +257,6 @@ class PlanStep(BaseModel):
     estimated_duration_ms: Optional[int] = Field(None, description="Estimated execution time")
     description: Optional[str] = Field(None, description="Human-readable step description")
 
-
 class Clarification(BaseModel):
     """Request for clarification or additional information"""
     clarification_id: str = Field(default_factory=lambda: str(uuid4()), description="Unique clarification ID")
@@ -276,7 +264,6 @@ class Clarification(BaseModel):
     message: str = Field(..., description="Clarification message")
     suggestions: List[str] = Field(default_factory=list, description="Suggested responses")
     required: bool = Field(default=False, description="Whether clarification is required to proceed")
-
 
 class CostSummary(BaseModel):
     """Cost tracking and budget information"""
@@ -302,7 +289,6 @@ class CostSummary(BaseModel):
             output_tokens = values.get('output_tokens', 0)
             values['total_tokens'] = input_tokens + output_tokens
         return values
-
 
 class PlanResponse(BaseEnterpriseModel):
     """Complete response from the /v1/plan endpoint"""
@@ -337,7 +323,6 @@ class PlanResponse(BaseEnterpriseModel):
             return 0.0
         return sum(step.confidence for step in self.steps) / len(self.steps)
 
-
 # Cache and optimization models
 class CacheEntry(BaseEnterpriseModel):
     """Generic cache entry with TTL and metadata"""
@@ -352,7 +337,6 @@ class CacheEntry(BaseEnterpriseModel):
         """Check if cache entry has expired"""
         age = (datetime.utcnow() - self.created_at).total_seconds()
         return age > self.ttl_seconds
-
 
 class ElementRankingConfig(BaseModel):
     """Configuration for element ranking algorithms"""
@@ -384,7 +368,6 @@ class ElementRankingConfig(BaseModel):
                 raise ValueError(f"Ranking weights must sum to 1.0, got {total}")
         return values
 
-
 class DataBinding(BaseEnterpriseModel):
     """Data binding for dynamic value extraction and calculation"""
     name: str = Field(..., description="Variable name for the binding")
@@ -405,7 +388,6 @@ class DataBinding(BaseEnterpriseModel):
     regex_pattern: Optional[str] = Field(None, description="Regex pattern to apply to extracted text")
     fallback_value: Optional[str] = Field(None, description="Fallback if extraction fails")
 
-
 class TestBindings(BaseEnterpriseModel):
     """Collection of data bindings for a test"""
     bindings: List[DataBinding] = Field(default_factory=list, description="List of data bindings")
@@ -422,7 +404,6 @@ class TestBindings(BaseEnterpriseModel):
         # Remove existing binding with same name
         self.bindings = [b for b in self.bindings if b.name != binding.name]
         self.bindings.append(binding)
-
 
 class BindingContext(BaseEnterpriseModel):
     """Runtime context for binding evaluation"""
@@ -448,7 +429,6 @@ class BindingContext(BaseEnterpriseModel):
             return str(value)
         
         return re.sub(r'\$\{([^}]+)\}', replace_var, template)
-
 
 # Export all models for easy importing
 __all__ = [

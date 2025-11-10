@@ -7,7 +7,6 @@ from pydantic import BaseModel, Field
 from enum import Enum
 from datetime import datetime
 
-
 class PolicyType(str, Enum):
     """Policy types supported by the engine"""
     BRANCHING = "branching"
@@ -17,13 +16,11 @@ class PolicyType(str, Enum):
     RETRY = "retry"
     OUTCOME_CLASSIFICATION = "outcome_classification"
 
-
 class PolicyStatus(str, Enum):
     """Policy activation status"""
     ACTIVE = "active"
     INACTIVE = "inactive"
     DRAFT = "draft"
-
 
 class EvaluationMode(str, Enum):
     """Rule evaluation modes"""
@@ -31,14 +28,12 @@ class EvaluationMode(str, Enum):
     ANY = "any"  # Any condition can match
     WEIGHTED = "weighted"  # Weighted scoring evaluation
 
-
 class RetryStrategy(str, Enum):
     """Retry backoff strategies"""
     IMMEDIATE = "immediate"
     LINEAR = "linear"
     EXPONENTIAL = "exponential"
     FIXED = "fixed"
-
 
 class OutcomeType(str, Enum):
     """Types of execution outcomes"""
@@ -50,7 +45,6 @@ class OutcomeType(str, Enum):
     BUSINESS_LOGIC_ERROR = "business_logic_error"
     UNKNOWN_ERROR = "unknown_error"
     CONDITIONAL_BRANCH = "conditional_branch"
-
 
 class DetectionCriteria(BaseModel):
     """Criteria for detecting specific outcomes"""
@@ -64,7 +58,6 @@ class DetectionCriteria(BaseModel):
     custom_js_condition: Optional[str] = None
     timeout_ms: Optional[int] = Field(default=5000, ge=1000, le=30000)
 
-
 class RetryPolicy(BaseModel):
     """Retry policy configuration"""
     max_retries: int = Field(default=3, ge=0, le=10)
@@ -75,7 +68,6 @@ class RetryPolicy(BaseModel):
     no_retry_errors: List[str] = Field(default_factory=list)
     escalate_on_failure: Optional[str] = None  # "manual_review_queue"
 
-
 class OutcomeDefinition(BaseModel):
     """Definition of a possible action outcome"""
     outcome_name: str
@@ -85,7 +77,6 @@ class OutcomeDefinition(BaseModel):
     retry_policy: Optional[RetryPolicy] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
-
 class ScopeCondition(BaseModel):
     """Conditions that define when a policy applies"""
     url_patterns: Optional[List[str]] = None
@@ -93,7 +84,6 @@ class ScopeCondition(BaseModel):
     environment: Optional[List[str]] = None
     page_types: Optional[List[str]] = None
     custom_conditions: Dict[str, Any] = Field(default_factory=dict)
-
 
 class PolicyRule(BaseModel):
     """Individual rule within a policy"""
@@ -106,7 +96,6 @@ class PolicyRule(BaseModel):
     retry_policy: Optional[RetryPolicy] = None
     expected_outcomes: List[OutcomeDefinition] = Field(default_factory=list)
     metadata: Dict[str, Any] = Field(default_factory=dict)
-
 
 class Policy(BaseModel):
     """Core policy model"""
@@ -123,7 +112,6 @@ class Policy(BaseModel):
     updated_at: datetime = Field(default_factory=datetime.now)
     version: str = "1.0.0"
 
-
 class ExecutionContext(BaseModel):
     """Context for policy evaluation and execution"""
     run_id: str
@@ -135,7 +123,6 @@ class ExecutionContext(BaseModel):
     environment: str = "development"
     browser_info: Dict[str, Any] = Field(default_factory=dict)
     execution_history: List[Dict[str, Any]] = Field(default_factory=list)
-
 
 class PolicyEvaluationResult(BaseModel):
     """Result of policy evaluation"""
@@ -149,7 +136,6 @@ class PolicyEvaluationResult(BaseModel):
     evaluation_details: Dict[str, Any] = Field(default_factory=dict)
     evaluation_time_ms: int = 0
 
-
 class OutcomeClassification(BaseModel):
     """Classification of execution outcome"""
     outcome_type: OutcomeType
@@ -160,7 +146,6 @@ class OutcomeClassification(BaseModel):
     retry_policy: Optional[RetryPolicy] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
     detection_time_ms: int = 0
-
 
 class PolicyExecutionLog(BaseModel):
     """Log entry for policy execution"""

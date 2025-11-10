@@ -16,15 +16,12 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
-import logging
+
 import time
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from schemas.enterprise import ActionCatalog, CacheEntry, TenantConfig
-
-logger = logging.getLogger(__name__)
-
 
 class CacheService:
     """Enterprise caching service with ETag support and compression"""
@@ -66,17 +63,11 @@ class CacheService:
             
             # Check If-None-Match header
             if if_none_match and if_none_match == current_etag:
-                logger.info(f" Catalog {catalog_id}:v{version} - 304 Not Modified (ETag match)")
                 cache_entry.hit_count += 1
                 return None, True, current_etag
-            
-            logger.info(f" Catalog {catalog_id}:v{version} - Cache hit")
-            cache_entry.hit_count += 1
             return catalog, False, current_etag
         
-        # Cache miss - would typically load from database
-        logger.info(f" Catalog {catalog_id}:v{version} - Cache miss")
-        catalog = self._load_catalog_from_storage(catalog_id, version, tenant_id)
+        # Cache miss - would typically load from databasecatalog = self._load_catalog_from_storage(catalog_id, version, tenant_id)
         
         if catalog:
             # Cache the catalog
@@ -116,7 +107,6 @@ class CacheService:
         if compress and len(serialized) > self.compression_threshold:
             compressed_data = gzip.compress(serialized.encode()).decode('latin1')
             is_compressed = True
-            logger.debug(f"🗜️ Compressed response: {len(serialized)} -> {len(compressed_data)} bytes")
         
         # Generate ETag
         etag = self._generate_etag(serialized)
@@ -136,8 +126,6 @@ class CacheService:
         # Store in cache
         self.response_cache[cache_key] = cache_entry
         self.etag_index[etag] = cache_key
-        
-        logger.info(f" Cached response with ETag {etag[:8]}...")
         return etag
     
     def get_cached_response(
@@ -183,7 +171,6 @@ class CacheService:
         response_data = json.loads(data)
         
         cache_entry.hit_count += 1
-        logger.info(f" Cache hit for key {cache_key[:16]}... (ETag: {etag[:8]}...)")
         
         return response_data, False, etag
     
@@ -195,8 +182,6 @@ class CacheService:
             cache_key = self._build_catalog_cache_key(catalog_id, version, tenant_id)
             if cache_key in self.catalog_cache:
                 del self.catalog_cache[cache_key]
-                logger.info(f"🗑️ Invalidated catalog {catalog_id}:v{version}")
-        else:
             # Invalidate all versions of the catalog
             keys_to_remove = [
                 key for key in self.catalog_cache.keys()
@@ -204,8 +189,6 @@ class CacheService:
             ]
             for key in keys_to_remove:
                 del self.catalog_cache[key]
-            logger.info(f"🗑️ Invalidated all versions of catalog {catalog_id}")
-    
     def invalidate_response_cache(self, pattern: Optional[str] = None):
         """Invalidate response cache entries matching pattern"""
         
@@ -225,8 +208,6 @@ class CacheService:
                 if etag and etag in self.etag_index:
                     del self.etag_index[etag]
                 del self.response_cache[key]
-        
-        logger.info(f"🗑️ Invalidated {len(keys_to_remove)} response cache entries")
     
     def cleanup_expired_entries(self):
         """Remove expired cache entries"""
@@ -254,9 +235,6 @@ class CacheService:
             del self.response_cache[key]
         
         total_expired = len(expired_catalog_keys) + len(expired_response_keys)
-        if total_expired > 0:
-            logger.info(f" Cleaned up {total_expired} expired cache entries")
-    
     def get_cache_statistics(self) -> Dict[str, Any]:
         """Get comprehensive cache statistics"""
         
@@ -309,8 +287,6 @@ class CacheService:
         )
         
         self.catalog_cache[cache_key] = cache_entry
-        logger.info(f" Cached catalog {catalog.catalog_id}:v{catalog.version}")
-    
     def _load_catalog_from_storage(
         self, 
         catalog_id: str, 
@@ -410,13 +386,9 @@ class CacheService:
                 description=catalog_data["description"],
                 actions=actions
             )
-            
-            logger.info(f"📚 Loaded catalog {catalog_id}:v{version} with {len(actions)} actions")
             return catalog
             
-        except Exception as e:
-            logger.error(f" Failed to load catalog {catalog_id}:v{version}: {e}")
-            return None
+        except Exception as e:return None
     
     def _generate_etag(self, content: str) -> str:
         """Generate ETag for content"""

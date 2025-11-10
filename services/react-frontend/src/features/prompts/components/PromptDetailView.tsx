@@ -10,6 +10,457 @@ import { TestCaseExecutionHistory } from '../../execution';
 import { promptsApiService } from '../api';
 import { useAuth } from '../../../contexts/AuthContext';
 import { BindingsManager } from '../../bindings';
+<<<<<<< Updated upstream
+=======
+import { usePromptSelectorSync, useSyncNotifications } from '../../../shared/hooks/useSyncHooks';
+import { stepElementRelationshipService } from '../../../shared/services/stepElementRelationshipService';
+import { SyncIndicator, SyncNotification as SyncNotificationDisplay } from '../../../shared/components/SyncVisualIndicators';
+import { 
+  RefreshCw, 
+  Play, 
+  Edit3, 
+  MoreVertical, 
+  FileText, 
+  ArrowLeft, 
+  Settings, 
+  Copy, 
+  Archive, 
+  History,
+  Zap,
+  CheckCircle,
+  XCircle,
+  Clock,
+  Activity,
+  Link
+} from 'lucide-react';
+
+// Modern Styled Components
+const Container = styled.div<{ theme: any }>`
+  background: ${props => props.theme.colors.background};
+  min-height: 100vh;
+  font-family: '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'Helvetica Neue', 'Arial', sans-serif;
+  color: ${props => props.theme.colors.text};
+`;
+
+const Layout = styled.div`
+  display: flex;
+  height: 100vh;
+`;
+
+const MainContent = styled.div`
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+`;
+
+const Header = styled.div`
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  padding: 32px 40px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+  position: relative;
+  
+  &::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(10px);
+  }
+  
+  > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  @media (max-width: 768px) {
+    padding: 20px;
+  }
+`;
+
+const Breadcrumb = styled.div`
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.9);
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+`;
+
+const BreadcrumbLink = styled.span`
+  color: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.2s ease;
+
+  &:hover {
+    color: white;
+  }
+`;
+
+const TitleSection = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 16px;
+
+  @media (max-width: 768px) {
+    flex-direction: column;
+    gap: 16px;
+  }
+`;
+
+const TitleLeft = styled.div`
+  flex: 1;
+`;
+
+const Category = styled.div`
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+`;
+
+const Title = styled.h1`
+  font-size: 28px;
+  font-weight: 700;
+  color: white;
+  margin: 0;
+  line-height: 1.2;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+`;
+
+const ActionsBar = styled.div`
+  display: flex;
+  gap: 12px;
+  align-items: center;
+
+  @media (max-width: 768px) {
+    flex-wrap: wrap;
+    width: 100%;
+    justify-content: center;
+  }
+`;
+
+const PrimaryButton = styled.button<{ variant?: 'primary' | 'running' }>`
+  background: ${props => props.variant === 'running' 
+    ? 'linear-gradient(135deg, #6b7280, #4b5563)' 
+    : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'};
+  color: white;
+  border: none;
+  padding: 12px 24px;
+  border-radius: 12px;
+  font-weight: 600;
+  cursor: ${props => props.variant === 'running' ? 'not-allowed' : 'pointer'};
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: ${props => props.variant === 'running' 
+    ? 'none' 
+    : '0 4px 15px rgba(102, 126, 234, 0.4)'};
+
+  &:hover {
+    transform: ${props => props.variant === 'running' ? 'none' : 'translateY(-2px)'};
+    box-shadow: ${props => props.variant === 'running' 
+      ? 'none' 
+      : '0 6px 20px rgba(102, 126, 234, 0.6)'};
+  }
+
+  &:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+  }
+`;
+
+const SecondaryButton = styled.button`
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  padding: 12px 20px;
+  border-radius: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  backdrop-filter: blur(10px);
+
+  &:hover {
+    transform: translateY(-2px);
+    background: rgba(255, 255, 255, 0.2);
+    color: white;
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+  }
+`;
+
+const DropdownContainer = styled.div`
+  position: relative;
+`;
+
+const DropdownButton = styled.button`
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  padding: 12px;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  backdrop-filter: blur(10px);
+
+  &:hover {
+    transform: translateY(-2px);
+    background: rgba(255, 255, 255, 0.2);
+    color: white;
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+  }
+`;
+
+const Dropdown = styled.div<{ theme: any }>`
+  position: absolute;
+  top: 100%;
+  right: 0;
+  background: ${props => props.theme.colors.surface};
+  border: 1px solid rgba(102, 126, 234, 0.2);
+  border-radius: 12px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+  min-width: 180px;
+  margin-top: 8px;
+  overflow: hidden;
+  backdrop-filter: blur(10px);
+`;
+
+const DropdownItem = styled.div<{ theme: any }>`
+  padding: 12px 16px;
+  font-size: 14px;
+  color: ${props => props.theme.colors.text};
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid rgba(102, 126, 234, 0.1);
+
+  &:last-child {
+    border-bottom: none;
+  }
+
+  &:hover {
+    background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+    color: #667eea;
+  }
+`;
+
+const EditingIndicator = styled.div`
+  color: #f59e0b;
+  font-weight: 600;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background: rgba(245, 158, 11, 0.1);
+  border-radius: 8px;
+  border: 1px solid rgba(245, 158, 11, 0.2);
+`;
+
+const TabsContainer = styled.div`
+  display: flex;
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+  padding: 0 40px;
+  border-bottom: 2px solid;
+  border-image: linear-gradient(90deg, #667eea 0%, #764ba2 100%) 1;
+
+  @media (max-width: 768px) {
+    padding: 0 20px;
+    overflow-x: auto;
+  }
+`;
+
+const Tab = styled.div<{ active?: boolean }>`
+  padding: 16px 24px;
+  font-size: 14px;
+  font-weight: 600;
+  color: ${props => props.active ? '#667eea' : '#6c757d'};
+  cursor: pointer;
+  border-bottom: 3px solid ${props => props.active ? '#667eea' : 'transparent'};
+  transition: all 0.3s ease;
+  white-space: nowrap;
+  position: relative;
+  border-radius: 8px 8px 0 0;
+  
+  ${props => props.active && `
+    background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+    box-shadow: 0 -2px 8px rgba(102, 126, 234, 0.2);
+  `}
+
+  &:hover {
+    color: #667eea;
+    background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+    transform: translateY(-2px);
+    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.2);
+  }
+`;
+
+const StepBadge = styled.span`
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border-radius: 16px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  margin-left: 8px;
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+`;
+
+const Content = styled.div<{ theme: any }>`
+  flex: 1;
+  padding: 40px;
+  overflow: auto;
+  background: ${props => props.theme.colors.background};
+  color: ${props => props.theme.colors.text};
+
+  @media (max-width: 768px) {
+    padding: 20px;
+  }
+`;
+
+const SectionTitle = styled.h3`
+  font-size: 18px;
+  font-weight: 700;
+  color: ${props => props.theme.colors.text};
+  margin: 0 0 16px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+`;
+
+const SectionCard = styled.div`
+  background: ${props => props.theme.colors.surface};
+  border-radius: 16px;
+  padding: 24px;
+  margin-bottom: 32px;
+  box-shadow: ${props => props.theme.shadows.medium};
+  transition: all 0.3s ease;
+
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: ${props => props.theme.shadows.large};
+  }
+`;
+
+const Description = styled.div`
+  font-size: 15px;
+  color: ${props => props.theme.colors.text};
+  line-height: 1.6;
+  margin-bottom: 16px;
+`;
+
+const ContentBox = styled.div`
+  background: ${props => props.theme.colors.background};
+  border: 1px solid ${props => props.theme.colors.border};
+  border-radius: 12px;
+  padding: 20px;
+  font-size: 14px;
+  color: ${props => props.theme.colors.text};
+  line-height: 1.6;
+  font-family: 'Monaco', 'Cascadia Code', 'Roboto Mono', monospace;
+  white-space: pre-wrap;
+  overflow-x: auto;
+`;
+
+const TagsContainer = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+`;
+
+const Tag = styled.span`
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  background: ${props => props.theme.colors.background};
+  color: ${props => props.theme.colors.text};
+  border: 1px solid ${props => props.theme.colors.border};
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+
+  &:hover {
+    transform: translateY(-1px);
+    box-shadow: ${props => props.theme.shadows.small};
+  }
+`;
+
+const LoadingContainer = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 400px;
+  flex-direction: column;
+  gap: 16px;
+`;
+
+const LoadingSpinner = styled.div`
+  border: 2px solid ${props => props.theme.colors.border};
+  border-top: 2px solid ${props => props.theme.colors.primary};
+  border-radius: 50%;
+  width: 32px;
+  height: 32px;
+  animation: spin 1s linear infinite;
+
+  @keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+`;
+
+const LoadingText = styled.span`
+  color: ${props => props.theme.colors.textSecondary};
+  font-size: 16px;
+`;
+
+const ErrorMessage = styled.div`
+  background: linear-gradient(135deg, #fee2e2, #fecaca);
+  border: 1px solid #f87171;
+  color: #dc2626;
+  padding: 20px;
+  border-radius: 12px;
+  margin: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-shadow: 0 4px 12px rgba(248, 113, 113, 0.2);
+`;
+>>>>>>> Stashed changes
 
 interface PromptData {
   id: string;  // Changed from number to string for UUID
@@ -33,12 +484,23 @@ interface PromptData {
 // Step editing components
 const StepEditForm: React.FC<{
   step: any;
+<<<<<<< Updated upstream
   onSave: (updatedStep: any) => void;
+=======
+  stepIndex: number;
+  promptId: string;
+  onSave: (updatedStep: any) => Promise<void>;
+>>>>>>> Stashed changes
   onCancel: () => void;
 }> = ({ step, onSave, onCancel }) => {
   const [editedStep, setEditedStep] = useState({ ...step });
   const [newParamKey, setNewParamKey] = useState('');
   const [newParamValue, setNewParamValue] = useState('');
+<<<<<<< Updated upstream
+=======
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+>>>>>>> Stashed changes
 
   const updateParam = (key: string, value: string) => {
     setEditedStep({
@@ -58,6 +520,19 @@ const StepEditForm: React.FC<{
   const removeParam = (key: string) => {
     const { [key]: removed, ...rest } = editedStep.params;
     setEditedStep({ ...editedStep, params: rest });
+  };
+
+  const handleSave = async () => {
+    if (isSaving) return;
+    
+    try {
+      setIsSaving(true);
+      await onSave(editedStep);
+    } catch (error) {
+      alert(`Failed to save step: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -185,19 +660,21 @@ const StepEditForm: React.FC<{
 
       <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
         <button
-          onClick={() => onSave(editedStep)}
+          onClick={handleSave}
+          disabled={isSaving}
           style={{
             padding: '8px 16px',
-            backgroundColor: '#10b981',
+            backgroundColor: isSaving ? '#9ca3af' : '#10b981',
             color: '#ffffff',
             border: 'none',
             borderRadius: '4px',
             fontSize: '12px',
             fontWeight: '500',
-            cursor: 'pointer'
+            cursor: isSaving ? 'not-allowed' : 'pointer',
+            opacity: isSaving ? 0.7 : 1
           }}
         >
-           Save
+           {isSaving ? 'Saving...' : 'Save'}
         </button>
         <button
           onClick={onCancel}
@@ -869,10 +1346,14 @@ export const PromptDetailView: React.FC = () => {
           let planData = existingPlan.steps;
           if (typeof planData === 'string') {
             try {
+<<<<<<< Updated upstream
               planData = JSON.parse(planData);
             console.log('📝 Parsed test plan data:', planData);
           } catch (e) {
             console.error(' Failed to parse test plan data:', e);
+=======
+              planData = JSON.parse(planData);} catch (e) {
+>>>>>>> Stashed changes
             return;
           }
         }
@@ -910,6 +1391,7 @@ export const PromptDetailView: React.FC = () => {
             originalStepCount: existingPlan.original_step_count
           }
         });
+<<<<<<< Updated upstream
         setTestPlanSaved(true);
         console.log(' Loaded test plan with', formattedPlan?.actions?.length || 0, 'steps');
         } else {
@@ -920,6 +1402,10 @@ export const PromptDetailView: React.FC = () => {
         // This is normal - not all prompts have saved test plans
       } else {
         console.warn(' Failed to load test plan:', response.statusText);
+=======
+        setTestPlanSaved(true);} else {}
+      } else if (response.status === 404) {// This is normal - not all prompts have saved test plans
+>>>>>>> Stashed changes
       }
     } catch (error) {
       console.error(' Error loading existing test plan:', error);
@@ -1011,7 +1497,6 @@ export const PromptDetailView: React.FC = () => {
       }
       
     } catch (error: any) {
-      console.error('Error starting test execution:', error);
       alert(`Error starting test execution: ${error.message || 'Unknown error'}`);
     } finally {
       setIsRunning(false);
@@ -1059,7 +1544,6 @@ export const PromptDetailView: React.FC = () => {
         }
 
       } catch (error) {
-        console.error('Error polling execution status:', error);
         setRunningExecutionId(null);
       }
     };
@@ -1266,11 +1750,14 @@ export const PromptDetailView: React.FC = () => {
       
       // Phase 1: Get available elements for step generation
       let availableElements: any[] = [];
+<<<<<<< Updated upstream
       
       try {
         console.log('Getting available elements...');
         
         // First, get available elements using authenticated request
+=======
+>>>>>>> Stashed changes
         const token = localStorage.getItem('auth_token');
         const elementsResponse = await fetch(`${config.apiBaseUrl}/api/v1/sql/elements?limit=1000`, {
           method: 'GET',
@@ -1475,11 +1962,6 @@ export const PromptDetailView: React.FC = () => {
             })));
           }
         }
-        
-      } catch (elementsError) {
-        console.warn('Error fetching discovered elements:', elementsError);
-        console.warn('Proceeding with generic selectors');
-      }
       
       // Extract the actual page URL from recorded elements, or fallback to prompt starting_url
       const pageUrl = prompt.starting_url || 
@@ -1539,8 +2021,6 @@ export const PromptDetailView: React.FC = () => {
           }))
         } : undefined
       };
-
-      const token = localStorage.getItem('auth_token');
       const response = await fetch(`${config.apiBaseUrl}/api/v1/plan`, {
         method: 'POST',
         headers: {
@@ -1593,7 +2073,6 @@ export const PromptDetailView: React.FC = () => {
       console.log('Generated steps:', data);
       
     } catch (err) {
-      console.error('Error generating steps:', err);
       setStepsError(err instanceof Error ? err.message : 'Failed to generate steps');
     } finally {
       setGeneratingSteps(false);
@@ -1655,7 +2134,6 @@ export const PromptDetailView: React.FC = () => {
       setTimeout(() => setTestPlanSaved(false), 3000);
       
     } catch (error) {
-      console.error(' Failed to save test plan:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
       alert(`Failed to save test plan: ${errorMessage}`);
     } finally {
@@ -1729,17 +2207,47 @@ export const PromptDetailView: React.FC = () => {
         throw new Error(`Failed to save edited test plan: ${response.statusText}`);
       }
 
+      const savedPlan = await response.json();
+      const planId = savedPlan.id;
+
+      // 🆕 Extract and save element relationships
+      try {
+        const elementReferences = stepElementRelationshipService.extractElementReferences(editedSteps);
+        
+        if (elementReferences.length > 0) {
+          // Clean up existing relationships first
+          await stepElementRelationshipService.deleteStepElementRelationships(id!);
+          
+          // Save new relationships
+          await stepElementRelationshipService.saveStepElementRelationships(
+            id!, // promptId
+            planId, // planId
+            elementReferences
+          );
+          
+        } else {
+          // No element references found
+        }
+      } catch (relationshipError) {
+        // Don't fail the entire save operation, just log the error
+        setTimeout(() => {
+          alert(`Test plan saved successfully, but failed to save element relationships: ${relationshipError instanceof Error ? relationshipError.message : 'Unknown error'}`);
+        }, 100);
+      }
+
       // Update the displayed steps
       setGeneratedSteps(updatedGeneratedSteps);
       setIsEditingSteps(false);
       setEditedSteps([]);
       setTestPlanSaved(true);
+<<<<<<< Updated upstream
       
       console.log(' Edited test plan saved successfully');
+=======
+>>>>>>> Stashed changes
       setTimeout(() => setTestPlanSaved(false), 3000);
       
     } catch (error) {
-      console.error(' Failed to save edited test plan:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
       alert(`Failed to save edited test plan: ${errorMessage}`);
     } finally {
@@ -1752,11 +2260,37 @@ export const PromptDetailView: React.FC = () => {
     setShowAddStepForm(false);
   };
 
-  const updateStep = (index: number, updatedStep: any) => {
+  const updateStep = async (index: number, updatedStep: any) => {
+    const oldStep = editedSteps[index];
     const newSteps = [...editedSteps];
     newSteps[index] = updatedStep;
     setEditedSteps(newSteps);
     setEditingStepIndex(null);
+
+    // Check for selector changes that need to be synced
+    const selectorKeys = ['selector', 'elementId', 'target', 'locator'];
+    
+    if (oldStep && updatedStep.params) {
+      for (const [key, newValue] of Object.entries(updatedStep.params)) {
+        if (selectorKeys.includes(key)) {
+          const oldValue = oldStep.params?.[key];
+          const newVal = String(newValue || '').trim();
+          const oldVal = String(oldValue || '').trim();
+          
+          // If selector value changed, trigger sync
+          if (newVal !== oldVal && newVal) {
+            try {
+              await updateStepSelector(index, key, newVal);
+            } catch (error) {
+              // Don't fail the entire update, but notify user
+              setTimeout(() => {
+                alert(`Step saved, but failed to sync selector '${key}' with related elements: ${error instanceof Error ? error.message : 'Unknown error'}`);
+              }, 100);
+            }
+          }
+        }
+      }
+    }
   };
 
   const deleteStep = (index: number) => {
@@ -1785,6 +2319,138 @@ export const PromptDetailView: React.FC = () => {
     // TODO: Implement archive functionality
   };
 
+<<<<<<< Updated upstream
+=======
+  // Failure analysis functions
+  const loadFailureAnalysis = async () => {
+    if (!id) return;
+    
+    try {
+      setLoadingFailures(true);
+      setFailuresError(null);const response = await unifiedApiClient.getRecentFailedExecutions(id, 10);// Handle both array response and object response
+        const executions = Array.isArray(response) ? response : response?.executions || [];if (executions && executions.length > 0) {// Log details of each execution to debug
+          executions.forEach((exec: any, index: number) => {});
+          
+          // Only show the most recent execution
+          const mostRecentExecution = executions[0];// Set the data with only the most recent execution
+          const failureData = { executions: [mostRecentExecution] };
+          setFailureAnalysisData(failureData);// Try both 'failed_steps' and 'steps' fields to be resilient
+          const failedSteps = mostRecentExecution?.failed_steps || 
+                             (mostRecentExecution?.steps || []).filter((step: any) => step.status === 'failed');
+          
+          if (mostRecentExecution && failedSteps && failedSteps.length > 0) {// Ensure the execution object has the right structure for the AI call
+            const executionForAI = {
+              ...mostRecentExecution,
+              failed_steps: failedSteps
+            };
+            
+            // Small delay to let the UI update first
+            setTimeout(() => {
+              generateMinimalReproSteps(executionForAI);
+            }, 500);
+          } else {}
+        } else {setFailureAnalysisData({ executions: [] });
+        }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+        setFailuresError(`Failed to load failure analysis data: ${errorMessage}`);
+    } finally {
+      setLoadingFailures(false);
+    }
+  };
+
+  const generateMinimalReproSteps = async (execution: any) => {if (!execution || !execution.failed_steps) {return;
+    }
+    
+    try {
+      setGeneratingMinimalSteps(true);
+      setMinimalStepsError(null);
+      setSelectedExecution(execution);
+      
+      // Call the real API
+      const response = await unifiedApiClient.generateMinimalReproSteps(
+        execution.execution_id,
+        execution.failed_steps
+      );
+      
+      setMinimalReproSteps(response);
+    } catch (error) {
+      setMinimalStepsError(`Failed to generate minimal reproduction steps: ${(error as Error)?.message || String(error)}`);
+    } finally {
+      setGeneratingMinimalSteps(false);
+    }
+  };
+
+  const analyzeFailurePatterns = async () => {
+    if (!id || !failureAnalysisData?.executions?.length) return;
+    
+    try {
+      setLoadingFailures(true);
+      
+      const response = await unifiedApiClient.analyzeFailurePatterns(id, 30);
+      
+      setFailureAnalysisData((prev: any) => ({
+        ...prev,
+        patterns: response
+      }));
+    } catch (error) {
+      setFailuresError('Failed to analyze failure patterns');
+    } finally {
+      setLoadingFailures(false);
+    }
+  };
+
+  const runAIDebugSteps = async () => {
+    if (!minimalReproSteps?.minimalSteps?.length) {
+      return;
+    }
+
+    try {
+      setRunningDebugSteps(true);
+      setDebugStepsError(null);
+      setDebugStepsResults(null);
+      
+      // Convert AI steps to the format expected by the execution API
+      const steps = minimalReproSteps.minimalSteps.map((step: any, index: number) => ({
+        action: step.action,
+        target: step.target || step.selector,
+        value: step.text_value || step.value || '', // Use text_value from AI service for typing actions
+        text_value: step.text_value || '', // Also include text_value explicitly
+        step_order: step.step_order,
+        originalStepId: step.originalStepId,
+        description: step.description || step.reasoning || `AI Debug Step ${index + 1}: ${step.action}`
+      }));// Create the execution request
+      const executionRequest = {
+        prompt_id: id,
+        test_name: `AI Debug Run - ${new Date().toISOString()}`,
+        steps: steps
+      };// Call the debug execution API (goes through Java runner)
+      const response = await unifiedApiClient.executeDebugSteps(executionRequest);// Set initial results showing execution started
+      setDebugStepsResults({
+        execution_id: response.execution_id,
+        status: 'running',
+        steps_count: response.steps_count,
+        message: response.message
+      });
+
+      // TODO: You can add polling here to check execution status
+      // For now, we'll just show that execution started
+
+    } catch (error: any) {
+      setDebugStepsError(`Failed to run debug steps: ${(error as Error)?.message || String(error)}`);
+    } finally {
+      setRunningDebugSteps(false);
+    }
+  };
+
+  // Load failure analysis when tab is activated
+  React.useEffect(() => {
+    if (activeTab === 'failure-analysis' && !failureAnalysisData && id) {
+      loadFailureAnalysis();
+    }
+  }, [activeTab, id]);
+
+>>>>>>> Stashed changes
   if (loading) {
     return (
       <div style={detailStyles.container}>
@@ -2314,8 +2980,22 @@ export const PromptDetailView: React.FC = () => {
                             {isEditing ? (
                               <StepEditForm
                                 step={action}
+<<<<<<< Updated upstream
                                 onSave={(updatedStep) => updateStep(index, updatedStep)}
                                 onCancel={() => setEditingStepIndex(null)}
+=======
+                                stepIndex={index}
+                                promptId={id || ''}
+                                onSave={async (updatedStep) => await updateStep(index, updatedStep)}
+                                onCancel={() => setEditingStepIndex(null)}
+                                onSyncUpdate={async (stepIndex, paramKey, newValue) => {
+                                  try {
+                                    await updateStepSelector(stepIndex, paramKey, newValue);
+                                  } catch (error) {
+                                    throw error;
+                                  }
+                                }}
+>>>>>>> Stashed changes
                               />
                             ) : (
                               <>

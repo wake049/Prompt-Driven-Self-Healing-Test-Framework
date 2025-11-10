@@ -10,27 +10,12 @@ export function extractIdentity(el: HTMLElement): ElementIdentity {
   // Get basic tag from the original element
   identity.tag = el.tagName?.toLowerCase?.();
   
-  // Debug: Let's see what we're actually working with
-  console.log(` DEBUG: Starting identity extraction from element:`, {
-    element: el,
-    tagName: el.tagName,
-    id_property: el.id,
-    id_getAttribute: el.getAttribute('id'),
-    dataTest_getAttribute: el.getAttribute('data-test'),
-    dataTestId_getAttribute: el.getAttribute('data-testid'),
-    allAttributes: Array.from(el.attributes).map(attr => `${attr.name}="${attr.value}"`),
-    textContent: el.textContent?.trim()
-  });
-
   // Walk up the DOM tree to find a stable identifier
   while (node && node !== document.body) {
-    console.log(` Checking node: ${node.tagName.toLowerCase()} with id="${node.id || 'none'}"`);
-    
     // Priority 1: ID attribute (should be unique)
     const id = node.getAttribute('id') || (node as HTMLElement).id;
     if (id && id.trim()) {
       identity.id = id.trim();
-      console.log(` Found ID in ancestor: ${id} (${node.tagName.toLowerCase()})`);
       break;
     }
     
@@ -38,7 +23,6 @@ export function extractIdentity(el: HTMLElement): ElementIdentity {
     const dataTest = node.getAttribute('data-test');
     if (dataTest && dataTest.trim()) {
       identity['data-test'] = dataTest.trim();
-      console.log(` Found data-test in ancestor: ${dataTest} (${node.tagName.toLowerCase()})`);
       break;
     }
     
@@ -46,7 +30,6 @@ export function extractIdentity(el: HTMLElement): ElementIdentity {
     const dataTestId = node.getAttribute('data-testid');
     if (dataTestId && dataTestId.trim()) {
       identity['data-testid'] = dataTestId.trim();
-      console.log(` Found data-testid in ancestor: ${dataTestId} (${node.tagName.toLowerCase()})`);
       break;
     }
     
@@ -54,7 +37,6 @@ export function extractIdentity(el: HTMLElement): ElementIdentity {
     const name = node.getAttribute('name');
     if (name && name.trim()) {
       identity.name = name.trim();
-      console.log(` Found name in ancestor: ${name} (${node.tagName.toLowerCase()})`);
       break;
     }
     
@@ -62,7 +44,6 @@ export function extractIdentity(el: HTMLElement): ElementIdentity {
     const ariaLabel = node.getAttribute('aria-label');
     if (ariaLabel && ariaLabel.trim()) {
       identity['aria-label'] = ariaLabel.trim();
-      console.log(` Found aria-label in ancestor: ${ariaLabel} (${node.tagName.toLowerCase()})`);
       break;
     }
     
@@ -74,7 +55,6 @@ export function extractIdentity(el: HTMLElement): ElementIdentity {
   const role = el.getAttribute('role');
   if (role && role.trim()) {
     identity.role = role.trim();
-    console.log(` Captured role: ${role}`);
   }
   
   // Only use text content if we don't have a unique identifier
@@ -82,20 +62,14 @@ export function extractIdentity(el: HTMLElement): ElementIdentity {
     const text = el.innerText?.trim().split(/\s+/).slice(0, 3).join(" ").toLowerCase();
     if (text) {
       identity.text = text;
-      console.log(` Captured text: ${text}`);
     }
     
     // Class hint as fallback
     const cls = el.classList?.[0];
     if (cls) {
       identity.class_hint = cls.toLowerCase();
-      console.log(` Captured class_hint: ${cls}`);
     }
-  } else {
-    console.log(`⏭️ Skipping text content - have unique identifier`);
   }
-  
-  console.log(` Final identity object:`, identity);
   
   return identity;
 }

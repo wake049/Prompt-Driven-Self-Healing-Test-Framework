@@ -87,15 +87,9 @@ class PythonPerformanceProfiler:
         # Initialize tracemalloc if enabled
         if self.enable_tracemalloc and not tracemalloc.is_tracing():
             tracemalloc.start()
-            logger.info(" Started tracemalloc for detailed memory tracking")
         
         # Get process for monitoring
         self.process = psutil.Process()
-        
-        logger.info(" Python Performance Profiler initialized")
-        logger.info(f"Python Version: {sys.version}")
-        logger.info(f"CPU Count: {psutil.cpu_count()}")
-        logger.info(f"Total Memory: {psutil.virtual_memory().total / (1024**3):.2f} GB")
     
     def capture_snapshot(self, label: str = "") -> PerformanceSnapshot:
         """Capture a performance snapshot at the current moment"""
@@ -146,18 +140,15 @@ class PythonPerformanceProfiler:
             
             # Log key metrics
             memory_mb = memory_info.rss / (1024 * 1024)
-            logger.info(f" [{label}] Memory: {memory_mb:.1f}MB, CPU: {cpu_percent:.1f}%, Threads: {thread_count}")
             
             return snapshot
             
         except Exception as e:
-            logger.error(f"Error capturing performance snapshot: {e}")
             return None
     
     def start_continuous_monitoring(self, interval_seconds: float = 5.0):
         """Start continuous performance monitoring in background thread"""
         if self.monitoring_active:
-            logger.warning("Monitoring already active")
             return
         
         self.monitoring_active = True
@@ -165,23 +156,18 @@ class PythonPerformanceProfiler:
         def monitor_loop():
             counter = 0
             while self.monitoring_active:
-                try:
-                    counter += 1
-                    self.capture_snapshot(f"Auto_Monitor_{counter}")
-                    time.sleep(interval_seconds)
-                except Exception as e:
-                    logger.error(f"Error in monitoring loop: {e}")
+                counter += 1
+                self.capture_snapshot(f"Auto_Monitor_{counter}")
+                time.sleep(interval_seconds)
         
         self.monitor_thread = threading.Thread(target=monitor_loop, daemon=True)
         self.monitor_thread.start()
-        logger.info(f"🔄 Started continuous monitoring (interval: {interval_seconds}s)")
     
     def stop_continuous_monitoring(self):
         """Stop continuous performance monitoring"""
         self.monitoring_active = False
         if self.monitor_thread:
             self.monitor_thread.join(timeout=1.0)
-        logger.info("⏹️ Stopped continuous monitoring")
     
     def track_endpoint_performance(self, endpoint: str, execution_time: float, 
                                  error_occurred: bool = False, memory_used: int = 0):
@@ -289,12 +275,10 @@ class PythonPerformanceProfiler:
     def start_cpu_profiling(self):
         """Start CPU profiling"""
         if self.profiler is not None:
-            logger.warning("CPU profiling already active")
             return
         
         self.profiler = cProfile.Profile()
         self.profiler.enable()
-        logger.info("🔄 Started CPU profiling")
     
     def stop_cpu_profiling(self) -> Dict[str, Any]:
         """Stop CPU profiling and return results"""
@@ -312,8 +296,6 @@ class PythonPerformanceProfiler:
         profiling_output = s.getvalue()
         self.profiler = None
         
-        logger.info("⏹️ Stopped CPU profiling")
-        
         return {
             "profiling_output": profiling_output,
             "summary": "CPU profiling completed - check profiling_output for detailed results"
@@ -321,7 +303,6 @@ class PythonPerformanceProfiler:
     
     def force_garbage_collection(self) -> Dict[str, Any]:
         """Force garbage collection and measure impact"""
-        logger.info("🗑️ Forcing garbage collection...")
         
         # Capture before GC
         before_snapshot = self.capture_snapshot("Before_GC")
@@ -352,8 +333,6 @@ class PythonPerformanceProfiler:
                 'memory_before_mb': before_snapshot.memory_usage['rss'] / (1024 * 1024),
                 'memory_after_mb': after_snapshot.memory_usage['rss'] / (1024 * 1024)
             }
-            
-            logger.info(f"🗑️ GC freed {memory_freed_mb:.2f} MB in {gc_duration*1000:.1f} ms")
             return result
         
         return {"error": "Failed to capture GC snapshots"}
