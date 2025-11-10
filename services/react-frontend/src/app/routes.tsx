@@ -12,15 +12,11 @@ import { PromptsTable } from "../features/prompts";
 import { PromptDetailView } from "../features/prompts/components/PromptDetailView";
 import { PageContextManager } from "../features/page-context";
 import { ExecutionDashboard } from "../features/execution";
-<<<<<<< Updated upstream
-
-=======
 import { DashboardAnalytics } from "../components/DashboardAnalytics";
 import RunDetails from "../features/execution/components/RunDetails";
 import SyncBidirectionalTest from "../features/sync/components/SyncBidirectionalTest";
 import SyncDebugger from "../shared/components/SyncDebugger";
 import ChromeExtensionPage from "../features/extension/components/ChromeExtensionPage";
->>>>>>> Stashed changes
 export function AppRoutes() {
   return (
     <Routes>
@@ -34,8 +30,6 @@ export function AppRoutes() {
       <Route path="/prompts/:id" element={<PromptDetailView />} />
       <Route path="/page-context" element={<PageContextManager />} />
       <Route path="/execution" element={<ExecutionDashboard />} />
-<<<<<<< Updated upstream
-=======
       <Route path="/execution-dashboard" element={<ExecutionDashboard />} />
       <Route path="/analytics" element={<DashboardAnalytics />} />
       <Route path="/analytics/trends" element={<AnalyticsTrendWidgets />} />
@@ -47,7 +41,6 @@ export function AppRoutes() {
       <Route path="/sync-test" element={<SyncBidirectionalTest />} />
       <Route path="/sync-debug" element={<SyncDebugger />} />
       <Route path="/chrome-extension" element={<ChromeExtensionPage />} />
->>>>>>> Stashed changes
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

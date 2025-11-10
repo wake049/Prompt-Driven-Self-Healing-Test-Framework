@@ -75,7 +75,7 @@ services:
       - "3000:3000"
     environment:
       - REACT_APP_API_BASE_URL=https://testhelix.com/api
-      - REACT_APP_MCP_SERVER_URL=wss://testhelix.com/mcp
+      - REACT_APP_MCP_SERVER_URL=wss://mcp.testhelix.com/mcp/ws
       - NODE_ENV=production
       - FRONTEND_DOMAIN=testhelix.com
     restart: unless-stopped

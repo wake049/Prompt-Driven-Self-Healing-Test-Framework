@@ -53,7 +53,7 @@ export default defineConfig(({ mode }) => {
         ? JSON.stringify('https://testhelix.com/api')
         : JSON.stringify('http://127.0.0.1:8000'),
       __MCP_URL__: isProduction
-        ? JSON.stringify('ws://testhelix.com/mcp/ws')
+        ? JSON.stringify('wss://mcp.testhelix.com/mcp/ws')
         : JSON.stringify('ws://127.0.0.1:8001')
     },
     server: { 
