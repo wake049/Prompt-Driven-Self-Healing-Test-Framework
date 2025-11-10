@@ -15,9 +15,6 @@ RUN apt-get update && apt-get install -y curl && \
 # Copy the application
 COPY . .
 
-# Install the package in editable mode
-RUN pip install -e .
-
 # Set proper permissions
 RUN chown -R mcpuser:mcpuser /app && \
     chmod -R 755 /app
