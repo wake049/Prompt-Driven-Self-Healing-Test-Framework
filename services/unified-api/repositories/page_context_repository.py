@@ -19,64 +19,87 @@ class PageContextRepository:
     async def create_context(self, page_context_data: dict) -> dict:
         """Create a new page context in repo.page_contexts table"""
         try:
+            print(f"🔍 Starting create_context with data: {page_context_data}")
+            
             # Generate UUID for the context
             context_id = str(uuid.uuid4())
+            print(f"🔍 Generated context_id: {context_id}")
             
             # First, ensure the page exists in repo.pages
             page_url = page_context_data.get('page_url', '')
             page_title = page_context_data.get('page_title', '')
             
+            print(f"🔍 Page URL: {page_url}, Title: {page_title}")
+            
             # Extract domain/page name from URL for the page name
             page_name = page_title or page_url.split('/')[-1] or 'unknown'
+            print(f"🔍 Extracted page_name: {page_name}")
             
+            print(f"🔍 Creating page record...")
             page_result = await self.db.execute_one(
                 """
-                INSERT INTO repo.pages (project_id, name, route_hint, tags)
+                INSERT INTO repo.pages (project_id, name, route_hint)
                 VALUES (
                     (SELECT id FROM core.projects LIMIT 1),  -- Use first project for now
-                    $1, $2, $3
+                    $1, $2
                 )
                 ON CONFLICT (project_id, name) DO UPDATE SET updated_at = NOW()
                 RETURNING id
                 """,
                 page_name,
-                page_url,  # Use full URL as route hint
-                [page_context_data.get('page_type', 'web')]  # Use page type as tag
+                page_url  # Use full URL as route hint
             )
             
             page_id = page_result['id'] if page_result else None
+            print(f"🔍 Page result: {page_result}, page_id: {page_id}")
             
             if not page_id:
                 raise Exception("Failed to create or find page record")
             
+            print(f"🔍 Preparing to insert page context...")
             query = """
                 INSERT INTO repo.page_contexts (
-                    id, page_id, screenshot_url, description, category, 
+                    id, page_id, context_type, screenshot_url, description, category, 
                     website_url, primary_actions, usage_count, 
                     last_used_at, created_at, updated_at
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
                 RETURNING *
             """
             
-            result = await self.db.execute_one(
-                query,
+            # Log the parameters being used
+            import json
+            params = [
                 context_id,
                 page_id,
+                'user_uploaded',  # context_type - required field
                 page_context_data.get('screenshot_url'),
                 page_context_data.get('page_description', ''),
                 page_context_data.get('page_type'),
                 page_context_data.get('page_url'),
-                page_context_data.get('primary_actions', []),
+                json.dumps(page_context_data.get('primary_actions', [])),  # Convert list to JSON string
                 0,  # initial usage_count
                 None,  # last_used_at
                 datetime.utcnow(),
                 datetime.utcnow()
-            )
+            ]
             
+            print(f"🔍 Query parameters:")
+            for i, param in enumerate(params, 1):
+                print(f"  ${i}: {param} (type: {type(param).__name__})")
+            
+            print(f"🔍 Executing page_contexts insert...")
+            result = await self.db.execute_one(query, *params)
+            
+            print(f"🔍 Insert result: {result}")
             return dict(result) if result else None
             
-        except Exception as e:raise
+        except Exception as e:
+            print(f"❌ Exception in create_context: {e}")
+            print(f"❌ Exception type: {type(e)}")
+            import traceback
+            print(f"❌ Traceback: {traceback.format_exc()}")
+            raise
     
     async def get_context_by_url(self, page_url: str) -> Optional[dict]:
         """Get page context by URL"""
@@ -95,7 +118,8 @@ class PageContextRepository:
             result = await self.db.execute_one(query, page_url)
             return dict(result) if result else None
             
-        except Exception as e:raise
+        except Exception as e:
+            raise
     
     async def get_contexts_by_category(self, category: str) -> List[dict]:
         """Get all contexts for a specific category/page type"""
@@ -109,7 +133,8 @@ class PageContextRepository:
             results = await self.db.execute(query, category)
             return [dict(row) for row in results]
             
-        except Exception as e:raise
+        except Exception as e:
+            raise
     
     async def get_user_contexts(self, user_id: str) -> List[dict]:
         """Get all contexts (mock implementation - no user tracking in current schema)"""
@@ -124,7 +149,8 @@ class PageContextRepository:
             results = await self.db.execute(query)
             return [dict(row) for row in results]
             
-        except Exception as e:raise
+        except Exception as e:
+            raise
     
     async def update_context(self, context_id: str, updates: dict) -> Optional[dict]:
         """Update an existing context"""
@@ -161,7 +187,8 @@ class PageContextRepository:
             result = await self.db.execute_one(query, *values)
             return dict(result) if result else None
             
-        except Exception as e:raise
+        except Exception as e:
+            raise
     
     async def delete_context(self, context_id: str) -> bool:
         """Delete a context"""
@@ -170,7 +197,8 @@ class PageContextRepository:
             result = await self.db.execute_command(query, context_id)
             return "DELETE 1" in result
             
-        except Exception as e:raise
+        except Exception as e:
+            raise
     
     async def increment_usage(self, context_id: str):
         """Increment usage count for a context"""
@@ -185,7 +213,8 @@ class PageContextRepository:
             
             await self.db.execute_command(query, datetime.utcnow(), context_id)
             
-        except Exception as e:raise
+        except Exception as e:
+            raise
     
     async def search_contexts(self, query_text: str, page_type: Optional[str] = None) -> List[dict]:
         """Search contexts by description or website URL"""
@@ -207,7 +236,8 @@ class PageContextRepository:
             results = await self.db.execute(query, *params)
             return [dict(row) for row in results]
             
-        except Exception as e:raise
+        except Exception as e:
+            raise
     
     async def get_all_contexts(self, limit: int = 100) -> List[dict]:
         """Get all page contexts with optional limit"""
@@ -226,7 +256,8 @@ class PageContextRepository:
             results = await self.db.execute(query, limit)
             return [dict(row) for row in results]
             
-        except Exception as e:raise
+        except Exception as e:
+            raise
     
     def _convert_db_row_to_page_context(self, row: dict) -> PageContext:
         """Convert database row to PageContext object"""

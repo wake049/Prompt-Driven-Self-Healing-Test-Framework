@@ -111,7 +111,8 @@ async def upload_page_context(
         
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON in primary_actions field")
-    except Exception as e:raise HTTPException(status_code=500, detail=f"Failed to upload page context: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to upload page context: {str(e)}")
 
 @router.post("/detect", response_model=PageContext)
 async def detect_page_context(request: PageContextRequest):

@@ -479,7 +479,10 @@ export const PromptsTable: React.FC = () => {
     try {
       setLoading(true);
       setError(null);
+      console.log('🔍 Starting fetchPrompts...');
       const data = await promptsApiService.getPrompts();
+      console.log('🔍 Raw API response:', data);
+      
       // Map API data to local PromptData format
       const mappedPrompts: PromptData[] = (data.prompts || []).map(apiPrompt => ({
         id: apiPrompt.id, // Keep as string UUID
@@ -495,9 +498,10 @@ export const PromptsTable: React.FC = () => {
         category: apiPrompt.category,
         usage_count: apiPrompt.usage_count
       }));
+      console.log('🔍 Mapped prompts:', mappedPrompts);
       setPrompts(mappedPrompts);
     } catch (err) {
-      console.error(err);
+      console.error('❌ Error in fetchPrompts:', err);
       setError(err instanceof Error ? err.message : 'Failed to load prompts');
     } finally {
       setLoading(false);

@@ -75,13 +75,14 @@ class AuthenticatedPromptsApiService {
   }
 
   async getPrompts(): Promise<PromptsResponse> {
-    // Temporarily use debug endpoint for testing
-    return this.fetchWithoutAuth<PromptsResponse>('/api/v1/prompts/debug');
+    console.log('🔍 Calling getPrompts API endpoint: /api/v1/prompts?limit=1000');
+    const result = await this.fetchWithAuth<PromptsResponse>('/api/v1/prompts?limit=1000');
+    console.log('🔍 API Response:', result);
+    return result;
   }
 
   async getPrompt(promptId: string): Promise<PromptData> {
-    // Temporarily use debug endpoint for testing
-    return this.fetchWithoutAuth<PromptData>(`/api/v1/prompts/debug/${promptId}`);
+    return this.fetchWithAuth<PromptData>(`/api/v1/prompts/${promptId}`);
   }
 
   async createPrompt(promptData: CreatePromptRequest): Promise<PromptData> {

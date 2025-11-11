@@ -208,38 +208,30 @@ async def get_prompts(
     current_user: CurrentUser = Depends(get_current_active_user)
 ):
     """Get all prompts from database with tenant filtering"""
-    try:# Build tenant-aware query
+    try:
+        # Build tenant-aware query
         where_conditions = ["1=1"]
         query_params = []
         
-        # Add tenant filtering
-        if current_user.tenant and current_user.tenant.id:
-            where_conditions.append("p.tenant_id = $" + str(len(query_params) + 1))
-            query_params.append(str(current_user.tenant.id))
-        elif current_user.project and current_user.project.id:
+        # Add tenant filtering (use project_id since prompts table doesn't have tenant_id)
+        if current_user.project and current_user.project.id:
             where_conditions.append("p.project_id = $" + str(len(query_params) + 1))  
             query_params.append(str(current_user.project.id))
         
         where_clause = " AND ".join(where_conditions)
         
-        # Query prompts from the planner.prompts table with tenant filtering
+        # Query prompts from the planner.prompts table with project filtering
         query = f"""
         SELECT 
             p.id,
             p.text,
             p.intent,
             p.created_at,
-            p.author_id,
-            p.title,
-            p.category,
-            p.tags,
-            p.starting_url,
-            p.status,
             p.updated_at,
-            p.version,
-            p.usage_count,
-            p.priority,
-            p.estimated_duration
+            p.project_id,
+            p.user_id,
+            p.status,
+            p.parsed_plan
         FROM planner.prompts p
         WHERE {where_clause}
         ORDER BY p.created_at DESC
@@ -250,34 +242,38 @@ async def get_prompts(
         # Format the results for the frontend
         prompts = []
         for row in results:
-            # Use the dedicated title column, fallback to extracting from text if empty
-            title = row["title"]
-            if not title and row["text"]:
+            # Extract title from text field (first line) since no dedicated title column
+            title = "Untitled"
+            if row["text"]:
                 text_lines = row["text"].split('\n')
-                title = text_lines[0].strip() if text_lines else f"Prompt {row['id']}"
-            elif not title:
-                title = f"Prompt {row['id']}"
+                title = text_lines[0].strip() if text_lines and text_lines[0].strip() else "Untitled"
                 
             prompt = {
                 "id": row["id"],
                 "title": title,
                 "description": row["intent"] or "",
                 "content": row["text"] or "",
-                "category": row["category"] or "Functional",
-                "starting_url": row["starting_url"] or "",
-                "tags": row["tags"] or [],
+                "category": "Functional",  # Default since not in schema
+                "starting_url": "",  # Not in schema
+                "tags": [],  # Not in schema
                 "status": row["status"] or "draft",
-                "priority": row["priority"] or "medium",
-                "version": row["version"] or 1,
-                "usage_count": row["usage_count"] or 0,
-                "estimated_duration": str(row["estimated_duration"]) if row["estimated_duration"] else None,
+                "priority": "medium",  # Default since not in schema
+                "version": 1,  # Default since not in schema
+                "usage_count": 0,  # Default since not in schema
+                "estimated_duration": None,  # Not in schema
                 "dateModified": (row["updated_at"] or row["created_at"]).isoformat() + "Z" if (row["updated_at"] or row["created_at"]) else None,
+                "created_at": row["created_at"].isoformat() + "Z" if row["created_at"] else None,
+                "updated_at": row["updated_at"].isoformat() + "Z" if row["updated_at"] else None,
             }
             prompts.append(prompt)
         
         return {"prompts": prompts, "total": len(prompts)}
         
-    except Exception as e:raise HTTPException(status_code=500, detail="Failed to fetch prompts")
+    except Exception as e:
+        print(f"❌ Exception in get_prompts: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Failed to fetch prompts")
 
 @router.get("/prompts/{prompt_id}")
 async def get_prompt(prompt_id: str, db: DatabaseManager = Depends(get_db)):
@@ -289,17 +285,11 @@ async def get_prompt(prompt_id: str, db: DatabaseManager = Depends(get_db)):
             p.text,
             p.intent,
             p.created_at,
-            p.author_id,
-            p.title,
-            p.category,
-            p.tags,
-            p.starting_url,
-            p.status,
             p.updated_at,
-            p.version,
-            p.usage_count,
-            p.priority,
-            p.estimated_duration
+            p.project_id,
+            p.user_id,
+            p.status,
+            p.parsed_plan
         FROM planner.prompts p
         WHERE p.id = $1
         """
@@ -309,55 +299,59 @@ async def get_prompt(prompt_id: str, db: DatabaseManager = Depends(get_db)):
         if not result:
             raise HTTPException(status_code=404, detail="Prompt not found")
         
-        # Use the dedicated title column, fallback to extracting from text if empty
-        title = result["title"]
-        if not title and result["text"]:
+        # Extract title from text field since no dedicated title column
+        title = "Untitled"
+        if result["text"]:
             text_lines = result["text"].split('\n')
-            title = text_lines[0].strip() if text_lines else f"Prompt {result['id']}"
-        elif not title:
-            title = f"Prompt {result['id']}"
+            title = text_lines[0].strip() if text_lines and text_lines[0].strip() else "Untitled"
             
         prompt = {
             "id": result["id"],
             "title": title,
             "description": result["intent"] or "",
             "content": result["text"] or "",
-            "category": result["category"] or "Functional",
-            "starting_url": result["starting_url"] or "",
-            "tags": result["tags"] or [],
+            "category": "Functional",  # Default since not in schema
+            "starting_url": "",  # Not in schema
+            "tags": [],  # Not in schema
             "status": result["status"] or "draft",
-            "priority": result["priority"] or "medium",
-            "version": result["version"] or 1,
-            "usage_count": result["usage_count"] or 0,
-            "estimated_duration": str(result["estimated_duration"]) if result["estimated_duration"] else None,
+            "priority": "medium",  # Default since not in schema
+            "version": 1,  # Default since not in schema
+            "usage_count": 0,  # Default since not in schema
+            "estimated_duration": None,  # Not in schema
             "dateModified": result["created_at"].isoformat() + "Z" if result["created_at"] else None,
+            "created_at": result["created_at"].isoformat() + "Z" if result["created_at"] else None,
+            "updated_at": result["updated_at"].isoformat() + "Z" if result["updated_at"] else None,
         }
         return prompt
         
     except HTTPException:
         raise
-    except Exception as e:raise HTTPException(status_code=500, detail="Failed to fetch prompt")
+    except Exception as e:
+        print(f"❌ Exception in get_prompt: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Failed to fetch prompt")
 
 @router.post("/prompts")
 async def create_prompt(prompt_data: Dict[str, Any], db: DatabaseManager = Depends(get_db)):
     """Create a new prompt"""
-    try:# Insert the new prompt into the correct schema
-        # Use the actual planner.prompts table structure with explicit IDs
+    try:
+        print(f"🔍 Received prompt data: {prompt_data}")
+        print(f"🔍 Database manager: {db}")
+        
+        # Insert the new prompt into the correct schema
+        # Use the actual planner.prompts table structure based on schema
         insert_query = """
         INSERT INTO planner.prompts (
-            tenant_id, project_id, author_id, text, intent, title, category, 
-            tags, starting_url, status, priority, version, usage_count, estimated_duration
+            project_id, user_id, text, intent, status
         )
         VALUES (
-            'c315b3f7-ab14-4e65-a87f-447092d11171'::uuid, 
-            '7b83ebdf-911f-464e-916a-abe229d5bdf4'::uuid, 
-            '25616325-6f9d-4dad-8e4d-16affd24e7cf'::uuid, 
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+            $1, $2, $3, $4, $5
         )
-        RETURNING id, text, intent, title, category, tags, starting_url, status, 
-                  priority, version, usage_count, estimated_duration, created_at
+        RETURNING id, project_id, user_id, text, intent, status, created_at, updated_at
         """
         
+        print("🔍 Preparing query parameters...")
         # Map frontend fields to database columns
         title = prompt_data.get("title", "Untitled")
         # Handle both 'content' and 'text' field names for backward compatibility
@@ -366,38 +360,34 @@ async def create_prompt(prompt_data: Dict[str, Any], db: DatabaseManager = Depen
         intent_field = prompt_data.get("description", "") or prompt_data.get("intent", "")
         category = prompt_data.get("category", "Functional")
         tags = prompt_data.get("tags", [])
-        starting_url = prompt_data.get("starting_url", "")
-        status = prompt_data.get("status", "draft")
-        priority = prompt_data.get("priority", "medium")
-        version = prompt_data.get("version", 1)
-        usage_count = prompt_data.get("usage_count", 0)
+        # Use hardcoded IDs for now (in production, these should come from auth context)
+        project_id = "4a8ed320-b109-432c-9b07-1b206bb2edb2"  # Default project
+        user_id = "f0a27595-4f2e-4362-815b-5b2b83a686f6"     # Default user
+        status = prompt_data.get("status", "pending")
         
-        # Parse estimated_duration if provided
-        estimated_duration = None
-        if prompt_data.get("estimated_duration"):
-            try:
-                # Assume duration is provided in minutes, convert to interval
-                minutes = int(prompt_data["estimated_duration"])
-                estimated_duration = f"{minutes} minutes"
-            except (ValueError, TypeError):
-                estimated_duration = None# Execute the insert with all the new fields
+        # Execute the insert with the correct parameters for the actual schema
+        print(f"🔍 Executing database query with parameters:")
+        print(f"   project_id: {project_id}")
+        print(f"   user_id: {user_id}")
+        print(f"   text: {content}")
+        print(f"   intent: {intent_field}")
+        print(f"   status: {status}")
+        
         result = await db.execute_one(
             insert_query,
-            content,  # text field ($1)
-            intent_field,  # intent field ($2)
-            title,  # title field ($3)
-            category,  # category field ($4)
-            tags,  # tags field ($5)
-            starting_url,  # starting_url field ($6)
-            status,  # status field ($7)
-            priority,  # priority field ($8)
-            version,  # version field ($9)
-            usage_count,  # usage_count field ($10)
-            estimated_duration  # estimated_duration field ($11)
+            project_id,   # project_id ($1)
+            user_id,      # user_id ($2)
+            content,      # text ($3)
+            intent_field, # intent ($4)
+            status        # status ($5)
         )
         
+        print(f"🔍 Database query result: {result}")
+        
         if not result:
-            raise HTTPException(status_code=500, detail="Failed to create prompt")# Handle tags if provided (simplified since we don't have tags table in schema)
+            raise HTTPException(status_code=500, detail="Failed to create prompt")
+        
+        # Handle tags if provided (simplified since we don't have tags table in schema)
         tags = []
         
         # Format response to match frontend expectations
@@ -421,13 +411,19 @@ async def create_prompt(prompt_data: Dict[str, Any], db: DatabaseManager = Depen
         
         return new_prompt
         
-    except Exception as e:# Return the actual error for debugging
+    except Exception as e:
+        print(f"❌ Exception in create_prompt: {str(e)}")
+        print(f"❌ Exception type: {type(e)}")
+        import traceback
+        traceback.print_exc()
+        # Return the actual error for debugging
         raise HTTPException(status_code=500, detail=f"Failed to create prompt: {str(e)}")
 
 @router.put("/prompts/{prompt_id}")
 async def update_prompt(prompt_id: str, prompt_data: Dict[str, Any], db: DatabaseManager = Depends(get_db)):
     """Update an existing prompt"""
-    try:# Update the prompt in the correct schema
+    try:
+        # Update the prompt in the correct schema
         update_query = """
         UPDATE planner.prompts 
         SET text = $2, intent = $3, title = $4, category = $5, tags = $6, 
@@ -467,13 +463,20 @@ async def update_prompt(prompt_id: str, prompt_data: Dict[str, Any], db: Databas
             estimated_duration  # estimated_duration
         )
         
-        if not result:raise HTTPException(status_code=404, detail="Prompt not found")# Get the updated prompt with tags
+        if not result:
+            raise HTTPException(status_code=404, detail="Prompt not found")
+        
+        # Get the updated prompt with tags
         updated_prompt = await get_prompt(prompt_id, db)
         return updated_prompt
         
     except HTTPException:
         raise
-    except Exception as e:raise HTTPException(status_code=500, detail="Failed to update prompt")
+    except Exception as e:
+        print(f"❌ Exception in update_prompt: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Failed to update prompt")
 
 @router.get("/generated-test-plans/by-prompt/{prompt_id}")
 async def get_test_plans_by_prompt(prompt_id: str, db: DatabaseManager = Depends(get_db)):
@@ -520,7 +523,11 @@ async def get_test_plans_by_prompt(prompt_id: str, db: DatabaseManager = Depends
         
         return {"test_plans": plans, "total": len(plans)}
         
-    except Exception as e:raise HTTPException(status_code=500, detail="Failed to fetch test plans")
+    except Exception as e:
+        print(f"❌ Exception in get_test_plans_by_prompt: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Failed to fetch test plans")
 
 @router.post("/generated-test-plans")
 async def create_or_update_test_plan(test_plan_data: Dict[str, Any], db: DatabaseManager = Depends(get_db)):
@@ -567,6 +574,7 @@ async def create_or_update_test_plan(test_plan_data: Dict[str, Any], db: Databas
                 "draft",
                 existing_plan["id"]
             )
+        else:
             # Insert new plan
             insert_query = """
             INSERT INTO planner.plans (prompt_id, status, plan_json)
@@ -596,7 +604,12 @@ async def create_or_update_test_plan(test_plan_data: Dict[str, Any], db: Databas
         }
         
         return new_plan
-    except Exception as e:raise HTTPException(status_code=500, detail="Failed to create test plan")
+        
+    except Exception as e:
+        print(f"❌ Exception in create_or_update_test_plan: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Failed to create test plan")
 
 @router.get("/elements")
 async def get_elements(limit: int = 100, db: DatabaseManager = Depends(get_db)):
@@ -656,11 +669,13 @@ async def get_elements(limit: int = 100, db: DatabaseManager = Depends(get_db)):
         try:
             simple_query = "SELECT COUNT(*) FROM repo.elements"
             count = await db.execute_scalar(simple_query)
-        except Exception as table_error:# Try alternative table
+        except Exception as table_error:
+            # Try alternative table
             try:
                 simple_query = "SELECT COUNT(*) FROM recorded_elements"
                 count = await db.execute_scalar(simple_query)
-            except Exception as alt_error:# Fallback to mock data if database fails
+            except Exception as alt_error:
+                # Fallback to mock data if database fails
                 mock_elements = [
                 {
                     "id": "el_1",

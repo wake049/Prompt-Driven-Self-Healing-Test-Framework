@@ -51,6 +51,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Debug: Log router information
+logger.info(f"Policy router routes: {len(policy_router.routes)}")
+logger.info(f"Page context router routes: {len(page_context_router.routes)}")
+for route in policy_router.routes:
+    if hasattr(route, 'path') and hasattr(route, 'methods'):
+        logger.info(f"Policy route: {route.methods} {route.path}")
+for route in page_context_router.routes:
+    if hasattr(route, 'path') and hasattr(route, 'methods'):
+        logger.info(f"Page context route: {route.methods} {route.path}")
+
 # Initialize global profiler
 profiler = get_global_profiler()
 

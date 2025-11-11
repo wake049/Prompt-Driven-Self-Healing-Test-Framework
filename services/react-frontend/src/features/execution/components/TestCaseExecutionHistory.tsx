@@ -334,7 +334,7 @@ const TestCaseExecutionHistory: React.FC<TestCaseExecutionHistoryProps> = ({
             <StatLabel>Failed Runs</StatLabel>
             <StatSubtext>{stats.failed_executions > 0 ? ((stats.failed_executions / stats.total_executions) * 100).toFixed(1) : '0.0'}% failure rate</StatSubtext>
           </StatCard>
-        </StatsGrid>
+        </StatsRow>
       )}
 
       <ExecutionsTable>
