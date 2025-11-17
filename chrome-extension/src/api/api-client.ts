@@ -35,16 +35,45 @@ class MCPApiClient {
       ...options
     };
 
+    console.log(`API Client - Making request to: ${url}`);
+    console.log(`API Client - Request config:`, config);
+
     try {
       const response = await fetch(url, config);
       
+      console.log(`API Client - Response status: ${response.status}`);
+      
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+        
+        try {
+          const errorBody = await response.text();
+          console.log(`API Client - Error response body:`, errorBody);
+          
+          // Try to parse JSON error
+          try {
+            const errorJson = JSON.parse(errorBody);
+            if (errorJson.detail) {
+              errorMessage += ` - ${errorJson.detail}`;
+            }
+          } catch {
+            // If not JSON, include the raw text
+            if (errorBody) {
+              errorMessage += ` - ${errorBody}`;
+            }
+          }
+        } catch (e) {
+          console.log('Could not read error response body:', e);
+        }
+        
+        throw new Error(errorMessage);
       }
 
       const data = await response.json();
+      console.log(`API Client - Success response:`, data);
       return data;
     } catch (error) {
+      console.error(`API Client - Request failed:`, error);
       throw error;
     }
   }
@@ -78,37 +107,41 @@ class MCPApiClient {
     const currentUrl = window.location.href;
     // Create a more consistent page ID based on the base URL (without query params)
     const baseUrl = currentUrl.split('?')[0].split('#')[0];
-    const pageId = sessionId || `page_${btoa(baseUrl).replace(/[^a-zA-Z0-9]/g, '').substring(0, 32)}`;
     
-    // Map old element structure to new unified API format that matches database schema
+    // Map element data to match the API's ElementData model exactly
     const elementDataForAPI = {
-      element_key: elementData.id || elementData.element_id || `element_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      page_id: pageId,
-      primary_selector: {
-        css_selector: elementData.cssSelector || elementData.css_selector || '',
-        xpath: elementData.xpath || '',
-        tag: elementData.tag || 'div'
-      },
-      alt_selectors: elementData.alt_selectors || [],
-      attributes: {
-        text_content: elementData.text || elementData.textContent || '',
-        url: baseUrl,  // Use clean base URL
-        full_url: currentUrl,  // Keep full URL for reference
-        ...elementData.attributes
-      },
-      ai_reasoning: elementData.reasoning || `Chrome extension recorded element on ${baseUrl}`,
-      is_active: true
+      // Required fields
+      tag: elementData.tag || 'div',
+      page: elementData.page || document.title || window.location.pathname || 'Current Page',
+      
+      // Optional fields with defaults
+      id: elementData.id || elementData.element_id || undefined,
+      element_id: elementData.id || elementData.element_id || undefined,
+      text_content: elementData.text_content || elementData.text || undefined,
+      text: elementData.text || elementData.text_content || undefined,
+      attributes: elementData.attributes || {},
+      xpath: elementData.xpath || undefined,
+      cssSelector: elementData.cssSelector || elementData.css_selector || undefined,
+      css_selector: elementData.css_selector || elementData.cssSelector || undefined,
+      position_x: elementData.position_x || elementData.position?.x || 0,
+      position_y: elementData.position_y || elementData.position?.y || 0,
+      selectors: Array.isArray(elementData.selectors) ? elementData.selectors : [],
+      logical_key: elementData.logical_key || undefined,
+      identity_data: elementData.identity_data || elementData.identity || {}
     };
 
-    // FastAPI expects parameters as separate fields in the request body
+    // FastAPI expects separate parameters, not nested structure
     const requestBody = {
       element_data: elementDataForAPI,
-      session_info: { 
-        session_id: sessionId || pageId, 
+      session_info: sessionId ? {
+        session_id: sessionId,
         name: document.title || 'Untitled Page',
-        url: baseUrl  // Use clean base URL for page identification
-      }
+        page: elementData.page || document.title || 'Current Page',
+        description: `Recorded from ${baseUrl}`
+      } : undefined
     };
+
+    console.log('API Client - Sending element data:', requestBody);
 
     return this.request('/sql/record-element', {
       method: 'POST',

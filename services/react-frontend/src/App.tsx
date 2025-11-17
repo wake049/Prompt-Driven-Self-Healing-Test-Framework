@@ -1,7 +1,8 @@
 import React from 'react';
 import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { ThemeProvider as StyledThemeProvider } from 'styled-components';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
-import { ThemeProvider } from './contexts/ThemeContext';
+import { ThemeProvider, useTheme } from './contexts/ThemeContext';
 import { MCPProvider } from './contexts/MCPContext';
 import ProtectedRoute from './components/auth/ProtectedRoute';
 import Login from './components/auth/Login';
@@ -16,6 +17,17 @@ import "./styles/App.css";
 if (process.env.NODE_ENV === 'development') {
   import('./shared/utils/extensionSimulator');
 }
+
+// Wrapper component to bridge custom theme context with styled-components
+const StyledThemeWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { theme } = useTheme();
+  return (
+    <StyledThemeProvider theme={theme}>
+      {children}
+    </StyledThemeProvider>
+  );
+};
+
 // Main app layout for authenticated users
 const AuthenticatedApp: React.FC = () => {
   const location = useLocation();
@@ -54,22 +66,24 @@ const AuthenticatedApp: React.FC = () => {
 export default function App() {
   return (
     <ThemeProvider>
-      <MCPProvider>
-        <AuthProvider>
-          <Routes>
-            {/* Public routes */}
-            <Route path="/login" element={<Login />} />
-            <Route path="/register" element={<Register />} />
-            
-            {/* Protected routes - all under one protected wrapper */}
-            <Route path="/*" element={
-              <ProtectedRoute>
-                <AuthenticatedApp />
-              </ProtectedRoute>
-            } />
-          </Routes>
-        </AuthProvider>
-      </MCPProvider>
+      <StyledThemeWrapper>
+        <MCPProvider>
+          <AuthProvider>
+            <Routes>
+              {/* Public routes */}
+              <Route path="/login" element={<Login />} />
+              <Route path="/register" element={<Register />} />
+              
+              {/* Protected routes - all under one protected wrapper */}
+              <Route path="/*" element={
+                <ProtectedRoute>
+                  <AuthenticatedApp />
+                </ProtectedRoute>
+              } />
+            </Routes>
+          </AuthProvider>
+        </MCPProvider>
+      </StyledThemeWrapper>
     </ThemeProvider>
   );
 }

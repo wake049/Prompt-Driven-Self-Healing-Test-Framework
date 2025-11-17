@@ -295,6 +295,9 @@ function generateSemanticName(element: Element): string {
   const name = element.getAttribute('name');
   const type = element.getAttribute('type');
   const href = element.getAttribute('href');
+  const placeholder = element.getAttribute('placeholder');
+  const alt = element.getAttribute('alt');
+  const title = element.getAttribute('title');
   
   // Priority 1: Use data-test or data-testid if available (convert to camelCase)
   if (dataTest) {
@@ -305,15 +308,77 @@ function generateSemanticName(element: Element): string {
   }
   
   // Priority 2: Use ID if meaningful (convert to camelCase)
-  if (id && id.length > 1 && !id.match(/^[0-9]+$/)) {
+  if (id && id.length > 1 && !id.match(/^[0-9]+$/) && !id.match(/^[a-z0-9_-]{20,}$/)) {
     return toCamelCase(id);
   }
   
-  // Priority 3: Combine meaningful class names with tag context
+  // Priority 3: Use name attribute for form elements
+  if (name && (tag === 'input' || tag === 'select' || tag === 'textarea')) {
+    const nameWithType = type ? `${name}_${type}` : name;
+    return toCamelCase(nameWithType);
+  }
+  
+  // Priority 4: Extract from meaningful text content (improved)
+  if (textContent && textContent.length > 0 && textContent.length <= 60) {
+    const cleanText = textContent.replace(/[^a-zA-Z0-9\s]/g, '').trim();
+    if (cleanText && cleanText.split(' ').length <= 6) { // Limit to reasonable word count
+      // For buttons, extract action
+      if (tag === 'button' || element.getAttribute('role') === 'button' || classes.some(cls => cls.includes('btn'))) {
+        const actionName = extractButtonAction(cleanText);
+        return actionName || toCamelCase(cleanText) + 'Button';
+      }
+      // For links
+      if (tag === 'a') {
+        const linkName = extractLinkAction(cleanText, href);
+        return linkName || toCamelCase(cleanText) + 'Link';
+      }
+      // For headings
+      if (['h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(tag)) {
+        return toCamelCase(cleanText) + 'Heading';
+      }
+      // For labels
+      if (tag === 'label') {
+        return toCamelCase(cleanText) + 'Label';
+      }
+      // For price-like content
+      if (cleanText.match(/^\$?\d+\.?\d*$/) || cleanText.toLowerCase().includes('price')) {
+        const productContext = extractProductContext(element, textContent);
+        return productContext ? `${productContext}Price` : 'priceElement';
+      }
+      // For general text elements
+      if (cleanText.length <= 30) {
+        return toCamelCase(cleanText) + getElementTypeSuffix(tag, element);
+      }
+    }
+  }
+  
+  // Priority 5: Use placeholder for inputs
+  if (placeholder && (tag === 'input' || tag === 'textarea')) {
+    return toCamelCase(placeholder) + 'Input';
+  }
+  
+  // Priority 6: Use aria-label
+  if (ariaLabel && ariaLabel.length <= 40) {
+    return toCamelCase(ariaLabel) + getElementTypeSuffix(tag, element);
+  }
+  
+  // Priority 7: Use alt text for images
+  if (alt && tag === 'img') {
+    return toCamelCase(alt) + 'Image';
+  }
+  
+  // Priority 8: Use title attribute
+  if (title && title.length <= 40) {
+    return toCamelCase(title) + getElementTypeSuffix(tag, element);
+  }
+  
+  // Priority 9: Combine meaningful class names with tag context
   const meaningfulClasses = classes.filter(cls => 
     cls.length > 2 && 
-    !cls.match(/^[a-z0-9_-]{8,}$/) && // Filter out generated classes
-    !cls.match(/^(col|row|d-|p-|m-|text-|bg-|btn-|container|wrapper|item|element)/) // Filter out utility classes
+    cls.length < 30 && // Not too long
+    !cls.match(/^[a-z0-9_-]{20,}$/) && // Filter out generated classes
+    !cls.match(/^(col|row|d-|p-|m-|text-|bg-|btn-outline|btn-sm|btn-lg|container|wrapper|item|element|component)$/) && // Filter out utility classes
+    !cls.match(/^(active|disabled|hidden|visible|selected|checked|focus|hover)$/) // Filter out state classes
   );
   
   if (meaningfulClasses.length > 0) {
@@ -324,71 +389,55 @@ function generateSemanticName(element: Element): string {
       return productContext ? `${productContext}Price` : toCamelCase(priceClass!);
     }
     
-    // For buttons, combine action with context
-    if (tag === 'button' || meaningfulClasses.some(cls => cls.includes('btn') || cls.includes('button'))) {
-      const actionContext = extractActionContext(element, textContent, meaningfulClasses);
-      return actionContext || toCamelCase(meaningfulClasses[0]);
+    // For navigation elements
+    if (meaningfulClasses.some(cls => cls.includes('nav') || cls.includes('menu'))) {
+      const navClass = meaningfulClasses.find(cls => cls.includes('nav') || cls.includes('menu'));
+      return toCamelCase(navClass!) + 'Navigation';
     }
     
-    // For links, use href context or class
-    if (tag === 'a' && href) {
-      const linkContext = extractLinkContext(href, textContent);
-      return linkContext || toCamelCase(meaningfulClasses[0]);
+    // For form elements
+    if (meaningfulClasses.some(cls => cls.includes('form') || cls.includes('input') || cls.includes('field'))) {
+      const formClass = meaningfulClasses.find(cls => cls.includes('form') || cls.includes('input') || cls.includes('field'));
+      return toCamelCase(formClass!);
     }
     
-    return toCamelCase(meaningfulClasses[0]);
+    // Use the most specific class
+    const bestClass = meaningfulClasses.find(cls => 
+      cls.includes(tag) || // Class that includes the tag name
+      cls.includes('btn') || cls.includes('button') ||
+      cls.includes('link') || cls.includes('nav') ||
+      cls.includes('header') || cls.includes('footer') ||
+      cls.includes('modal') || cls.includes('card')
+    ) || meaningfulClasses[0];
+    
+    return toCamelCase(bestClass) + getElementTypeSuffix(tag, element);
   }
   
-  // Priority 4: Use name attribute
-  if (name) {
-    return toCamelCase(name);
-  }
-  
-  // Priority 5: Use aria-label
-  if (ariaLabel) {
-    return toCamelCase(ariaLabel);
-  }
-  
-  // Priority 6: Generate name from text content
-  if (textContent && textContent.length > 0 && textContent.length <= 50) {
-    const cleanText = textContent.replace(/[^a-zA-Z0-9\s]/g, '').trim();
-    if (cleanText) {
-      // For buttons, extract action
-      if (tag === 'button' || element.getAttribute('role') === 'button') {
-        return toCamelCase(cleanText) + 'Button';
-      }
-      // For links
-      if (tag === 'a') {
-        return toCamelCase(cleanText) + 'Link';
-      }
-      // For price-like content
-      if (cleanText.match(/^\$?\d+\.?\d*$/)) {
-        const productContext = extractProductContext(element, textContent);
-        return productContext ? `${productContext}Price` : 'priceElement';
-      }
-      return toCamelCase(cleanText);
-    }
-  }
-  
-  // Priority 6.5: Use position-based naming for similar elements
-  const siblingElements = Array.from(document.querySelectorAll(`.${element.className.split(' ')[0]}`));
-  if (siblingElements.length > 1 && siblingElements.includes(element)) {
-    const index = siblingElements.indexOf(element) + 1;
-    const baseClass = element.className.split(' ')[0];
-    if (baseClass && baseClass.length > 2) {
-      return `${toCamelCase(baseClass)}${index}`;
-    }
-  }
-  
-  // Priority 7: Use type for inputs
+  // Priority 10: Use type for inputs with better naming
   if (tag === 'input' && type) {
-    return `${type}Input`;
+    const inputName = getInputTypeName(type);
+    return inputName + 'Input';
   }
   
-  // Fallback: Generate based on tag and position
+  // Priority 11: Use href context for links
+  if (tag === 'a' && href && href !== '#') {
+    const hrefContext = extractHrefContext(href);
+    if (hrefContext) {
+      return hrefContext + 'Link';
+    }
+  }
+  
+  // Priority 12: Smart positional naming based on context
+  const contextualName = getContextualName(element, tag);
+  if (contextualName) {
+    return contextualName;
+  }
+  
+  // Fallback: Generate based on tag and position with better naming
   const siblings = Array.from(element.parentElement?.children || []).filter(s => s.tagName === element.tagName);
   const index = siblings.indexOf(element) + 1;
-  return `${tag}Element${index}`;
+  const tagName = getElementTypeDisplayName(tag);
+  return `${tagName}${siblings.length > 1 ? index : ''}`;
 }
 
 // Helper function to convert strings to camelCase
@@ -398,6 +447,293 @@ function toCamelCase(str: string): string {
     .replace(/[^a-zA-Z0-9]+(.)/g, (_, char) => char.toUpperCase())
     .replace(/^[^a-zA-Z]/, '') // Remove leading non-letters
     .replace(/[^a-zA-Z0-9]/g, ''); // Remove any remaining special chars
+}
+
+// Helper functions for better naming
+function extractButtonAction(text: string): string | null {
+  const lowerText = text.toLowerCase();
+  
+  // Common button patterns
+  if (lowerText.includes('add') && lowerText.includes('cart')) return 'addToCart';
+  if (lowerText.includes('add') && lowerText.includes('basket')) return 'addToBasket';
+  if (lowerText.includes('login') || lowerText.includes('sign in')) return 'login';
+  if (lowerText.includes('logout') || lowerText.includes('sign out')) return 'logout';
+  if (lowerText.includes('register') || lowerText.includes('sign up')) return 'register';
+  if (lowerText.includes('submit')) return 'submit';
+  if (lowerText.includes('cancel')) return 'cancel';
+  if (lowerText.includes('close')) return 'close';
+  if (lowerText.includes('save')) return 'save';
+  if (lowerText.includes('delete') || lowerText.includes('remove')) return 'delete';
+  if (lowerText.includes('edit')) return 'edit';
+  if (lowerText.includes('search')) return 'search';
+  if (lowerText.includes('filter')) return 'filter';
+  if (lowerText.includes('sort')) return 'sort';
+  if (lowerText.includes('menu')) return 'menu';
+  if (lowerText.includes('burger')) return 'burgerMenu';
+  if (lowerText.includes('toggle')) return 'toggle';
+  if (lowerText.includes('expand')) return 'expand';
+  if (lowerText.includes('collapse')) return 'collapse';
+  if (lowerText.includes('next')) return 'next';
+  if (lowerText.includes('previous') || lowerText.includes('prev')) return 'previous';
+  if (lowerText.includes('back')) return 'back';
+  if (lowerText.includes('continue')) return 'continue';
+  if (lowerText.includes('proceed')) return 'proceed';
+  if (lowerText.includes('checkout')) return 'checkout';
+  if (lowerText.includes('buy')) return 'buy';
+  if (lowerText.includes('purchase')) return 'purchase';
+  if (lowerText.includes('download')) return 'download';
+  if (lowerText.includes('upload')) return 'upload';
+  if (lowerText.includes('share')) return 'share';
+  if (lowerText.includes('copy')) return 'copy';
+  
+  return null;
+}
+
+function extractLinkAction(text: string, href?: string | null): string | null {
+  const lowerText = text.toLowerCase();
+  
+  // Check text content first
+  if (lowerText.includes('home')) return 'home';
+  if (lowerText.includes('about')) return 'about';
+  if (lowerText.includes('contact')) return 'contact';
+  if (lowerText.includes('help')) return 'help';
+  if (lowerText.includes('support')) return 'support';
+  if (lowerText.includes('faq')) return 'faq';
+  if (lowerText.includes('terms')) return 'terms';
+  if (lowerText.includes('privacy')) return 'privacy';
+  if (lowerText.includes('policy')) return 'policy';
+  if (lowerText.includes('login')) return 'login';
+  if (lowerText.includes('register')) return 'register';
+  if (lowerText.includes('account')) return 'account';
+  if (lowerText.includes('profile')) return 'profile';
+  if (lowerText.includes('settings')) return 'settings';
+  if (lowerText.includes('dashboard')) return 'dashboard';
+  if (lowerText.includes('cart')) return 'cart';
+  if (lowerText.includes('checkout')) return 'checkout';
+  if (lowerText.includes('order')) return 'order';
+  if (lowerText.includes('inventory')) return 'inventory';
+  if (lowerText.includes('products')) return 'products';
+  if (lowerText.includes('catalog')) return 'catalog';
+  
+  // Check href if available
+  if (href) {
+    const lowerHref = href.toLowerCase();
+    if (lowerHref.includes('home')) return 'home';
+    if (lowerHref.includes('about')) return 'about';
+    if (lowerHref.includes('contact')) return 'contact';
+    if (lowerHref.includes('login')) return 'login';
+    if (lowerHref.includes('cart')) return 'cart';
+    if (lowerHref.includes('inventory')) return 'inventory';
+  }
+  
+  return null;
+}
+
+function getElementTypeSuffix(tag: string, element: Element): string {
+  const role = element.getAttribute('role');
+  
+  if (tag === 'button' || role === 'button') return 'Button';
+  if (tag === 'a') return 'Link';
+  if (tag === 'input') return 'Input';
+  if (tag === 'select') return 'Select';
+  if (tag === 'textarea') return 'TextArea';
+  if (tag === 'img') return 'Image';
+  if (tag === 'div' && role === 'button') return 'Button';
+  if (tag === 'span' && role === 'button') return 'Button';
+  if (['h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(tag)) return 'Heading';
+  if (tag === 'label') return 'Label';
+  if (tag === 'form') return 'Form';
+  if (tag === 'nav') return 'Navigation';
+  if (tag === 'header') return 'Header';
+  if (tag === 'footer') return 'Footer';
+  if (tag === 'main') return 'Main';
+  if (tag === 'section') return 'Section';
+  if (tag === 'article') return 'Article';
+  if (tag === 'aside') return 'Aside';
+  
+  // For generic elements, check for common patterns
+  if (element.textContent && element.textContent.trim()) {
+    const text = element.textContent.toLowerCase();
+    if (text.match(/^\$?\d+\.?\d*$/)) return 'Price';
+    if (text.includes('error') || text.includes('warning')) return 'Message';
+  }
+  
+  // Check classes for hints
+  const classes = (element as HTMLElement).className || '';
+  if (classes.includes('price') || classes.includes('cost')) return 'Price';
+  if (classes.includes('error') || classes.includes('warning') || classes.includes('alert')) return 'Message';
+  if (classes.includes('modal')) return 'Modal';
+  if (classes.includes('card')) return 'Card';
+  if (classes.includes('panel')) return 'Panel';
+  if (classes.includes('menu')) return 'Menu';
+  
+  return 'Element';
+}
+
+function getInputTypeName(type: string): string {
+  switch (type.toLowerCase()) {
+    case 'text': return 'text';
+    case 'password': return 'password';
+    case 'email': return 'email';
+    case 'tel': case 'phone': return 'phone';
+    case 'number': return 'number';
+    case 'date': return 'date';
+    case 'time': return 'time';
+    case 'datetime-local': return 'datetime';
+    case 'search': return 'search';
+    case 'url': return 'url';
+    case 'submit': return 'submit';
+    case 'button': return 'button';
+    case 'reset': return 'reset';
+    case 'checkbox': return 'checkbox';
+    case 'radio': return 'radio';
+    case 'file': return 'file';
+    case 'hidden': return 'hidden';
+    case 'range': return 'range';
+    case 'color': return 'color';
+    default: return type || 'input';
+  }
+}
+
+function extractHrefContext(href: string): string | null {
+  const lowerHref = href.toLowerCase();
+  
+  // Extract meaningful parts from URL
+  if (lowerHref.includes('linkedin')) return 'linkedin';
+  if (lowerHref.includes('facebook')) return 'facebook';
+  if (lowerHref.includes('twitter')) return 'twitter';
+  if (lowerHref.includes('instagram')) return 'instagram';
+  if (lowerHref.includes('youtube')) return 'youtube';
+  if (lowerHref.includes('github')) return 'github';
+  
+  // Extract from pathname
+  try {
+    const url = new URL(href, window.location.origin);
+    const pathParts = url.pathname.split('/').filter(p => p && p !== 'index.html');
+    if (pathParts.length > 0) {
+      const lastPart = pathParts[pathParts.length - 1]
+        .replace(/\.(html|htm|php|jsp|asp)$/i, '')
+        .replace(/[-_]/g, '');
+      if (lastPart.length > 0 && lastPart.length < 20) {
+        return lastPart;
+      }
+    }
+  } catch {
+    // Invalid URL, continue with other checks
+  }
+  
+  return null;
+}
+
+function getContextualName(element: Element, tag: string): string | null {
+  // Check if element is in a form
+  const form = element.closest('form');
+  if (form) {
+    const formClass = form.className || '';
+    const formId = form.id || '';
+    
+    if (formClass.includes('login') || formId.includes('login')) {
+      if (tag === 'input') {
+        const type = element.getAttribute('type');
+        const name = element.getAttribute('name');
+        if (type === 'email' || name?.includes('email')) return 'loginEmail';
+        if (type === 'password' || name?.includes('password')) return 'loginPassword';
+        if (name?.includes('username')) return 'loginUsername';
+      }
+      if (tag === 'button') return 'loginButton';
+    }
+    
+    if (formClass.includes('search') || formId.includes('search')) {
+      if (tag === 'input') return 'searchInput';
+      if (tag === 'button') return 'searchButton';
+    }
+    
+    if (formClass.includes('contact') || formId.includes('contact')) {
+      if (tag === 'input') {
+        const name = element.getAttribute('name');
+        if (name?.includes('name')) return 'contactName';
+        if (name?.includes('email')) return 'contactEmail';
+        if (name?.includes('subject')) return 'contactSubject';
+      }
+      if (tag === 'textarea') return 'contactMessage';
+      if (tag === 'button') return 'contactSubmit';
+    }
+  }
+  
+  // Check if element is in a navigation
+  const nav = element.closest('nav, .nav, .navigation, .navbar, .menu');
+  if (nav && tag === 'a') {
+    const text = element.textContent?.trim().toLowerCase();
+    if (text && text.length <= 20) {
+      return toCamelCase(text) + 'NavLink';
+    }
+    return 'navLink';
+  }
+  
+  // Check if element is in a card or product container
+  const productContainer = element.closest('.product, .item, .card, .inventory_item, [class*="product"], [class*="item"]');
+  if (productContainer) {
+    const containerClass = (productContainer as HTMLElement).className || '';
+    
+    if (containerClass.includes('inventory_item') || containerClass.includes('product')) {
+      if (tag === 'button' || element.getAttribute('role') === 'button') {
+        const text = element.textContent?.toLowerCase();
+        if (text?.includes('add')) return 'addToCartButton';
+        return 'productButton';
+      }
+      
+      if (element.className.includes('price') || element.textContent?.match(/^\$\d/)) {
+        const productName = extractProductContext(element, element.textContent || '');
+        return productName ? `${productName}Price` : 'productPrice';
+      }
+      
+      if (element.className.includes('name') || element.className.includes('title')) {
+        return 'productName';
+      }
+    }
+  }
+  
+  // Check for modal or dialog context
+  const modal = element.closest('.modal, .dialog, [role="dialog"], [role="alertdialog"]');
+  if (modal) {
+    if (tag === 'button') {
+      const text = element.textContent?.toLowerCase();
+      if (text?.includes('close') || text?.includes('cancel')) return 'modalClose';
+      if (text?.includes('ok') || text?.includes('confirm')) return 'modalConfirm';
+      return 'modalButton';
+    }
+  }
+  
+  return null;
+}
+
+function getElementTypeDisplayName(tag: string): string {
+  switch (tag) {
+    case 'button': return 'button';
+    case 'a': return 'link';
+    case 'input': return 'input';
+    case 'select': return 'dropdown';
+    case 'textarea': return 'textArea';
+    case 'img': return 'image';
+    case 'h1': case 'h2': case 'h3': case 'h4': case 'h5': case 'h6': return 'heading';
+    case 'p': return 'paragraph';
+    case 'span': return 'text';
+    case 'div': return 'container';
+    case 'form': return 'form';
+    case 'nav': return 'navigation';
+    case 'header': return 'header';
+    case 'footer': return 'footer';
+    case 'main': return 'main';
+    case 'section': return 'section';
+    case 'article': return 'article';
+    case 'aside': return 'sidebar';
+    case 'ul': case 'ol': return 'list';
+    case 'li': return 'listItem';
+    case 'table': return 'table';
+    case 'tr': return 'tableRow';
+    case 'td': case 'th': return 'tableCell';
+    default: return tag;
+  }
 }
 
 // Extract product context from surrounding elements
@@ -484,146 +820,94 @@ function extractLinkContext(href: string, textContent: string): string | null {
 }
 
 function discoverElements(max = 500): Candidate[] {
-  // Include both interactive AND content/verification elements
-  const interactiveElements = Array.from(document.querySelectorAll('button, input, a[href], [role="button"], [onclick], select, textarea'));
-  const contentElements = Array.from(document.querySelectorAll('[data-test], [data-testid], .price, .inventory_item_price, [class*="price"], [class*="cost"], [class*="amount"], .title, [class*="title"], .name, [class*="name"], .description, [class*="description"], .product, [class*="product"], .item, [class*="item"]'));
+  // Simple discovery - let AI handle complex filtering and naming
+  const allElements = Array.from(document.querySelectorAll(`
+    button, 
+    input:not([type="hidden"]), 
+    a[href], 
+    [role="button"], 
+    select, 
+    textarea,
+    [data-test], 
+    [data-testid], 
+    .btn,
+    .button,
+    h1, h2, h3, h4, h5, h6,
+    [class*="price"],
+    [class*="cost"], 
+    [class*="amount"],
+    [class*="title"],
+    [class*="name"],
+    [class*="product"],
+    [class*="item"]
+  `));
   
-  // Combine both sets and remove duplicates
-  const allElements = new Set([...interactiveElements, ...contentElements]);
-  
-  // Filter out meaningless container elements
-  const filteredElements = Array.from(allElements).filter(el => {
-    // Always keep interactive elements
-    if (interactiveElements.includes(el)) return true;
-    
-    // For content elements, check if they're meaningful containers
-    const tag = el.tagName.toLowerCase();
-    const hasId = !!(el as HTMLElement).id;
-    const hasDataAttrs = el.hasAttribute('data-test') || el.hasAttribute('data-testid');
-    const hasClasses = !!(el as HTMLElement).className && typeof (el as HTMLElement).className === 'string' && (el as HTMLElement).className.trim().length > 0;
-    const hasText = !!(el.textContent?.trim());
-    const hasDirectText = el.childNodes && Array.from(el.childNodes).some(node => node.nodeType === Node.TEXT_NODE && node.textContent?.trim());
-    
-    // Skip generic divs/spans that are just containers
-    if ((tag === 'div' || tag === 'span') && !hasId && !hasDataAttrs && !hasClasses) {
-      // If it has no identifying attributes, check if it has direct text content
-      // or if it's just a wrapper around other elements
-      if (!hasDirectText) {
-        const childElements = Array.from(el.children);
-        // Skip if it's just a wrapper with one child that has the meaningful content
-        if (childElements.length === 1) {
-          const child = childElements[0];
-          const childHasId = !!(child as HTMLElement).id;
-          const childHasClasses = !!(child as HTMLElement).className && typeof (child as HTMLElement).className === 'string' && (child as HTMLElement).className.trim().length > 0;
-          const childHasDataAttrs = child.hasAttribute('data-test') || child.hasAttribute('data-testid');
-          
-          // If the child has meaningful attributes, skip the parent container
-          if (childHasId || childHasClasses || childHasDataAttrs) {
-            return false;
-          }
-        }
-        
-        // Also skip if it's a container with multiple children but no direct text
-        if (childElements.length > 1 && !hasDirectText) {
-          return false;
-        }
-      }
+  // Basic filtering only - remove obviously useless elements
+  const filteredElements = allElements.filter(el => {
+    // Skip hidden elements
+    const style = window.getComputedStyle(el as HTMLElement);
+    if (style.display === 'none' || style.visibility === 'hidden') {
+      return false;
     }
     
-    // Keep elements with meaningful attributes or direct text content
-    return hasId || hasDataAttrs || hasClasses || hasDirectText;
+    // Skip tiny elements
+    const rect = (el as HTMLElement).getBoundingClientRect();
+    if (rect.width < 5 || rect.height < 5) {
+      return false;
+    }
+    
+    return true;
   });
-  
-  const elements = filteredElements;
-  
+
   const candidates: Candidate[] = [];
-  elements.slice(0, max).forEach((el) => {
+  
+  filteredElements.slice(0, max).forEach((el, index) => {
     const tag = el.tagName.toLowerCase();
     
-    // Generate semantic name based on selectors and content
-    const semanticName = generateSemanticName(el);
+    // Simple generic naming - AI will handle proper naming
+    const genericName = `${tag}_${index + 1}`;
     
     const testid = el.getAttribute('data-testid') || '';
     const id = el.id || '';
-    const className = el.className || '';
     const selectors: any[] = [];
 
+    // Basic selectors
     if (id) {
-      selectors.push({ type: 'css', value: `#${id}`, stability: 'high' });
+      selectors.push({ type: 'css', value: `#${CSS.escape(id)}`, stability: 'high' });
       selectors.push({ type: 'xpath', value: `//*[@id="${id}"]`, stability: 'high' });
     }
     if (testid) {
       selectors.push({ type: 'css', value: `[data-testid="${testid}"]`, stability: 'high' });
-      selectors.push({ type: 'xpath', value: `//*[@data-testid="${testid}"]`, stability: 'high' });
     }
-    if (className && typeof className === 'string') {
-      const classes = className.trim().split(/\s+/).filter(c => c);
-      if (classes.length > 0) {
-        selectors.push({ type: 'css', value: `.${classes.join('.')}`, stability: 'med' });
-      }
-    }
-    const nameAttr = el.getAttribute('name');
-    if (nameAttr) {
-      selectors.push({ type: 'css', value: `${tag}[name="${nameAttr}"]`, stability: 'med' });
-    }
-    if (semanticName && semanticName.length < 50 && semanticName.length > 0) {
-      selectors.push({ type: 'css', value: `${tag}:contains("${semanticName}")`, stability: 'low' });
-    }
-    selectors.push({
-      type: 'css',
-      value: `${tag}:nth-of-type(${Array.from(el.parentElement?.children || []).filter(child => child.tagName === el.tagName).indexOf(el) + 1})`,
-      stability: 'low'
-    });
-    selectors.push({ type: 'xpath', value: generateXPath(el), stability: id ? 'high' : testid ? 'high' : 'low' });
-
-    let score = 0.8;
-    const why = [];
-    let group = {label: 'interactive'};
     
-    // Score interactive elements higher
-    if (tag === 'button' || el.getAttribute('role') === 'button') { 
-      score = 0.9; 
-      why.push('button element'); 
-      group = {label: 'buttons'}; 
-    }
-    else if (tag === 'input') { 
-      score = 0.85; 
-      why.push('input element'); 
-      group = {label: 'inputs'}; 
-    }
-    else if (tag === 'a') { 
-      score = 0.8; 
-      why.push('link element'); 
-      group = {label: 'links'}; 
-    }
-    // Score content/verification elements appropriately
-    else if (el.classList.contains('price') || el.classList.contains('inventory_item_price') || 
-             el.className.includes('price') || el.className.includes('cost') || el.className.includes('amount')) {
-      score = 0.75;
-      why.push('price element');
-      group = {label: 'prices'};
-    }
-    else if (el.className.includes('title') || el.className.includes('name')) {
-      score = 0.7;
-      why.push('title/name element');
-      group = {label: 'content'};
-    }
-    else if (el.className.includes('description') || el.className.includes('product') || el.className.includes('item')) {
-      score = 0.65;
-      why.push('content element');
-      group = {label: 'content'};
-    }
-    else {
-      score = 0.6;
-      why.push('other element');
-      group = {label: 'other'};
-    }
+    selectors.push({ type: 'xpath', value: generateXPath(el), stability: id ? 'high' : 'low' });
 
-    if (id) { score += 0.1; why.push('has ID'); }
-    if (testid) { score += 0.1; why.push('has test ID'); }
+    // Simple scoring
+    let score = 0.5;
+    const why = [];
+    let group = {label: 'elements'};
+    
+    if (['button', 'input', 'select', 'textarea', 'a'].includes(tag)) {
+      score = 0.8;
+      why.push('interactive element');
+      group = {label: 'interactive'};
+    }
+    
+    if (id) { score += 0.2; why.push('has ID'); }
+    if (testid) { score += 0.2; why.push('has test ID'); }
 
-    candidates.push({ tag, name: semanticName, testid, selectors, score, why, group, element: el });
+    candidates.push({ 
+      tag, 
+      name: genericName, 
+      testid, 
+      selectors, 
+      score, 
+      why, 
+      group, 
+      element: el 
+    });
   });
+  
   return candidates.sort((a, b) => b.score - a.score);
 }
 
@@ -1878,91 +2162,98 @@ chrome.runtime.onMessage.addListener(async (request, _sender, sendResponse) => {
 });
 
 /**
- * NEW: Extract all elements for AI analysis
- * This is the core function that gets all page elements and formats them for AI processing
+ * NEW: Extract all elements for AI analysis - copy the recording approach
+ * This mimics what the recording button does but for all elements at once
  */
 function extractAllElementsForAI(): any {
+  // Use the same discovery logic as the recording functionality
+  const allCandidates = discoverElements(500);
   
-  // Get all potentially interesting elements
-  const selectors = [
-    // Interactive elements
-    'button', 'input', 'select', 'textarea', 'a[href]', '[role="button"]', '[onclick]',
-    // Content elements
-    'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'span', 'div',
-    // Form elements
-    'form', 'label', 'fieldset', 'legend',
-    // Lists and tables
-    'ul', 'ol', 'li', 'table', 'tr', 'td', 'th',
-    // Media and embedded content
-    'img', 'video', 'audio', 'iframe', 'embed',
-    // Semantic elements
-    'nav', 'header', 'footer', 'main', 'section', 'article', 'aside',
-    // Special attributes
-    '[data-test]', '[data-testid]', '[id]', '[name]', '[class*="btn"]', '[class*="button"]',
-    '[class*="menu"]', '[class*="nav"]', '[class*="price"]', '[class*="cost"]', '[class*="amount"]'
-  ];
-  
-  const foundElements = document.querySelectorAll(selectors.join(', '));
   const elements: any[] = [];
   const elementStats = {
-    total: foundElements.length,
+    total: allCandidates.length,
     interactive: 0,
     withId: 0,
     withTestId: 0,
-    withText: 0,
-    forms: 0,
-    buttons: 0,
-    links: 0,
-    inputs: 0
+    withText: 0
   };
 
-  // Process each element
-  foundElements.forEach((element, index) => {
-      const elementData = extractElementData(element, index);
+  // Process each discovered element using the same logic as click recording
+  allCandidates.forEach((candidate, index) => {
+    try {
+      const element = candidate.element;
       
+      // Generate selectors the same way as individual recording
+      const selectorsAll = (domActionExecutor as any).elementFinder.generateSelectors(element);
+      
+      // Get primary selectors with validation (same as recording)
+      let primaryCssSelector = simpleCssSelector(element);
+      try {
+        const testElement = document.querySelector(primaryCssSelector);
+        if (testElement !== element) {
+          primaryCssSelector = (domActionExecutor as any).generateUniqueSelector(element);
+        }
+      } catch (e) {
+        primaryCssSelector = (domActionExecutor as any).generateUniqueSelector(element);
+      }
+
+      let primaryXPath = selectorsAll.find((s: any) => s.startsWith('//')) || generateXPath(element);
+      try {
+        const result = document.evaluate(primaryXPath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+        if (result.singleNodeValue !== element) {
+          primaryXPath = (domActionExecutor as any).generateUniqueXPath(element);
+        }
+      } catch (e) {
+        primaryXPath = (domActionExecutor as any).generateUniqueXPath(element);
+      }
+
+      // Create RecordedElement exactly like in click recording
+      const recordedElement = {
+        id: (domActionExecutor as any).generateSuggestedIds(element)[0] || `element-${index}`,
+        tag: element.tagName.toLowerCase(),
+        text: element.textContent?.trim() || '',
+        attributes: (domActionExecutor as any).getElementAttributes(element),
+        xpath: primaryXPath,
+        cssSelector: primaryCssSelector,
+        position: { x: 0, y: 0 }, // No click position for bulk extraction
+        suggestedIds: (domActionExecutor as any).generateSuggestedIds(element),
+        selectors: selectorsAll,
+        page: (domActionExecutor as any).currentPageName || 'Current Page'
+      };
+
       // Update stats
-      if (elementData.isInteractive) elementStats.interactive++;
-      if (elementData.attributes?.id) elementStats.withId++;
-      if (elementData.attributes?.['data-testid'] || elementData.attributes?.['data-test']) elementStats.withTestId++;
-      if (elementData.text && elementData.text.trim()) elementStats.withText++;
-      if (elementData.tag === 'form') elementStats.forms++;
-      if (elementData.tag === 'button' || elementData.attributes?.role === 'button') elementStats.buttons++;
-      if (elementData.tag === 'a') elementStats.links++;
-      if (elementData.tag === 'input') elementStats.inputs++;
+      if (candidate.tag === 'button' || candidate.tag === 'input' || candidate.tag === 'a' || element.getAttribute('role') === 'button') {
+        elementStats.interactive++;
+      }
+      if (recordedElement.attributes?.id) elementStats.withId++;
+      if (recordedElement.attributes?.['data-testid'] || recordedElement.attributes?.['data-test']) elementStats.withTestId++;
+      if (recordedElement.text && recordedElement.text.trim()) elementStats.withText++;
       
-      elements.push(elementData);
+      elements.push(recordedElement);
+    } catch (error) {
+      // Skip elements that fail to process
+      console.warn('Failed to process element:', error);
+    }
   });
 
   const pageInfo = {
     url: window.location.href,
     title: document.title,
     hostname: window.location.hostname,
-    pathname: window.location.pathname,
-    viewport: {
-      width: window.innerWidth,
-      height: window.innerHeight
-    },
-    documentSize: {
-      width: document.documentElement.scrollWidth,
-      height: document.documentElement.scrollHeight
-    }
+    pathname: window.location.pathname
   };
 
-  const result = {
+  return {
     pageInfo,
     elements,
     elementStats,
     elementCount: elements.length,
     extractedAt: new Date().toISOString(),
-    extractionType: 'full_page_ai_analysis'
+    extractionType: 'bulk_recording_extraction'
   };
-
-  return result;
 }
 
-/**
- * Extract detailed data for a single element
- */
+// Simple element data extraction - let AI handle naming
 function extractElementData(element: Element, index: number): any {
   const tag = element.tagName.toLowerCase();
   const rect = (element as HTMLElement).getBoundingClientRect();
@@ -1980,75 +2271,249 @@ function extractElementData(element: Element, index: number): any {
     }
   };
 
-  // Attributes
+  // Attributes - collect all meaningful attributes for AI to analyze
   const attributes: Record<string, string> = {};
-  const meaningfulAttrs = ['id', 'class', 'name', 'type', 'role', 'data-test', 'data-testid', 
-                          'href', 'src', 'alt', 'title', 'placeholder', 'value', 'for', 
-                          'aria-label', 'aria-labelledby', 'aria-describedby'];
-  
-  meaningfulAttrs.forEach(attr => {
-    const value = element.getAttribute(attr);
-    if (value !== null && value.trim() !== '') {
-      attributes[attr] = value.trim();
+  for (const attr of Array.from(element.attributes)) {
+    if (attr.value !== null && attr.value.trim() !== '') {
+      attributes[attr.name] = attr.value.trim();
     }
-  });
+  }
   
   if (Object.keys(attributes).length > 0) {
     elementData.attributes = attributes;
   }
 
   // Text content
-  const text = element.textContent?.trim();
-  if (text && text.length > 0) {
-    elementData.text = text.length > 200 ? text.substring(0, 200) + '...' : text;
-    elementData.textLength = text.length;
+  const textContent = element.textContent?.trim();
+  if (textContent) {
+    elementData.textContent = textContent;
+    elementData.textLength = textContent.length;
+    
+    // Also capture direct text (not from children)
+    const directText = Array.from(element.childNodes)
+      .filter(node => node.nodeType === Node.TEXT_NODE)
+      .map(node => node.textContent?.trim())
+      .filter(text => text)
+      .join(' ').trim();
+    
+    if (directText) {
+      elementData.directText = directText;
+    }
   }
 
-  // Direct text (not from children)
-  const directText = Array.from(element.childNodes)
-    .filter(node => node.nodeType === Node.TEXT_NODE)
-    .map(node => node.textContent?.trim())
-    .filter(text => text && text.length > 0)
-    .join(' ')
-    .trim();
-  
-  if (directText) {
-    elementData.directText = directText.length > 100 ? directText.substring(0, 100) + '...' : directText;
+  // Interactive element detection
+  elementData.isInteractive = isInteractiveElement(element);
+  elementData.isFormElement = ['input', 'select', 'textarea', 'button'].includes(tag) || 
+                             element.closest('form') !== null;
+
+  // Context information for AI
+  elementData.context = {
+    parentTag: element.parentElement?.tagName?.toLowerCase(),
+    parentClasses: element.parentElement?.className?.trim().split(/\s+/).filter(c => c) || [],
+    siblingCount: element.parentElement?.children.length || 0,
+    childCount: element.children.length,
+    depth: getElementDepth(element)
+  };
+
+  // Form context
+  const form = element.closest('form');
+  if (form) {
+    elementData.formContext = {
+      formId: form.id,
+      formClasses: form.className?.trim().split(/\s+/).filter(c => c) || [],
+      formAction: form.getAttribute('action'),
+      formMethod: form.getAttribute('method')
+    };
   }
 
-  // Interactive classification
-  const interactiveElements = ['button', 'input', 'select', 'textarea', 'a'];
-  const hasInteractiveRole = element.getAttribute('role') === 'button' || 
-                           element.hasAttribute('onclick') ||
-                           element.getAttribute('tabindex') !== null;
-  
-  elementData.isInteractive = interactiveElements.includes(tag) || hasInteractiveRole;
-
-  // Special element type classifications
-  if (tag === 'input') {
-    elementData.inputType = element.getAttribute('type') || 'text';
-    elementData.required = element.hasAttribute('required');
+  // Navigation context
+  const nav = element.closest('nav, .nav, .navigation, .navbar, .menu');
+  if (nav) {
+    elementData.navigationContext = {
+      navClasses: (nav as HTMLElement).className?.trim().split(/\s+/).filter(c => c) || [],
+      navRole: nav.getAttribute('role')
+    };
   }
 
-  if (tag === 'form') {
-    elementData.method = element.getAttribute('method') || 'get';
-    elementData.action = element.getAttribute('action') || '';
-  }
-
-  if (tag === 'a') {
-    const href = element.getAttribute('href');
-    elementData.isExternalLink = href && (href.startsWith('http') || href.startsWith('//'));
-    elementData.isInternalLink = href && href.startsWith('/');
-    elementData.isAnchorLink = href && href.startsWith('#');
-  }
-
-  // Generate potential selectors
-  elementData.selectors = generateElementSelectors(element);
-
-  // Semantic analysis
-  elementData.semanticInfo = analyzeElementSemantics(element, text || '', attributes);
+  // Generate multiple selector types for AI to choose from
+  elementData.selectors = generateAllSelectors(element);
 
   return elementData;
+}
+
+function isInteractiveElement(element: Element): boolean {
+  const tag = element.tagName.toLowerCase();
+  const role = element.getAttribute('role');
+  
+  return ['button', 'input', 'select', 'textarea', 'a'].includes(tag) ||
+         role === 'button' ||
+         element.hasAttribute('onclick') ||
+         element.hasAttribute('tabindex') ||
+         (element as HTMLElement).className?.includes('btn') ||
+         (element as HTMLElement).className?.includes('button');
+}
+
+function getElementDepth(element: Element): number {
+  let depth = 0;
+  let current = element.parentElement;
+  while (current && current !== document.body && depth < 20) {
+    depth++;
+    current = current.parentElement;
+  }
+  return depth;
+}
+
+function generateAllSelectors(element: Element): any[] {
+  const selectors: any[] = [];
+  const tag = element.tagName.toLowerCase();
+  
+  // ID selector
+  const id = (element as HTMLElement).id;
+  if (id) {
+    selectors.push({
+      type: 'css',
+      value: `#${CSS.escape(id)}`,
+      stability: 'high',
+      priority: 1
+    });
+    selectors.push({
+      type: 'xpath',
+      value: `//*[@id="${id}"]`,
+      stability: 'high',
+      priority: 1
+    });
+  }
+  
+  // Data attributes
+  const testId = element.getAttribute('data-testid');
+  if (testId) {
+    selectors.push({
+      type: 'css',
+      value: `[data-testid="${CSS.escape(testId)}"]`,
+      stability: 'high',
+      priority: 1
+    });
+  }
+  
+  const dataTest = element.getAttribute('data-test');
+  if (dataTest) {
+    selectors.push({
+      type: 'css',
+      value: `[data-test="${CSS.escape(dataTest)}"]`,
+      stability: 'high',
+      priority: 1
+    });
+  }
+  
+  // Name attribute
+  const name = element.getAttribute('name');
+  if (name) {
+    selectors.push({
+      type: 'css',
+      value: `${tag}[name="${CSS.escape(name)}"]`,
+      stability: 'medium',
+      priority: 2
+    });
+  }
+  
+  // Class selectors
+  const className = (element as HTMLElement).className;
+  if (className && typeof className === 'string') {
+    const classes = className.trim().split(/\s+/).filter(c => c);
+    if (classes.length > 0) {
+      // Full class combination
+      selectors.push({
+        type: 'css',
+        value: `.${classes.map(CSS.escape).join('.')}`,
+        stability: 'medium',
+        priority: 3
+      });
+      
+      // Individual classes (for AI to evaluate)
+      classes.forEach(cls => {
+        selectors.push({
+          type: 'css',
+          value: `.${CSS.escape(cls)}`,
+          stability: 'medium',
+          priority: 4
+        });
+      });
+    }
+  }
+  
+  // Attribute selectors for other meaningful attributes
+  const meaningfulAttrs = ['href', 'src', 'alt', 'title', 'placeholder', 'type', 'role'];
+  meaningfulAttrs.forEach(attr => {
+    const value = element.getAttribute(attr);
+    if (value) {
+      selectors.push({
+        type: 'css',
+        value: `[${attr}="${CSS.escape(value)}"]`,
+        stability: 'medium',
+        priority: 5
+      });
+    }
+  });
+  
+  // Text-based selector (for AI to evaluate)
+  const textContent = element.textContent?.trim();
+  if (textContent && textContent.length <= 50) {
+    selectors.push({
+      type: 'xpath',
+      value: `//${tag}[normalize-space(text())="${textContent}"]`,
+      stability: 'low',
+      priority: 6
+    });
+  }
+  
+  // XPath
+  selectors.push({
+    type: 'xpath',
+    value: generateXPath(element),
+    stability: id ? 'high' : 'low',
+    priority: id ? 1 : 7
+  });
+  
+  // CSS path
+  selectors.push({
+    type: 'css',
+    value: generateCSSPath(element),
+    stability: 'low',
+    priority: 8
+  });
+  
+  return selectors;
+}
+
+function generateCSSPath(element: Element): string {
+  const path: string[] = [];
+  let current: Element | null = element;
+  
+  while (current && current !== document.documentElement) {
+    let selector = current.tagName.toLowerCase();
+    
+    if ((current as HTMLElement).id) {
+      selector += `#${CSS.escape((current as HTMLElement).id)}`;
+      path.unshift(selector);
+      break;
+    } else if ((current as HTMLElement).className && typeof (current as HTMLElement).className === 'string') {
+      const classes = (current as HTMLElement).className.trim().split(/\s+/).filter(c => c);
+      if (classes.length > 0) {
+        selector += `.${classes.slice(0, 2).map(CSS.escape).join('.')}`;
+      }
+    }
+    
+    const siblings = Array.from(current.parentElement?.children || [])
+      .filter(s => s.tagName === current!.tagName);
+    if (siblings.length > 1) {
+      selector += `:nth-child(${siblings.indexOf(current) + 1})`;
+    }
+    
+    path.unshift(selector);
+    current = current.parentElement;
+  }
+  
+  return path.join(' > ');
 }
 
 /**
@@ -2306,42 +2771,6 @@ function isElementVisible(element: Element): boolean {
          style.visibility !== 'hidden' && 
          style.display !== 'none' && 
          style.opacity !== '0';
-}
-
-/**
- * Generate CSS path for element
- */
-function generateCSSPath(element: Element): string {
-  const path: string[] = [];
-  let current: Element | null = element;
-  
-  while (current && current !== document.documentElement) {
-    let selector = current.tagName.toLowerCase();
-    
-    if ((current as HTMLElement).id) {
-      selector += `#${CSS.escape((current as HTMLElement).id)}`;
-      path.unshift(selector);
-      break;
-    }
-    
-    if ((current as HTMLElement).className && typeof (current as HTMLElement).className === 'string') {
-      const classes = (current as HTMLElement).className.trim().split(/\s+/).filter(c => c);
-      if (classes.length > 0) {
-        selector += `.${classes.map(CSS.escape).join('.')}`;
-      }
-    }
-    
-    const siblings = Array.from(current.parentElement?.children || [])
-      .filter(s => s.tagName === current!.tagName);
-    if (siblings.length > 1) {
-      selector += `:nth-child(${siblings.indexOf(current) + 1})`;
-    }
-    
-    path.unshift(selector);
-    current = current.parentElement;
-  }
-  
-  return path.join(' > ');
 }
 
 window.addEventListener('beforeunload', () => {

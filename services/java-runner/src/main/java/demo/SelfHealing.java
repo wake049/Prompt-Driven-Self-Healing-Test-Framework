@@ -22,8 +22,12 @@ public class SelfHealing {
     private SqlElementRepository sqlElementRepository;
     private List<HealingLogEntry> healingLog;
     private static final String HEALING_LOG_FILE = "healing_log.json";
-    private static final String HEALING_SERVICE_URL = "http://localhost:8000/api/v1/healing/submit";
-    private static final String SELECTOR_GENERATION_URL = "http://localhost:8000/api/v1/selectors/generate";
+    private static final String HEALING_SERVICE_URL = System.getenv("UNIFIED_API_URL") != null ? 
+        System.getenv("UNIFIED_API_URL") + "/api/v1/healing/submit" : 
+        "https://testhelix.com/api/v1/healing/submit";
+    private static final String SELECTOR_GENERATION_URL = System.getenv("UNIFIED_API_URL") != null ? 
+        System.getenv("UNIFIED_API_URL") + "/api/v1/selectors/generate" : 
+        "https://testhelix.com/api/v1/selectors/generate";
     private boolean useSqlBackend;
 
     public SelfHealing(WebDriver driver, ElementRepository elementRepository) {
@@ -60,13 +64,9 @@ public class SelfHealing {
         
         // Tier 1: Repository-based alternatives (prioritized by policy)
         if (useSqlBackend) {
-<<<<<<< Updated upstream
-            alternatives = sqlElementRepository.getAlternatives(elementId, page);
-=======
             List<String> repoAlternatives = sqlElementRepository.getAlternatives(elementId, page, step.getSelectorPolicy());
             alternatives.addAll(repoAlternatives);
             System.out.println("📚 Tier 1: Found " + repoAlternatives.size() + " repository alternatives");
->>>>>>> Stashed changes
         } else {
             List<String> repoAlternatives = elementRepository.getAlternatives(elementId, page);
             alternatives.addAll(repoAlternatives);
@@ -821,17 +821,6 @@ public class SelfHealing {
         return null;
     }
     
-    /**
-     * Determine selector type from locator string
-     */
-    private String getSelectorType(String locator) {
-        if (locator.startsWith("xpath=") || locator.startsWith("//") || locator.contains("//*[@")) {
-            return "xpath";
-        } else {
-            return "css";
-        }
-    }
-
     private void sendHealingSuccessRequest(Step step, String healedLocator, List<String> attemptedAlternatives, String healedSelectorType, String expectedPolicy) {
         try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
             HttpPost httpPost = new HttpPost(HEALING_SERVICE_URL);

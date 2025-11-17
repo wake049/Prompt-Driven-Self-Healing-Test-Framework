@@ -1,13 +1,7 @@
 {
-<<<<<<< Updated upstream
-  "name": "mcp-test-runner-extension",
-  "version": "1.0.0",
-  "description": "Chrome Extension with MCP-style tools for test automation",
-=======
   "name": "self-healing-test-framework-extension",
-  "version": "2.0.0",
+  "version": "2.0.0", 
   "description": "Chrome Extension for automated test element recording and execution with MCP server integration",
->>>>>>> Stashed changes
   "type": "module",
   "scripts": {
     "dev": "vite build --watch --mode development",

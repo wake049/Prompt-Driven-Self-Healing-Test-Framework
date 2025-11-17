@@ -388,7 +388,7 @@ const GlobalSidebar: React.FC<GlobalSidebarProps> = ({ className }) => {
     <SidebarContainer className={className}>
       <SidebarHeader>
         <SidebarIcon></SidebarIcon>
-        <SidebarTitle>Test Framework</SidebarTitle>
+        <SidebarTitle>Test Helix</SidebarTitle>
       </SidebarHeader>
       
       <NavigationList>

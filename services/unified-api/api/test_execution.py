@@ -2,7 +2,7 @@
 Test Execution API - Clean version with proper database integration
 """
 
-from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Header
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 import logging
@@ -17,6 +17,8 @@ import tempfile
 import psycopg2
 import uuid
 from pathlib import Path
+import boto3
+from botocore.exceptions import ClientError
 from core.database import get_database, DatabaseManager
 from core.binding_processor import BindingProcessor
 from schemas.enterprise import TestBindings, DataBinding
@@ -26,6 +28,94 @@ from services.selector_conversion import convert_steps_to_dual_selector_format, 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# Initialize ECS client
+try:
+    ecs_client = boto3.client('ecs', region_name='us-east-2')
+except Exception as e:
+    logger.warning(f"Could not initialize ECS client: {e}")
+    ecs_client = None
+
+async def launch_ecs_task_for_test_execution(prompt_id: str, test_steps: List[Dict], execution_id: str, auth_token: str) -> str:
+    """
+    Launch an ECS task to execute the test steps
+    Returns the ECS task ARN
+    """
+    if not ecs_client:
+        raise HTTPException(status_code=500, detail="ECS client not available")
+    
+    try:
+        # Create the task definition overrides with environment variables
+        task_overrides = {
+            'containerOverrides': [
+                {
+                    'name': 'java-runner',
+                    'environment': [
+                        {
+                            'name': 'UNIFIED_API_URL',
+                            'value': 'https://testhelix.com'
+                        },
+                        {
+                            'name': 'API_AUTH_TOKEN',
+                            'value': auth_token
+                        },
+                        {
+                            'name': 'EXECUTION_ID',
+                            'value': execution_id
+                        },
+                        {
+                            'name': 'PROMPT_ID',
+                            'value': prompt_id
+                        }
+                    ]
+                }
+            ]
+        }
+        
+        # Create a temporary file with test steps for the Java runner
+        import json
+        steps_json = json.dumps(test_steps)
+        
+        # Store steps in environment variable (for small payloads) or upload to S3 (for large payloads)
+        if len(steps_json) < 4000:  # Environment variable size limit
+            task_overrides['containerOverrides'][0]['environment'].append({
+                'name': 'TEST_STEPS_JSON',
+                'value': steps_json
+            })
+        else:
+            # TODO: Upload to S3 and pass S3 URL
+            raise HTTPException(status_code=413, detail="Test steps too large - S3 upload needed")
+        
+        # Launch the ECS task
+        response = ecs_client.run_task(
+            cluster='testhelix-cluster-v2',
+            taskDefinition='java-runner-task',
+            launchType='FARGATE',
+            networkConfiguration={
+                'awsvpcConfiguration': {
+                    'subnets': [
+                        'subnet-0e4d1e38fab9a2eac'  # testhelix-v2-subnet-public1-us-east-2a
+                    ],
+                    'assignPublicIp': 'ENABLED',
+                    'securityGroups': [
+                        # Add your security group ID here if needed
+                    ]
+                }
+            },
+            overrides=task_overrides
+        )
+        
+        task_arn = response['tasks'][0]['taskArn']
+        logger.info(f"Launched ECS task for execution {execution_id}: {task_arn}")
+        
+        return task_arn
+        
+    except ClientError as e:
+        logger.error(f"Failed to launch ECS task: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to launch test execution: {str(e)}")
+    except Exception as e:
+        logger.error(f"Unexpected error launching ECS task: {e}")
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
 
 def determine_test_execution_status(results: Dict, return_code: int) -> str:
     """
@@ -330,11 +420,41 @@ async def get_db() -> DatabaseManager:
 async def execute_prompt(
     prompt_id: str,
     background_tasks: BackgroundTasks,
+    authorization: Optional[str] = Header(None),
     db: DatabaseManager = Depends(get_db)
 ):
     """Execute a test based on a prompt"""
+    logger.info(f"=== EXECUTE PROMPT REQUEST ===")
+    logger.info(f"Prompt ID: {prompt_id}")
+    logger.info(f"Authorization header present: {bool(authorization)}")
+    
     try:
         # Get the plan details from database (using existing planner.plans table)
+        logger.info("Querying database for plan details...")
+        
+        # First, let's see what plans exist in the database
+        debug_query = """
+        SELECT prompt_id, status, created_at 
+        FROM planner.plans 
+        ORDER BY created_at DESC 
+        LIMIT 5
+        """
+        try:
+            debug_results = await db.fetch(debug_query)  # Use fetch() to get rows, not execute()
+            logger.info(f"Recent plans in database: {len(debug_results) if debug_results else 0} records found")
+            logger.info(f"Debug results type: {type(debug_results)}")
+            if debug_results and len(debug_results) > 0:
+                logger.info(f"First result type: {type(debug_results[0])}")
+                logger.info(f"First result: {dict(debug_results[0])}")
+                for i, result in enumerate(debug_results):
+                    row_dict = dict(result)
+                    logger.info(f"Plan {i+1}: prompt_id={row_dict.get('prompt_id', 'N/A')}, status={row_dict.get('status', 'N/A')}")
+            else:
+                logger.info("No plans found in database - this confirms the save endpoint issue")
+        except Exception as e:
+            logger.error(f"Debug query failed: {e}")
+            logger.info("Continuing with execution despite debug query failure")
+        
         plan_query = """
         SELECT 
             p.id,
@@ -347,16 +467,25 @@ async def execute_prompt(
         """
         
         plan_result = await db.execute_one(plan_query, prompt_id)
+        logger.info(f"Plan query result: {bool(plan_result)}")
         
         if not plan_result:
+            logger.error(f"No plan found for prompt ID: {prompt_id}")
             raise HTTPException(status_code=404, detail="Plan not found for this prompt")
         
         # Extract steps from plan_json
+        logger.info("Parsing plan JSON...")
         import json
-        plan_data = json.loads(plan_result['plan_json'])
-        steps_data = plan_data.get('steps', [])
+        try:
+            plan_data = json.loads(plan_result['plan_json'])
+            steps_data = plan_data.get('steps', [])
+            logger.info(f"Found {len(steps_data)} steps in plan")
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse plan JSON: {e}")
+            raise HTTPException(status_code=500, detail="Invalid plan data format")
         
         # Fix corrupted XPath selectors in existing plan data
+        logger.info("Processing and fixing selectors...")
         for step in steps_data:
             if 'dual_selectors' in step and step['dual_selectors']:
                 xpath_selector = step['dual_selectors'].get('xpath_selector', '')
@@ -364,8 +493,11 @@ async def execute_prompt(
                     # Fix double @@ to single @
                     corrected_xpath = xpath_selector.replace('@@', '@')
                     step['dual_selectors']['xpath_selector'] = corrected_xpath
+                    logger.debug(f"Fixed XPath: {xpath_selector} -> {corrected_xpath}")
+                    step['dual_selectors']['xpath_selector'] = corrected_xpath
         
         # Load active data bindings from datahub.data_bindings table for this specific prompt
+        logger.info("Loading active data bindings...")
         active_bindings = []
         try:
             bindings_query = """
@@ -374,16 +506,17 @@ async def execute_prompt(
                 WHERE is_active = true 
                 ORDER BY priority DESC, created_at DESC
             """
-            db_bindings = await db.execute(bindings_query)
+            db_bindings = await db.fetch(bindings_query)
+            logger.info(f"Found {len(db_bindings) if db_bindings else 0} active bindings")
             
             if db_bindings:
-                
                 for binding in db_bindings:
-                    source_ref = binding.get('source_ref', {})
-                    target = binding.get('target', {})
+                    binding_dict = dict(binding)  # Convert asyncpg.Record to dict
+                    source_ref = binding_dict.get('source_ref', {})
+                    target = binding_dict.get('target', {})
                     
                     # Extract binding information
-                    var_name = target.get('variable_name', binding.get('rule_name', 'unknown'))
+                    var_name = target.get('variable_name', binding_dict.get('rule_name', 'unknown'))
                     var_type = target.get('type', 'text')
                     category = target.get('category', 'data')
                     
@@ -414,40 +547,14 @@ async def execute_prompt(
         # Build variable mapping from bindings
         for binding in active_bindings:
             if binding.get('category') == 'price' or binding.get('extract_type') != 'calculated':
-            # Special handling for extract_data steps to use correct variable names
-                action = step.get('action', step.get('name', ''))
-            if action == 'extract_data':
-                # Get the variable name from the step
-                variable_name = None
-                for i, step in enumerate(steps_data):# Process step with binding resolution
-                    processed_step = step.copy()
-            action = step.get('action', step.get('name', ''))
-            if action == 'extract_data':
-                # Get the variable name from the step
-                variable_name = None
-                if binding.get('category') == 'price' or binding.get('extract_type') != 'calculated':
-                    variable_mapping[binding['name']] = binding['name']
-                elif binding.get('type') == "extract":
-                    variable_mapping[binding['name']] = binding['name']
-                for i, step in enumerate(steps_data):# Process step with binding resolution
-                    processed_step = step.copy()
+                variable_mapping[binding['name']] = binding['name']
+            elif binding.get('type') == "extract":
+                variable_mapping[binding['name']] = binding['name']
+        
+        # Process each step and convert to test_steps format
+        for i, step in enumerate(steps_data):
+            processed_step = step.copy()
             
-            # Special handling for extract_data steps to use correct variable names
-            action = step.get('action', step.get('name', ''))
-            if action == 'extract_data':
-                # Get the variable name from the step
-                variable_name = None
-                if 'params' in step and 'variable' in step['params']:
-                    variable_name = step['params']['variable']
-                elif 'variable' in step:
-                    variable_name = step['variable']
-                
-                # Map to actual binding variable name if it exists
-                if variable_name and variable_name in variable_mapping:
-                    mapped_name = variable_mapping[variable_name]# Set the data field to the mapped variable name for Java runner
-                    processed_step['data'] = mapped_name
-                elif variable_name:
-                    processed_step['data'] = variable_name
             def process_variable_step(step_data):
                 """Convert variable assertion steps to extraction/validation steps"""
                 
@@ -461,16 +568,20 @@ async def execute_prompt(
                 elif 'params' in step_data:
                     text_value = step_data['params'].get('text', '')
                 else:
-                    text_value = step_data.get('text', '')# Check for any ${variableName} pattern
+                    text_value = step_data.get('text', '')
+                
+                # Check for any ${variableName} pattern
                 import re
                 variable_pattern = r'\$\{([^}]+)\}'
-                variables_found = re.findall(variable_pattern, str(text_value)) if text_value else []# If this is an assert_text step with any variable pattern
+                variables_found = re.findall(variable_pattern, str(text_value)) if text_value else []
+                
+                # If this is an assert_text step with any variable pattern
                 if action == 'assert_text' and isinstance(text_value, str) and variables_found:
                     modified_step = step_data.copy()
                     new_text = text_value
                     
                     # Process each variable found
-                    for variable_name in variables_found:# Calculate variable value based on bindings
+                    for variable_name in variables_found:
                         # Variable replacement is now handled by Java runner during execution
                         if active_bindings:
                             # Check if this variable is defined in our bindings
@@ -487,11 +598,26 @@ async def execute_prompt(
                         modified_step['params']['text'] = text_value  # Keep original text with variables
                     else:
                         modified_step['text'] = text_value  # Keep original text with variables
-                return modified_step
+                    
+                    return modified_step
+                else:
+                    # Return the original step if no processing needed
+                    return step_data
             
             # Apply variable processing
             processed_step = process_variable_step(processed_step)
             action = processed_step.get('action', processed_step.get('name', ''))
+            
+            # Map actions to Java runner expected format
+            if action == "open_url":
+                action = "open"
+            elif action == "assert_visible":
+                action = "verify_element"
+            elif action == "assert_text":
+                action = "verify_text"
+            elif action == "screenshot":
+                action = "screenshot"
+            # Keep extract_data and calculate as-is since Java runner supports them
             
             # Special handling for extract_data steps
             if action == 'extract_data':
@@ -588,83 +714,205 @@ async def execute_prompt(
         # ENFORCE DATABASE MODE: Create execution record FIRST
         execution_id = await create_execution_record(db, prompt_id, test_steps)
         
-        # Start execution WITH database tracking enforced
-        background_tasks.add_task(
-            execute_java_test_background_wrapper,
-            prompt_id,
-            test_steps,
-            execution_id,
-            active_bindings  # Pass the loaded bindings instead of processed_bindings
-        )
+        # Extract auth token from Authorization header
+        auth_token = None
+        if authorization and authorization.startswith("Bearer "):
+            auth_token = authorization[7:]  # Remove "Bearer " prefix
         
+        logger.info(f"Starting test execution for prompt {prompt_id} with {len(test_steps)} steps")
+        
+        # Call Java runner service directly (much faster than ECS tasks)
+        try:
+            import httpx
+            
+            java_runner_url = os.getenv("JAVA_RUNNER_URL", "https://java-runner.testhelix.com")
+            target_url = f"{java_runner_url}/api/v1/execute"
+            
+            # Apply action mapping to steps before sending to Java runner
+            mapped_steps = []
+            action_mapping = {
+                # Navigation actions
+                "open_url": "open",
+                "navigate": "open",
+                
+                # Element interaction actions
+                "click": "click",
+                "type": "type",
+                "enter_text": "type",
+                "select": "select",
+                
+                # Verification/assertion actions
+                "assert_visible": "verify_element",
+                "assert_element": "verify_element",
+                "verify_element": "verify_element",
+                "assert_text": "verify_text",
+                "verify_text": "verify_text",
+                
+                # Wait actions
+                "wait_for": "wait",
+                "wait": "wait",
+                
+                # Data extraction and calculation
+                "extract_data": "extract_data",
+                "calculate": "calculate",
+                
+                # Screenshot
+                "screenshot": "screenshot"
+            }
+            
+            for step in test_steps:
+                mapped_step = step.copy()  # Create a copy to avoid modifying original
+                original_action = step["action"]
+                if original_action in action_mapping:
+                    mapped_step["action"] = action_mapping[original_action]
+                    logger.info(f"Mapped action '{original_action}' -> '{mapped_step['action']}'")
+                else:
+                    logger.info(f"Action '{original_action}' passed through unchanged")
+                mapped_steps.append(mapped_step)
+            
+            execution_request = {
+                "promptId": prompt_id,
+                "executionId": execution_id,  # Pass the database execution ID
+                "steps": mapped_steps,
+                "authToken": auth_token or ""
+            }
+            
+            logger.info(f"Calling Java runner service at: {target_url}")
+            logger.info(f"Request payload - promptId: {prompt_id}, steps count: {len(test_steps)}, has auth: {bool(auth_token)}")
+            logger.info(f"DETAILED REQUEST PAYLOAD: {json.dumps(execution_request, indent=2)}")
+            
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                logger.info("Making HTTP POST request to Java runner...")
+                logger.info(f"Request headers: Content-Type=application/json, timeout=60s")
+                response = await client.post(
+                    target_url,
+                    json=execution_request,
+                    timeout=60.0
+                )
+                
+                logger.info(f"Java runner response - Status: {response.status_code}, Headers: {dict(response.headers)}")
+                logger.info(f"Java runner response body: {response.text}")
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    logger.info(f"Java runner started execution successfully: {result}")
+                    logger.info(f"Execution ID from Java runner: {result.get('executionId')}")
+                    logger.info(f"Status from Java runner: {result.get('status')}")
+                    
+                    return {
+                        "success": True,
+                        "message": "Test execution started via Java runner service",
+                        "execution_id": execution_id,
+                        "java_runner_execution_id": result.get("executionId"),
+                        "java_runner_status": result.get("status"),
+                        "steps_count": len(test_steps),
+                        "prompt_text": f"Plan execution for prompt {prompt_id}"
+                    }
+                else:
+                    response_text = response.text if hasattr(response, 'text') else str(response.content)
+                    logger.error(f"Java runner failed - Status: {response.status_code}, Response: {response_text}")
+                    raise Exception(f"Java runner service error: {response.status_code} - {response_text}")
+            
+        except httpx.TimeoutException as e:
+            logger.error(f"Timeout calling Java runner service: {e}")
+            logger.error(f"Target URL was: {target_url}")
+        except httpx.ConnectError as e:
+            logger.error(f"Connection error calling Java runner service: {e}")
+            logger.error(f"Target URL was: {target_url}")
+        except Exception as e:
+            logger.error(f"Unexpected error calling Java runner service: {type(e).__name__}: {e}")
+            logger.error(f"Target URL was: {target_url}")
+            
+            # Fallback to background task execution
+            logger.info("Falling back to background task execution")
+            background_tasks.add_task(
+                execute_java_test_background_wrapper,
+                prompt_id,
+                test_steps,
+                execution_id,
+                active_bindings
+            )
+        
+        # Return success response (either from Java runner or fallback)
         return {
             "success": True,
-            "message": "Test execution started with database tracking",
+            "message": "Test execution started",
             "execution_id": execution_id,
             "steps_count": len(test_steps),
-            "prompt_text": f"Plan execution for prompt {prompt_id}"
+            "prompt_text": f"Plan execution for prompt {prompt_id}",
+            "note": "Check logs for execution method used (Java runner vs background task)"
         }
         
+    except HTTPException as he:
+        logger.error(f"HTTP Exception in execute_prompt: {he.status_code} - {he.detail}")
+        raise he
     except Exception as e:
+        logger.error(f"Unexpected error in execute_prompt: {type(e).__name__}: {str(e)}")
+        logger.error(f"Error details: {repr(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Failed to execute prompt: {str(e)}")
 
 async def create_execution_record(db: DatabaseManager, prompt_id: str, steps: List[Dict]) -> str:
     """Create a new execution record using proper exec.runs table"""
     try:
-        # First, find any existing test case to see what project_id is actually used
+        # Find any existing test case to see what project_id is actually used in tests.test_cases table
         try:
-            existing_test_case = await db.execute("SELECT project_id FROM tests.test_cases LIMIT 1")
-            if existing_test_case and existing_test_case[0]['project_id']:
-                project_uuid = existing_test_case[0]['project_id']
-            else:
-                # If no test cases exist, we have a chicken-and-egg problem
-                # Let's see what project_id values exist in the exec.runs table
-                existing_run = await db.execute("SELECT project_id FROM exec.runs WHERE project_id IS NOT NULL LIMIT 1")
-                if existing_run and existing_run[0]['project_id']:
-                    project_uuid = existing_run[0]['project_id']
+            existing_test_case = await db.fetch("SELECT project_id FROM tests.test_cases LIMIT 1")
+            if existing_test_case and len(existing_test_case) > 0:
+                first_row = dict(existing_test_case[0])
+                if first_row.get('project_id'):
+                    project_uuid = first_row['project_id']
                 else:
-                    # Last resort: try to find any valid project reference in the database
-                    # Check if there's a projects table in a different schema
-                    try:
-                        projects_query = """
-                        SELECT table_schema, table_name 
-                        FROM information_schema.tables 
-                        WHERE table_name = 'projects'
-                        """
-                        project_tables = await db.execute(projects_query)
-                        if project_tables:
-                            schema_name = project_tables[0]['table_schema']
-                            projects_in_schema = await db.execute(f"SELECT id FROM {schema_name}.projects LIMIT 1")
-                            if projects_in_schema:
-                                project_uuid = projects_in_schema[0]['id']
-                            else:
-                                raise Exception("Projects table found but empty")
+                    raise Exception("No project_id found in test_cases")
+            else:
+                # If no test cases exist, try to find a project from core.projects table
+                try:
+                    existing_project = await db.fetch("SELECT id FROM core.projects LIMIT 1")
+                    if existing_project and len(existing_project) > 0:
+                        project_uuid = dict(existing_project[0])['id']
+                    else:
+                        # Create a default project if none exists
+                        default_tenant = await db.fetch("SELECT id FROM core.tenants LIMIT 1")
+                        if default_tenant and len(default_tenant) > 0:
+                            tenant_uuid = dict(default_tenant[0])['id']
                         else:
-                            raise Exception("No projects table found in any schema")
-                    except Exception as e:
-                        raise
+                            # Create default tenant first
+                            tenant_result = await db.execute_one("""
+                                INSERT INTO core.tenants (name, slug, description) 
+                                VALUES ($1, $2, $3) 
+                                RETURNING id
+                            """, 'Default Tenant', 'default', 'Auto-created tenant for test execution')
+                            tenant_uuid = tenant_result['id']
+                        
+                        # Create default project
+                        project_result = await db.execute_one("""
+                            INSERT INTO core.projects (tenant_id, name, slug, description, base_url) 
+                            VALUES ($1, $2, $3, $4, $5) 
+                            RETURNING id
+                        """, tenant_uuid, 'Self-Healing Framework', 'self-healing', 'Auto-created project for test execution', 'https://www.saucedemo.com')
+                        project_uuid = project_result['id']
+                except Exception as e:
+                    raise Exception(f"Failed to create/find project: {e}")
         except Exception as e:
-            raise
-        
-        # Environment setup not needed - using single environment mode")
+            raise Exception(f"Failed to find project_id: {e}")
         
         # Use confirmed existing user UUID
-        created_by_uuid = uuid.UUID('25616325-6f9d-4dad-8e4d-16affd24e7cf')# Create or get a test case record in the tests.test_cases table
+        created_by_uuid = uuid.UUID('25616325-6f9d-4dad-8e4d-16affd24e7cf')
+        
+        # Create or get a test case record in the tests.test_cases table
         test_case_uuid = uuid.uuid5(uuid.NAMESPACE_URL, f"prompt:{prompt_id}")
         
-        # Create test case with confirmed user
+        # Create test case with confirmed user - using actual tests.test_cases schema
         test_case_query = """
         INSERT INTO tests.test_cases (
             id, 
             project_id, 
+            plan_id,
             title, 
-            description, 
-            source, 
-            source_ref_id, 
-            status, 
-            created_by
+            description
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        VALUES ($1, $2, $3, $4, $5)
         ON CONFLICT (id) DO NOTHING
         """
         
@@ -672,29 +920,29 @@ async def create_execution_record(db: DatabaseManager, prompt_id: str, steps: Li
             test_case_query,
             test_case_uuid,
             project_uuid,  # Use discovered valid project UUID
+            prompt_id,     # Add plan_id (prompt_id)
             f"Prompt-driven test: {prompt_id[:8]}",
-            f"Automated test execution for prompt {prompt_id}",
-            "prompt_api",  # source
-            prompt_id,  # source_ref_id (the original prompt ID)
-            "active",  # status
-            created_by_uuid  # Use confirmed user UUID
-        )# Now insert into exec.runs table without environment_id
+            f"Automated test execution for prompt {prompt_id}"
+        )
+        
+        # Now insert into exec.runs table - NOTE: exec.runs does NOT have project_id column
+        # It only references test_case_id and session_id (optional)
         execution_query = """
         INSERT INTO exec.runs (
             test_case_id,
-            project_id,
-            runner_meta,
             status,
-            started_at
+            started_at,
+            runner_meta
         )
-        VALUES ($1, $2, $3, $4, $5)
+        VALUES ($1, $2, $3, $4)
         RETURNING id
         """
         
         execution_result = await db.execute_one(
             execution_query,
             test_case_uuid,  # Reference to test case in tests schema
-            project_uuid,  # Use discovered valid project UUID
+            "running",
+            datetime.now(),
             json.dumps({
                 "total_steps": len(steps),
                 "steps_preview": steps[:3] if len(steps) > 3 else steps,
@@ -704,36 +952,41 @@ async def create_execution_record(db: DatabaseManager, prompt_id: str, steps: Li
                 "test_case_name": f"Prompt-driven test: {prompt_id[:8]}",
                 "triggered_by": "api-execution",
                 "project_name": "self-healing-framework"
-            }),
-            "running",
-            datetime.now()
+            })
         )
         
-        execution_id = str(execution_result["id"])# Also create step_results records for each step
+        execution_id = str(execution_result["id"])
+        
+        # Also create step_results records for each step
         # Note: Using test_run_id column name as per actual table schema
         for i, step in enumerate(steps):
             step_query = """
             INSERT INTO exec.step_results (
                 test_run_id,
                 step_order,
-                action,
-                target,
+                action_data,
                 status
             )
-            VALUES ($1, $2, $3, $4, $5)
+            VALUES ($1, $2, $3, $4)
             """
             
             await db.execute_one(
                 step_query,
                 execution_id,  # This should reference our exec.runs record
                 i + 1,
-                step.get("action", "unknown"),
-                step.get("locator", step.get("selector", "")),
+                json.dumps({
+                    "action": step.get("action", "unknown"),
+                    "locator": step.get("locator", step.get("selector", "")),
+                    "value": step.get("value", ""),
+                    "description": step.get("description", "")
+                }),
                 "pending"
             )
+            
         return execution_id
         
     except Exception as e:
+        logger.error(f"Failed to create execution record: {e}")
         raise
 
 def update_db_status_sync(status: str, execution_id: str, prompt_id: str = None, message: str = None, results: Dict = None, bindings: List[Dict] = None):
@@ -1085,14 +1338,14 @@ async def update_execution_status(db: DatabaseManager, execution_id: str, status
         update_query = """
         UPDATE exec.runs 
         SET 
-            status = $1,
-            finished_at = CASE WHEN $1 IN ('completed', 'failed', 'completed_with_failures') THEN $2 ELSE finished_at END,
+            status = $1::VARCHAR,
+            finished_at = CASE WHEN $1::VARCHAR IN ('completed', 'failed', 'completed_with_failures') THEN $2 ELSE finished_at END,
             runner_meta = $3
-        WHERE id = $4
+        WHERE id = $4::UUID
         """
         
         # Get current runner_meta and update it
-        current_query = "SELECT runner_meta FROM exec.runs WHERE id = $1"
+        current_query = "SELECT runner_meta FROM exec.runs WHERE id = $1::UUID"
         current_result = await db.execute_one(current_query, execution_id)
         
         current_meta = {}
@@ -1213,6 +1466,7 @@ async def execute_debug_steps(
         INSERT INTO tests.test_cases (
             id, 
             project_id, 
+            plan_id,
             title, 
             description, 
             source, 
@@ -1220,7 +1474,7 @@ async def execute_debug_steps(
             status, 
             created_by
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         ON CONFLICT (id) DO NOTHING
         """
         
@@ -1231,6 +1485,7 @@ async def execute_debug_steps(
             test_case_query,
             test_case_uuid,
             project_uuid,
+            prompt_id,  # Add plan_id (prompt_id)
             f"AI Debug Run: {test_name[:50]}",  # Truncate title if too long
             f"AI-generated minimal reproduction steps for prompt {prompt_id}",
             "ai_debug",
@@ -1374,3 +1629,88 @@ async def execute_debug_steps(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to execute debug steps: {str(e)}")
+
+@router.put("/execution/{execution_id}/status")
+async def update_execution_status_endpoint(
+    execution_id: str,
+    request: dict,
+    db: DatabaseManager = Depends(get_database),
+    authorization: str = Header(None)
+):
+    """
+    Endpoint for Java runner to report execution completion status
+    """
+    try:
+        status = request.get("status")
+        message = request.get("message", "")
+        results = request.get("results", {})
+        
+        if not status:
+            raise HTTPException(status_code=400, detail="Status is required")
+            
+        if status not in ["completed", "failed", "completed_with_failures"]:
+            raise HTTPException(status_code=400, detail="Invalid status")
+            
+        # Update the execution status
+        await update_execution_status(db, execution_id, status, message, results)
+        
+        return {
+            "success": True, 
+            "message": f"Execution {execution_id} status updated to {status}"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating execution status: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update execution status: {str(e)}")
+
+@router.put("/execution/{execution_id}/step-result")
+async def report_step_result_endpoint(
+    execution_id: str,
+    request: dict,
+    db: DatabaseManager = Depends(get_database),
+    authorization: str = Header(None)
+):
+    """
+    Endpoint for Java runner to report individual step results
+    """
+    try:
+        step_order = request.get("step_order")
+        status = request.get("status") 
+        step_data = request.get("step_data", {})
+        
+        if step_order is None:
+            raise HTTPException(status_code=400, detail="step_order is required")
+        if not status:
+            raise HTTPException(status_code=400, detail="status is required")
+            
+        # Update the step result
+        update_query = """
+        UPDATE exec.step_results 
+        SET 
+            status = $1,
+            action_data = $2,
+            finished_at = $3
+        WHERE test_run_id = $4 AND step_order = $5
+        """
+        
+        await db.execute_one(
+            update_query,
+            status,
+            json.dumps(step_data),
+            datetime.now(),
+            execution_id,
+            step_order
+        )
+        
+        return {
+            "success": True,
+            "message": f"Step {step_order} result updated for execution {execution_id}"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating step result: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update step result: {str(e)}")

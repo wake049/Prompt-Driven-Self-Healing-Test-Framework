@@ -2137,7 +2137,7 @@ export const PromptDetailView: React.FC = () => {
       if (!isValidUuid(promptId)) {
         return;
       }const token = localStorage.getItem('auth_token');
-      const response = await fetch(`${config.apiBaseUrl}/generated-test-plans/by-prompt/${promptId}`, {
+  const response = await fetch(`${config.apiBaseUrl}/api/v1/generated-test-plans/by-prompt/${promptId}`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -2835,7 +2835,7 @@ export const PromptDetailView: React.FC = () => {
         generation_success: true,
         created_by: 'user'
       };const token = localStorage.getItem('auth_token');
-      const response = await fetch(`${config.apiBaseUrl}/generated-test-plans`, {
+  const response = await fetch(`${config.apiBaseUrl}/api/v1/generated-test-plans`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -2915,7 +2915,7 @@ export const PromptDetailView: React.FC = () => {
       };
       
       const token = localStorage.getItem('auth_token');
-      const response = await fetch(`${config.apiBaseUrl}/generated-test-plans`, {
+  const response = await fetch(`${config.apiBaseUrl}/api/v1/generated-test-plans`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

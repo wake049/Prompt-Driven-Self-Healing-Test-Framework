@@ -141,19 +141,21 @@ class AuthenticationManager:
         return user
     
     async def get_user_with_context(self, user_id: str) -> Optional[CurrentUser]:
-        """Get user with full tenant/project context for authentication"""
+        """Get user with full context for authentication"""
         db = await get_database_manager()
         
-        # Get user with tenant and project information
+        # Get user with project information (using proper core schema joins)
         user_data = await db.execute_one(
             """
             SELECT u.id, u.email, u.full_name, u.is_active,
                    u.created_at, u.updated_at,
+                   p.id as project_id, p.name as project_name,
                    t.id as tenant_id, t.name as tenant_name, t.slug as tenant_slug,
-                   p.id as project_id, p.name as project_name, p.slug as project_slug
+                   r.name as role_name
             FROM core.users u
-            LEFT JOIN core.user_tenant_roles utr ON u.id = utr.user_id
+            LEFT JOIN core.user_tenant_roles utr ON u.id = utr.user_id AND utr.is_active = true
             LEFT JOIN core.tenants t ON utr.tenant_id = t.id AND t.is_active = true
+            LEFT JOIN core.roles r ON utr.role_id = r.id AND r.is_active = true
             LEFT JOIN core.projects p ON t.id = p.tenant_id AND p.is_active = true
             WHERE u.id = $1 AND u.is_active = true
             ORDER BY p.created_at DESC
@@ -165,7 +167,7 @@ class AuthenticationManager:
         if not user_data:
             return None
         
-        # Build the CurrentUser object with tenant/project context
+        # Build the CurrentUser object with project context
         user = UserResponse(
             id=user_data["id"],
             email=user_data["email"],
@@ -175,6 +177,7 @@ class AuthenticationManager:
             updated_at=user_data["updated_at"]
         )
         
+        # Include tenant info
         tenant = None
         if user_data["tenant_id"]:
             tenant = TenantInfo(
@@ -190,8 +193,8 @@ class AuthenticationManager:
                 id=user_data["project_id"],
                 tenant_id=user_data["tenant_id"],
                 name=user_data["project_name"],
-                slug=user_data["project_slug"],
-                description=None,  # Could add this to the query if needed
+                slug=user_data["project_name"].lower().replace(' ', '-'),
+                description=f"Project for {user_data['full_name']}",
                 is_active=True
             )
         
@@ -199,7 +202,7 @@ class AuthenticationManager:
             user=user,
             tenant=tenant,
             project=project,
-            permissions=[]  # TODO: Implement role-based permissions
+            permissions=[]
         )
     
     async def get_user_by_email(self, email: str) -> Optional[Dict[str, Any]]:
@@ -233,30 +236,7 @@ class AuthenticationManager:
         # Hash password
         password_hash = self.get_password_hash(password)
         
-        # Ensure we have a tenant to assign the user to
-        assigned_tenant_id = tenant_id
-        if not assigned_tenant_id:
-            # Get or create default tenant
-            default_tenant = await db.execute_one(
-                """
-                SELECT id FROM core.tenants 
-                WHERE slug = 'default-org' AND is_active = true
-                """
-            )
-            
-            if not default_tenant:
-                # Create default tenant
-                default_tenant = await db.execute_one(
-                    """
-                    INSERT INTO core.tenants (id, name, slug, is_active, created_at, updated_at)
-                    VALUES (gen_random_uuid(), 'Default Organization', 'default-org', true, NOW(), NOW())
-                    RETURNING id
-                    """
-                )
-            
-            assigned_tenant_id = str(default_tenant["id"])
-        
-        # Create user
+        # Create user (in core.users table)
         user = await db.execute_one(
             """
             INSERT INTO core.users (email, full_name, password_hash, is_active)
@@ -266,33 +246,60 @@ class AuthenticationManager:
             email, full_name, password_hash
         )
         
-        # Get or create default role
-        default_role = await db.execute_one(
+        # Create a project for the user in the core.projects table
+        project_name = f"{full_name}'s Project"
+        
+        # Get or create default tenant first
+        tenant = await db.execute_one(
             """
-            SELECT id FROM core.roles WHERE name = 'User' LIMIT 1
+            INSERT INTO core.tenants (id, name, slug, description, is_active, created_at, updated_at)
+            VALUES (gen_random_uuid(), $1, $2, $3, true, NOW(), NOW())
+            ON CONFLICT (slug) DO UPDATE SET updated_at = NOW()
+            RETURNING id
+            """,
+            f"{full_name}'s Organization",
+            f"{full_name.lower().replace(' ', '-')}-org",
+            f"Default organization for {full_name}"
+        )
+        
+        tenant_id = str(tenant["id"])
+        
+        # Get or create default role
+        role = await db.execute_one(
+            """
+            INSERT INTO core.roles (id, name, description, is_active, created_at, updated_at)
+            VALUES (gen_random_uuid(), 'Owner', 'Organization owner with full access', true, NOW(), NOW())
+            ON CONFLICT (name) DO UPDATE SET updated_at = NOW()
+            RETURNING id
             """
         )
         
-        if not default_role:
-            default_role = await db.execute_one(
-                """
-                INSERT INTO core.roles (id, name)
-                VALUES (gen_random_uuid(), 'User')
-                RETURNING id
-                """
-            )
+        role_id = str(role["id"])
         
-        # Assign user to tenant with default role
+        # Link user to tenant with owner role
         await db.execute_one(
             """
-            INSERT INTO core.user_tenant_roles (id, user_id, tenant_id, role_id)
-            VALUES (gen_random_uuid(), $1, $2, $3)
+            INSERT INTO core.user_tenant_roles (id, user_id, tenant_id, role_id, is_active, created_at, updated_at)
+            VALUES (gen_random_uuid(), $1, $2, $3, true, NOW(), NOW())
+            ON CONFLICT (user_id, tenant_id) DO UPDATE SET role_id = $3, updated_at = NOW()
             """,
-            str(user["id"]), assigned_tenant_id, str(default_role["id"])
+            str(user["id"]), tenant_id, role_id
         )
         
-        # Create sample project and data for new user
-        await self._create_sample_project_for_user(str(user["id"]), assigned_tenant_id)
+        # Create project under the tenant
+        project = await db.execute_one(
+            """
+            INSERT INTO core.projects (id, tenant_id, name, slug, description, is_active, created_at, updated_at)
+            VALUES (gen_random_uuid(), $1, $2, $3, $4, true, NOW(), NOW())
+            RETURNING id, name
+            """,
+            tenant_id, 
+            project_name, 
+            project_name.lower().replace(' ', '-').replace("'", ""), 
+            f"Default project for {full_name}"
+        )
+        
+        print(f"DEBUG: Created project for new user {email}: {project['name']} (ID: {project['id']})")
         
         return user
     
@@ -355,131 +362,8 @@ class AuthenticationManager:
             user=user,
             tenant=tenant,
             project=project,
-            permissions=[]  # TODO: Implement role-based permissions
+            permissions=[]
         )
-
-    async def _create_sample_project_for_user(self, user_id: str, tenant_id: str) -> None:
-        """Create a sample project with demo test data for new user"""
-        db = await get_database_manager()
-        
-        try:
-            # Create sample project
-            project = await db.execute_one(
-                """
-                INSERT INTO core.projects (id, name, slug, description, tenant_id, is_active, created_at, updated_at)
-                VALUES (gen_random_uuid(), 'Sample Project', 'sample-project', 
-                        'A sample project with demo test cases to help you get started', 
-                        $1, true, NOW(), NOW())
-                RETURNING id
-                """,
-                tenant_id
-            )
-            
-            project_id = str(project["id"])
-            
-            # Create sample elements
-            elements_data = [
-                ('username_field', 'login', '#username', '//input[@id="username"]', 'input', 'Username input field'),
-                ('password_field', 'login', '#password', '//input[@id="password"]', 'input', 'Password input field'),
-                ('login_button', 'login', '#login-btn', '//button[@id="login-btn"]', 'button', 'Login submit button'),
-                ('dashboard_title', 'dashboard', '.dashboard-title', '//h1[@class="dashboard-title"]', 'heading', 'Dashboard page title'),
-                ('search_box', 'main', '#search', '//input[@placeholder="Search..."]', 'input', 'Main search box'),
-                ('user_menu', 'main', '.user-menu', '//div[@class="user-menu"]', 'menu', 'User dropdown menu')
-            ]
-            
-            for name, page_name, css_selector, xpath_selector, element_type, description in elements_data:
-                await db.execute_one(
-                    """
-                    INSERT INTO core.elements (id, project_id, name, page_name, css_selector, xpath_selector, 
-                                             element_type, description, is_active, created_at, updated_at)
-                    VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, true, NOW(), NOW())
-                    """,
-                    project_id, name, page_name, css_selector, xpath_selector, element_type, description
-                )
-            
-            # Create sample test session with AI-generated plan
-            ai_plan = {
-                "steps": [
-                    {
-                        "step": 1,
-                        "action": "navigate",
-                        "target": "login_page",
-                        "url": "https://demo.testapp.com/login",
-                        "description": "Navigate to the login page"
-                    },
-                    {
-                        "step": 2,
-                        "action": "fill",
-                        "target": "username_field",
-                        "value": "demo_user",
-                        "description": "Enter username in the username field"
-                    },
-                    {
-                        "step": 3,
-                        "action": "fill",
-                        "target": "password_field",
-                        "value": "demo_password",
-                        "description": "Enter password in the password field"
-                    },
-                    {
-                        "step": 4,
-                        "action": "click",
-                        "target": "login_button",
-                        "description": "Click the login button to submit credentials"
-                    },
-                    {
-                        "step": 5,
-                        "action": "verify",
-                        "target": "dashboard_title",
-                        "expected": "Dashboard",
-                        "description": "Verify that the dashboard page loads and shows the correct title"
-                    }
-                ],
-                "metadata": {
-                    "estimated_duration": "30 seconds",
-                    "complexity": "low",
-                    "browser_required": "chrome",
-                    "ai_confidence": 0.95
-                }
-            }
-            
-            session = await db.execute_one(
-                """
-                INSERT INTO core.test_sessions (id, project_id, user_id, session_name, prompt, ai_generated_plan, 
-                                              status, total_steps, successful_steps, created_at, updated_at)
-                VALUES (gen_random_uuid(), $1, $2, 'Login Test - Demo', 
-                        'Test the login functionality with valid credentials and verify the user reaches the dashboard',
-                        $3, 'ready', 5, 0, NOW(), NOW())
-                RETURNING id
-                """,
-                project_id, user_id, json.dumps(ai_plan)
-            )
-            
-            session_id = str(session["id"])
-            
-            # Create sample test steps
-            steps_data = [
-                (1, 'navigate', 'login_page', 'https://demo.testapp.com/login', None, 'Page loads successfully'),
-                (2, 'fill', 'username_field', '#username', 'demo_user', 'Username entered successfully'),
-                (3, 'fill', 'password_field', '#password', 'demo_password', 'Password entered successfully'),
-                (4, 'click', 'login_button', '#login-btn', None, 'Login button clicked'),
-                (5, 'verify', 'dashboard_title', '.dashboard-title', None, 'Dashboard title is visible')
-            ]
-            
-            for step_number, action_type, element_name, element_selector, input_value, expected_result in steps_data:
-                await db.execute_one(
-                    """
-                    INSERT INTO core.test_steps (id, session_id, step_number, action_type, element_name, 
-                                               element_selector, input_value, expected_result, status, 
-                                               created_at, updated_at)
-                    VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, 'pending', NOW(), NOW())
-                    """,
-                    session_id, step_number, action_type, element_name, element_selector, input_value, expected_result
-                )
-                
-        except Exception as e:
-            # Log the error but don't fail user creation
-            print(f"Warning: Failed to create sample project for user {user_id}: {str(e)}")
 
 
 # Global authentication manager instance

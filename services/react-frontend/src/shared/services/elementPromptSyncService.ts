@@ -399,7 +399,7 @@ class ElementPromptSyncService {
     try {
       const token = localStorage.getItem('auth_token');
       // Get the plan for this prompt
-      const plansResponse = await fetch(`${config.apiBaseUrl}/generated-test-plans/by-prompt/${promptId}`, {
+  const plansResponse = await fetch(`${config.apiBaseUrl}/api/v1/generated-test-plans/by-prompt/${promptId}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
@@ -502,7 +502,7 @@ class ElementPromptSyncService {
       let notFoundCount = 0;
       for (let i = 0; i < Math.min(3, prompts.length); i++) {
         const prompt = prompts[i];
-          const url = `${config.apiBaseUrl}/generated-test-plans/by-prompt/${prompt.id}`;
+          const url = `${config.apiBaseUrl}/api/v1/generated-test-plans/by-prompt/${prompt.id}`;
           const plansResponse = await fetch(url, {
             headers: {
               'Authorization': `Bearer ${token}`,
@@ -562,7 +562,7 @@ class ElementPromptSyncService {
       const promptsWithPlans = await Promise.all(
         prompts.map(async (prompt: any, index: number) => {
           try {
-            const testPlanResponse = await fetch(`${config.apiBaseUrl}/generated-test-plans/by-prompt/${prompt.id}`, {
+            const testPlanResponse = await fetch(`${config.apiBaseUrl}/api/v1/generated-test-plans/by-prompt/${prompt.id}`, {
               headers: {
                 'Authorization': `Bearer ${token}`,
               },
@@ -615,7 +615,7 @@ class ElementPromptSyncService {
       }
       const prompt = await promptResponse.json();
       // Load plans for this prompt
-      const plansResponse = await fetch(`${config.apiBaseUrl}/generated-test-plans/by-prompt/${promptId}`, {
+  const plansResponse = await fetch(`${config.apiBaseUrl}/api/v1/generated-test-plans/by-prompt/${promptId}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
@@ -809,7 +809,7 @@ class ElementPromptSyncService {
     try {
       const token = localStorage.getItem('auth_token');
       // Try to get all test plans
-      const response = await fetch(`${config.apiBaseUrl}/generated-test-plans?limit=10`, {
+  const response = await fetch(`${config.apiBaseUrl}/api/v1/generated-test-plans?limit=10`, {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
@@ -846,7 +846,7 @@ class ElementPromptSyncService {
         }
       }
       // Check plans for this prompt
-      const plansResponse = await fetch(`${config.apiBaseUrl}/generated-test-plans/by-prompt/${promptId}`, {
+  const plansResponse = await fetch(`${config.apiBaseUrl}/api/v1/generated-test-plans/by-prompt/${promptId}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (plansResponse.ok) {

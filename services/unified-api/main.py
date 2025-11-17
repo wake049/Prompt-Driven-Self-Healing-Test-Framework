@@ -75,6 +75,15 @@ async def lifespan(app: FastAPI):
     logger.info(f"DB_NAME: {os.getenv('DB_NAME', 'NOT SET')}")
     logger.info(f"DB_USER: {os.getenv('DB_USER', 'NOT SET')}")
     logger.info(f"DB_PASSWORD: {'SET' if os.getenv('DB_PASSWORD') else 'NOT SET'}")
+    
+    # Debug: Log OpenAI environment variables
+    openai_key = os.getenv('OPENAI_API_KEY', 'NOT SET')
+    logger.info(f"OPENAI_API_KEY: {'SET' if openai_key != 'NOT SET' else 'NOT SET'}")
+    if openai_key != 'NOT SET':
+        logger.info(f"OPENAI_API_KEY length: {len(openai_key)}")
+        logger.info(f"OPENAI_API_KEY starts with sk-: {openai_key.startswith('sk-')}")
+    logger.info(f"OPENAI_ENABLED: {os.getenv('OPENAI_ENABLED', 'NOT SET')}")
+    logger.info(f"OPENAI_MODEL: {os.getenv('OPENAI_MODEL', 'NOT SET')}")
     logger.info("===================================")
     
     # Start performance monitoring

@@ -11,7 +11,9 @@ import java.util.HashMap;
 import java.util.Map;
 
 public class TestSelfHealing {
-    private static final String SQL_BACKEND_URL = "http://localhost:3001";
+    private static final String SQL_BACKEND_URL = System.getenv("UNIFIED_API_URL") != null ? 
+        System.getenv("UNIFIED_API_URL") : 
+        "https://testhelix.com";
     private static final ObjectMapper objectMapper = new ObjectMapper();
 
     public static void main(String[] args) {

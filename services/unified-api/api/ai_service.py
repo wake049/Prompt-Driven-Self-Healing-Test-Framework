@@ -17,11 +17,16 @@ import json
 import os
 import re
 import time
+import logging
 from typing import Any, Dict, List, Optional, Tuple
 import asyncio
 from pathlib import Path
 import asyncio
 from fastapi import Depends, Request, HTTPException
+
+# Configure logging for AI service
+logger = logging.getLogger("ai_service")
+logger.setLevel(logging.DEBUG)
 
 try:
     from openai import OpenAI
@@ -258,11 +263,29 @@ class EnterpriseAIService:
         """Initialize OpenAI client"""
         try:
             api_key = self.config["openai"]["apiKey"]
-            if api_key and OpenAI is not None:
-                self.client = OpenAI(api_key=api_key)
-            else:
+            logger.info(f"Initializing OpenAI client - API key present: {bool(api_key)}, length: {len(api_key) if api_key else 0}")
+            
+            if not api_key:
+                logger.warning("⚠️  OPENAI_API_KEY not set - falling back to heuristic mode")
                 self.client = None
+                return
+                
+            if OpenAI is None:
+                logger.warning("⚠️  OpenAI library not available - falling back to heuristic mode")
+                self.client = None
+                return
+            
+            # Validate API key format
+            if not api_key.startswith('sk-'):
+                logger.error("❌ Invalid OpenAI API key format (should start with 'sk-')")
+                self.client = None
+                return
+                
+            self.client = OpenAI(api_key=api_key)
+            logger.info("✅ OpenAI client initialized successfully")
+            
         except Exception as e:
+            logger.error(f"❌ Failed to initialize OpenAI client: {str(e)}")
             self.client = None
     def _enforce_rate_limit(self) -> None:
         """Enforce rate limiting between OpenAI API calls"""
@@ -357,6 +380,8 @@ class EnterpriseAIService:
         }
         """
         start_time = time.time()
+        logger.info(f"🚀 Starting plan generation for prompt: '{prompt_envelope.prompt[:100]}...'")
+        logger.debug(f"📊 Request details - Tenant: {prompt_envelope.tenant_id}, Elements: {len(prompt_envelope.page_slice.elements) if prompt_envelope.page_slice else 0}")
         
         try:
             # Load existing bindings for this prompt if available
@@ -625,16 +650,26 @@ class EnterpriseAIService:
                 for i, el in enumerate(prompt_envelope.page_slice.elements[:10]):  # Log first 10 elements
                     tag = self._get_element_tag(el)
                     text = self._get_element_text(el)[:50] + "..." if len(self._get_element_text(el)) > 50 else self._get_element_text(el)
-                    selector = self._get_element_selector(el)# Categorize elements
+                    selector = self._get_element_selector(el)
+                    
+                    # Categorize elements
                     element_types[tag] = element_types.get(tag, 0) + 1
                     if 'password' in selector.lower() or 'user-name' in selector.lower() or 'login' in selector.lower():
                         login_elements.append(selector)
                     if 'remove-' in selector.lower() or 'inventory' in selector.lower() or 'item' in selector.lower():
                         inventory_elements.append(selector)
                 
-                if len(prompt_envelope.page_slice.elements) > 10:- 10
+                if len(prompt_envelope.page_slice.elements) > 10:
+                    logger.debug(f"📝 Showing first 10 elements out of {len(prompt_envelope.page_slice.elements)} total")
                 
-                # Log page state analysis# form_elements check removedif interactive_elements:if navigation_elements:else:# Rank elements if provided
+                # Log page state analysis
+                logger.debug(f"🏷️ Element types found: {element_types}")
+                if login_elements:
+                    logger.debug(f"🔐 Login elements detected: {login_elements}")
+                if inventory_elements:
+                    logger.debug(f"📦 Inventory elements detected: {inventory_elements}")
+                    
+            # Rank elements if provided
             ranked_elements = []
             cache_hits = 0
             
@@ -663,22 +698,58 @@ class EnterpriseAIService:
             
             # Log ranked/filtered elements
             if ranked_elements:
+                logger.debug(f"🎯 Using {len(ranked_elements)} ranked/filtered elements for plan generation")
                 for i, el in enumerate(ranked_elements[:10]):  # Log first 10 ranked elements
                     tag = self._get_element_tag(el)
                     text = self._get_element_text(el)[:50] + "..." if len(self._get_element_text(el)) > 50 else self._get_element_text(el)
-                    selector = self._get_element_selector(el) if len(ranked_elements) > 10 else ranked_elements[-10:]
-            else:# Generate test steps using AI when available, fallback to heuristic
-                if self.client and self.config["openai"]["enabled"]:
+                    selector = self._get_element_selector(el)
+                    logger.debug(f"  🔗 [{i+1}] {tag}: '{text}' -> {selector}")
+                
+                if len(ranked_elements) > 10:
+                    logger.debug(f"📝 Showing first 10 ranked elements out of {len(ranked_elements)} total")
+
+            # Initialize variables
+            steps = []
+            actual_tokens = {"input": 0, "output": 0}
+            method = "unknown"
+            model = "unknown"
+
+            # Generate test steps using AI when available, fallback to heuristic
+            logger.info(f"🤖 Checking AI availability - Client: {bool(self.client)}, Enabled: {self.config['openai']['enabled']}")
+            
+            if self.client and self.config["openai"]["enabled"]:
+                logger.info("✅ Using AI-powered plan generation")
+                try:
+                    logger.info("🚀 CALLING AI GENERATION - This should generate steps from AI")
                     steps, actual_tokens = await self._generate_ai_plan(prompt_envelope, ranked_elements)
                     method = "ai-powered"
                     model = self.config["openai"]["model"]
-                else:
+                    logger.info(f"🎯 AI plan generated - Steps: {len(steps)}, Tokens: {actual_tokens}")
+                    logger.info("🔍 AI-GENERATED STEPS:")
+                    for i, step in enumerate(steps, 1):
+                        logger.info(f"  AI Step {i}: {step.action} -> {step.target} ({step.args.get('selector', 'no-selector')})")
+                except Exception as ai_error:
+                    logger.error(f"❌ AI plan generation failed: {str(ai_error)}")
+                    logger.info("🔄 Falling back to heuristic plan generation")
                     steps, actual_tokens = await self._generate_heuristic_plan(prompt_envelope, ranked_elements)
-                    method = "heuristic-fallback"
+                    method = "heuristic-fallback-after-ai-error"
                     model = "rule-based"
-                    cache_hits += 1  # Heuristic is essentially cached
+                    cache_hits += 1
+                    logger.info("🔍 HEURISTIC FALLBACK STEPS:")
+                    for i, step in enumerate(steps, 1):
+                        logger.info(f"  Heuristic Step {i}: {step.action} -> {step.target} ({step.args.get('selector', 'no-selector')})")
+            else:
+                logger.info("🛠️  Using heuristic plan generation (AI not available)")
+                steps, actual_tokens = await self._generate_heuristic_plan(prompt_envelope, ranked_elements)
+                method = "heuristic-fallback"
+                model = "rule-based"
+                cache_hits += 1  # Heuristic is essentially cached
+                logger.info("🔍 PURE HEURISTIC STEPS:")
+                for i, step in enumerate(steps, 1):
+                    logger.info(f"  Pure Heuristic Step {i}: {step.action} -> {step.target} ({step.args.get('selector', 'no-selector')})")
             
             # SAFETY POLICY: Validate generated steps for destructive operations (if available)
+            logger.debug(f"🛡️  Validating {len(steps)} generated steps for safety policy")
             try:
                 from core.safety_policy import safety_policy
                 validated_steps = []
@@ -691,10 +762,13 @@ class EnterpriseAIService:
                         )
                         validated_steps.append(step)
                     except Exception as e:
+                        logger.warning(f"⚠️  Step rejected by safety policy: {step.action} - {str(e)}")
                         # Skip this step instead of failing the entire request
                         continue
                 steps = validated_steps
+                logger.info(f"✅ Safety validation complete - {len(steps)} steps approved")
             except ImportError:
+                logger.debug("ℹ️  Safety policy not available, skipping validation")
                 # Safety policy not available, skip validation
                 pass
             
@@ -709,6 +783,16 @@ class EnterpriseAIService:
             )
             
             cost_summary.elements_processed = len(ranked_elements)
+            
+            # Detailed step logging before returning
+            logger.info(f"📋 Final step details before response:")
+            for i, step in enumerate(steps, 1):
+                logger.info(f"  Step {i}: {step.action} -> {step.target}")
+                logger.info(f"    Selector: {step.args.get('selector', 'N/A')}")
+                logger.info(f"    Description: {step.description}")
+                logger.info(f"    Confidence: {step.confidence}")
+                if step.args.get('text'):
+                    logger.info(f"    Text: '{step.args.get('text')}'")
             
             # Create successful response
             response = PlanResponse(
@@ -727,7 +811,9 @@ class EnterpriseAIService:
             )
 
             # Log final response steps for debugging
+            logger.info(f"🎉 Plan generation successful - Method: {method}, Steps: {len(response.steps)}, Time: {response.processing_time_ms}ms")
             for i, step in enumerate(response.steps):
+                logger.debug(f"  Step {i+1}: {step.action} -> {step.target}")
                 cached_pref = getattr(self, '_cached_policy_preference', 'unknown')
                 if step.target and '#' in step.target:
                     pass
@@ -736,6 +822,10 @@ class EnterpriseAIService:
             return response
 
         except Exception as e:
+            logger.error(f"💥 Plan generation failed with exception: {str(e)}")
+            logger.error(f"Exception type: {type(e).__name__}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return self._create_error_response(str(e), start_time)
     
     async def get_action_catalog(
@@ -782,14 +872,21 @@ class EnterpriseAIService:
     ) -> Tuple[List[PlanStep], Dict[str, int]]:
         """Generate plan using AI with intelligent element analysis"""
         
+        logger.info(f"🤖 Starting AI plan generation with {len(ranked_elements)} elements")
+        
         # Build optimized prompts with full context
         system_prompt = self._build_enhanced_system_prompt()
         user_prompt = self._build_enhanced_user_prompt(prompt_envelope, ranked_elements)
         
+        logger.debug(f"📝 System prompt length: {len(system_prompt)} chars")
+        logger.debug(f"📝 User prompt length: {len(user_prompt)} chars")
+        
         # Estimate input tokens
         input_tokens = len(system_prompt + user_prompt) // 4
+        logger.info(f"💰 Estimated input tokens: {input_tokens}")
         
         try:
+            logger.info(f"🔗 Calling OpenAI API - Model: {self.config['openai']['model']}")
             
             response = await self._chat_json(
                 model=self.config["openai"]["model"],
@@ -801,10 +898,17 @@ class EnterpriseAIService:
                 timeout_ms=prompt_envelope.timeout_ms
             )
             
+            logger.info(f"✅ OpenAI API response received, length: {len(response)} chars")
+            logger.debug(f"📝 Raw AI response: {response[:200]}...")
+            
             # Try to parse JSON with better error handling
             try:
                 parsed = json.loads(response)
-            except json.JSONDecodeError as e:# Try to extract and reconstruct JSON from responsetry:
+                logger.info("✅ JSON parsing successful")
+            except json.JSONDecodeError as e:
+                logger.warning(f"⚠️  JSON parsing failed: {str(e)}, attempting reconstruction")
+                # Try to extract and reconstruct JSON from response
+                try:
                     # Look for JSON array in the response (new format)
                     import re
                     json_match = re.search(r'\[.*', response, re.DOTALL)
@@ -822,28 +926,35 @@ class EnterpriseAIService:
                             
                             # Close the array
                             reconstructed += '\n]'
-                            parsed = json.loads(reconstructed)if isinstance(parsed, list) else 0
+                            parsed = json.loads(reconstructed)
+                            logger.info("✅ JSON reconstruction successful")
                         else:
                             # Fallback: just try to find a complete JSON array
                             json_match = re.search(r'\[.*\]', response, re.DOTALL)
                             if json_match:
                                 parsed = json.loads(json_match.group())
+                                logger.info("✅ JSON array fallback successful")
                             else:
                                 # Try legacy object format as final fallback
                                 json_match = re.search(r'\{.*\}', response, re.DOTALL)
                                 if json_match:
                                     parsed = json.loads(json_match.group())
+                                    logger.info("✅ JSON object fallback successful")
                                 else:
+                                    logger.error("❌ All JSON reconstruction attempts failed")
                                     raise e
                     else:
                         # Try legacy object format as fallback
                         json_match = re.search(r'\{.*\}', response, re.DOTALL)
                         if json_match:
                             parsed = json.loads(json_match.group())
+                            logger.info("✅ JSON object fallback successful")
                         else:
+                            logger.error("❌ JSON reconstruction completely failed")
                             raise e
-                        
-            except Exception as reconstruction_error:raise e
+                except Exception as reconstruction_error:
+                    logger.error(f"❌ JSON reconstruction error: {reconstruction_error}")
+                    raise e
             
             # Handle both array format (new) and object format (legacy)
             if isinstance(parsed, list):
@@ -851,11 +962,38 @@ class EnterpriseAIService:
             else:
                 raw_steps = parsed.get("steps", [])  # Object format with steps property
             
-            # Convert to PlanStep objects with variable validation
+            # Convert to PlanStep objects with element validation
             steps = []
             for i, raw_step in enumerate(raw_steps[:prompt_envelope.max_steps]):
                 # Apply policy-based selector transformation to AI-generated target
                 original_target = raw_step.get("target")
+                
+                # Validate that the target element actually exists in our ranked_elements
+                step_selector = raw_step.get("args", {}).get('selector', original_target)
+                element_found = False
+                matching_element = None
+                
+                for el in ranked_elements:
+                    el_id = self._get_element_id(el)
+                    el_selector = self._get_element_selector(el)
+                    el_text = self._get_element_text(el).lower()
+                    
+                    # Check multiple matching criteria
+                    if (el_id == original_target or 
+                        el_selector == step_selector or 
+                        step_selector in el_selector or
+                        el_selector in step_selector):
+                        element_found = True
+                        matching_element = el
+                        logger.debug(f"✅ Step {i+1} validated - found element: {original_target} -> {el_selector}")
+                        break
+                
+                if not element_found:
+                    logger.warning(f"❌ Step {i+1} REJECTED - element not found: {original_target} ({step_selector})")
+                    logger.warning(f"   Available elements: {[self._get_element_selector(el) for el in ranked_elements[:3]]}")
+                    continue  # Skip this step entirely
+                
+                # Element exists, create the step
                 if original_target and original_target.startswith('#'):
                     # AI generated CSS selector, apply policy
                     if getattr(self, '_cached_policy_preference', 'css') == 'xpath':
@@ -892,45 +1030,88 @@ class EnterpriseAIService:
             output_tokens = len(response) // 4
             return steps, {"input": input_tokens, "output": output_tokens}
             
-        except Exception as e:raise Exception(f"AI service unavailable: {str(e)}")
+        except Exception as e:
+            logger.error(f"❌ AI plan generation failed: {str(e)}")
+            raise Exception(f"AI service unavailable: {str(e)}")
 
-    def _generate_heuristic_plan(
+    async def _generate_heuristic_plan(
         self,
         prompt_envelope: PromptEnvelope,
         ranked_elements: List[Any]
     ) -> Tuple[List[PlanStep], Dict[str, int]]:
         """Generate plan using heuristic rules when AI is unavailable"""
         
+        logger.info(f"🛠️  Starting heuristic plan generation for prompt: '{prompt_envelope.prompt[:50]}...'")
+        
         prompt = prompt_envelope.prompt.lower()
         steps = []
         
         # Analyze prompt for intent
+        logger.debug(f"🔍 Analyzing prompt intent from: '{prompt}'")
+        
         if "login" in prompt or "sign in" in prompt:
-            steps.extend(self._generate_login_steps(ranked_elements))
+            logger.info("🔑 Detected login intent, generating login steps")
+            steps.extend(await self._generate_login_steps(ranked_elements))
         elif "search" in prompt:
             search_term = self._extract_search_term(prompt_envelope.prompt)
+            logger.info(f"🔍 Detected search intent, term: '{search_term}'")
             if search_term:
                 steps.extend(self._generate_search_steps(ranked_elements, search_term))
         elif "click" in prompt or "navigate" in prompt:
             link_text = self._extract_link_text(prompt_envelope.prompt)
+            logger.info(f"👆 Detected navigation intent, link: '{link_text}'")
             if link_text:
                 steps.extend(self._generate_navigation_steps(ranked_elements, link_text))
         elif "extract" in prompt or "price" in prompt or "total" in prompt or "calculate" in prompt:
+            logger.info("💰 Detected data extraction/calculation intent")
             # Handle data extraction and calculation scenarios
             steps.extend(self._generate_data_extraction_steps(ranked_elements, prompt_envelope.prompt))
         
         # Add generic steps if no specific pattern matched
         if not steps:
+            logger.info("❓ No specific pattern matched, generating generic steps")
             steps.extend(self._generate_generic_steps(ranked_elements, prompt_envelope.prompt))
         
-        # Validate variables in heuristic steps too
+        # Validate all generated steps to ensure they have valid targets
+        logger.debug(f"✅ Validating heuristic step variables")
         validated_steps = []
-        for step in steps:
+        for i, step in enumerate(steps, 1):
+            # Check if the step has a valid target that exists in our elements
+            step_target = step.target
+            step_selector = step.args.get('selector', '')
+            
+            # Verify the target element actually exists in our ranked_elements
+            element_found = False
+            for el in ranked_elements:
+                element_id = self._get_element_id(el)
+                element_selector = self._get_element_selector(el)
+                if element_id == step_target or element_selector == step_selector:
+                    element_found = True
+                    break
+            
+            if element_found:
+                logger.debug(f"  ✓ Step {i} validated: {step.action}")
+                validated_steps.append(step)
+            else:
+                logger.warning(f"  ❌ Step {i} SKIPPED - target element not found: {step_target} ({step_selector})")
+                
+        steps = validated_steps
+        
+        logger.info(f"📝 Generated {len(steps)} raw steps from heuristics")
+        
+        # Validate variables in heuristic steps too
+        logger.debug("✅ Validating heuristic step variables")
+        validated_steps = []
+        for i, step in enumerate(steps):
             validated_step = self.variable_validator.validate_step_variables(step)
             if validated_step:
                 validated_steps.append(validated_step)
+                logger.debug(f"  ✓ Step {i+1} validated: {step.action}")
             else:
-                return validated_steps, {"input": 0, "output": 0}
+                logger.warning(f"  ✗ Step {i+1} validation failed: {step.action}")
+        
+        logger.info(f"🎯 Heuristic plan complete - {len(validated_steps)} validated steps")
+        return validated_steps, {"input": 0, "output": 0}
 
     # =========================
     # STEP GENERATION HELPERS
@@ -940,9 +1121,18 @@ class EnterpriseAIService:
         """Generate login-specific steps with policy-based selectors"""
         steps = [] 
         
+        # Debug: Log available elements
+        logger.debug(f"🔍 Available elements for login step generation:")
+        for i, el in enumerate(elements):
+            el_id = self._get_element_id(el)
+            el_selector = self._get_element_selector(el)
+            el_tag = self._get_element_tag(el)
+            logger.debug(f"  [{i+1}] {el_tag} -> {el_selector} (ID: {el_id})")
+        
         # Find username/email field
         username_el = self._find_element_by_keywords(elements, ["email", "username", "user", "user-name"])
         if username_el:
+            logger.debug(f"✅ Found username element: {self._get_element_selector(username_el)}")
             username_selector = await self._get_policy_based_element_selector(username_el)
             steps.append(PlanStep(
                 action="type",
@@ -955,9 +1145,13 @@ class EnterpriseAIService:
                 description="Enter username/email",
                 confidence=0.9
             ))
-        else:# Find password field
-            password_el = self._find_element_by_keywords(elements, ["password"])
+        else:
+            logger.debug("❌ No username field found")
+
+        # Find password field
+        password_el = self._find_element_by_keywords(elements, ["password"])
         if password_el:
+            logger.debug(f"✅ Found password element: {self._get_element_selector(password_el)}")
             password_selector = await self._get_policy_based_element_selector(password_el)
             steps.append(PlanStep(
                 action="type", 
@@ -970,9 +1164,13 @@ class EnterpriseAIService:
                 description="Enter password",
                 confidence=0.9
             ))
-        else:# Find submit button
-            submit_el = self._find_element_by_keywords(elements, ["submit", "login", "signin"])
+        else:
+            logger.debug("❌ No password field found - SKIPPING password step")
+
+        # Find submit button
+        submit_el = self._find_element_by_keywords(elements, ["submit", "login", "signin"])
         if submit_el:
+            logger.debug(f"✅ Found submit element: {self._get_element_selector(submit_el)}")
             submit_selector = await self._get_policy_based_element_selector(submit_el)
             steps.append(PlanStep(
                 action="click",
@@ -984,6 +1182,10 @@ class EnterpriseAIService:
                 description="Click login button",
                 confidence=0.95
             ))
+        else:
+            logger.debug("❌ No submit button found - SKIPPING submit step")
+            
+        logger.debug(f"🎯 Generated {len(steps)} login steps from {len(elements)} available elements")
         return steps
     
     def _generate_search_steps(self, elements: List[Any], search_term: str) -> List[PlanStep]:
@@ -1476,19 +1678,28 @@ Generate comprehensive workflow with EXTENSIVE VERIFICATION of all relevant elem
                 page_context += f"\n- Notes: {ctx.user_notes}"
             if ctx.screenshot_url:
                 page_context += f"\n- Screenshot Available: Use visual context at {ctx.screenshot_url}"
-            else:
-                return f"""Request: {prompt_envelope.prompt}
+                
+        return f"""Request: {prompt_envelope.prompt}
 {url_context}
 {page_context}
 {elements_context}
 
+CRITICAL REQUIREMENTS:
+🚫 ONLY use elements from the PROVIDED ELEMENTS list above
+🚫 DO NOT generate steps for elements that are NOT in the list
+🚫 DO NOT assume elements exist (like #password, #login-button, etc.)
+🚫 DO NOT create fictional selectors or elements
+
+✅ ONLY reference selectors that appear in the elements list above
+✅ If required elements are missing, note this in clarifications
+✅ Generate steps ONLY for the elements that actually exist
+
 Generate an ADAPTIVE workflow based on the website type and user request:
 
-0. VISUAL CONTEXT ANALYSIS (when screenshot is available):
-   - Carefully examine the provided screenshot to identify visual elements not captured in the element list
-   - Pay special attention to navigation patterns like hamburger menus, dropdown menus, and collapsible sections
-   - Look for interactive elements that require specific actions to become visible (e.g., hover effects, expandable menus)
-   - Use visual context to understand the page layout and user interface patterns
+0. ELEMENT VALIDATION (MANDATORY):
+   - Before creating ANY step, verify the target element exists in the PROVIDED ELEMENTS list above
+   - If a step requires an element not in the list, SKIP that step entirely
+   - Add clarification explaining which expected elements are missing
 
 1. ANALYZE WEBSITE TYPE from URL and available elements:
    - E-commerce: Look for product, cart, checkout elements
@@ -2145,6 +2356,7 @@ Return a JSON array of recommendation strings.
 
     def _create_error_response(self, error_message: str, start_time: float) -> PlanResponse:
         """Create response for error scenarios"""
+        logger.error(f"🚨 Creating error response: {error_message}")
         return PlanResponse(
             steps=[],
             clarifications=[
@@ -2170,7 +2382,10 @@ Return a JSON array of recommendation strings.
         timeout_ms: int,
     ) -> str:
         """Call OpenAI Chat Completions with JSON response format"""
+        logger.debug(f"🤖 Starting OpenAI chat completion: model={model}, max_tokens={max_tokens}")
+        
         if not self.client:
+            logger.error("❌ OpenAI client not initialized")
             raise RuntimeError("OpenAI client not initialized")
 
         def _call():
@@ -2194,16 +2409,43 @@ Return a JSON array of recommendation strings.
         while attempt <= retries:
             try:
                 attempt += 1
+                logger.debug(f"🔄 OpenAI API attempt {attempt}/{retries+1}")
+                
                 resp = await asyncio.to_thread(_call)
                 content = resp.choices[0].message.content if resp and resp.choices else ""
+                
+                logger.info(f"✅ OpenAI API call successful on attempt {attempt}")
                 return content or ""
+                
             except Exception as e:
                 last_err = e
-                if attempt > retries:
-                    break
-                await asyncio.sleep(min(2.0 * attempt, 5.0))
+                error_msg = str(e).lower()
                 
-                raise RuntimeError(f"OpenAI call failed after {retries+1} attempts: {last_err}")
+                # Enhanced error logging with specific handling for common issues
+                if "401" in error_msg or "unauthorized" in error_msg:
+                    logger.error(f"🔐 OpenAI API authentication failed (401): {str(e)}")
+                    logger.error("💡 Check OpenAI API key configuration and billing status")
+                elif "429" in error_msg or "rate limit" in error_msg:
+                    logger.warning(f"⚠️ OpenAI API rate limit hit: {str(e)}")
+                elif "timeout" in error_msg:
+                    logger.warning(f"⏱️ OpenAI API timeout: {str(e)}")
+                else:
+                    logger.error(f"❌ OpenAI API error: {str(e)}")
+                
+                if attempt > retries:
+                    logger.error(f"💥 All {retries+1} OpenAI API attempts exhausted")
+                    break
+                    
+                # Exponential backoff with jitter
+                sleep_time = min(2.0 * attempt, 5.0)
+                logger.debug(f"😴 Retrying in {sleep_time}s...")
+                await asyncio.sleep(sleep_time)
+        
+        # Final error handling with specific auth guidance        
+        if last_err and ("401" in str(last_err).lower() or "unauthorized" in str(last_err).lower()):
+            raise RuntimeError(f"OpenAI API authentication failed: {last_err}. Check API key and billing status.")
+        else:
+            raise RuntimeError(f"OpenAI call failed after {retries+1} attempts: {last_err}")
 
     async def analyze_prompt_intent(self, prompt: str, available_elements: List[Any]) -> Dict[str, Any]:
         """Phase 1: Analyze prompt to identify required pages and elements"""
@@ -2669,14 +2911,20 @@ async def plan_endpoint(
     Supports ETag caching and gzip compression.
     """
     try:
+        logger.info("📥 Received plan generation request")
+        logger.debug(f"📋 Request payload keys: {list(request.keys())}")
+        logger.debug(f"📦 Request size: {len(str(request))} characters")
+        
         # Validate and parse request
         prompt_envelope = PromptEnvelope(**request)
+        logger.info(f"✅ Request validation successful - Prompt: '{prompt_envelope.prompt[:50]}...', Tenant: {prompt_envelope.tenant_id}")
         
         # Generate plan
         response = await enterprise_ai_service.plan_test_steps(prompt_envelope)
         
         # Convert to dict for JSON response (with proper datetime serialization)
         response_dict = response.model_dump(mode='json')
+        logger.info(f"📤 Sending response - Method: {response_dict.get('method')}, Steps: {len(response_dict.get('steps', []))}")
         
         # Add compression if requested and beneficial
         should_compress = (
@@ -2686,6 +2934,7 @@ async def plan_endpoint(
         
         if should_compress:
             response_dict["compressed"] = True
+            logger.debug("🗜️  Response will be compressed")
             
         # Create JSON response with ETag
         json_response = JSONResponse(content=response_dict)
@@ -2697,9 +2946,15 @@ async def plan_endpoint(
         json_response.headers["ETag"] = f'"{etag}"'
         json_response.headers["Cache-Control"] = "private, max-age=3600"
         
+        logger.info("✅ Plan generation endpoint completed successfully")
         return json_response
         
-    except Exception as e:raise HTTPException(status_code=500, detail=f"Plan generation failed: {str(e)}")
+    except Exception as e:
+        logger.error(f"💥 Plan endpoint failed: {str(e)}")
+        logger.error(f"Exception type: {type(e).__name__}")
+        import traceback
+        logger.error(f"Full traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Plan generation failed: {str(e)}")
 
 @router.get("/v1/safety-policy")
 async def get_safety_policy(

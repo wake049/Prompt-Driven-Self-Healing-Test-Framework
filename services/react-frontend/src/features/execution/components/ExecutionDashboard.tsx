@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { useNavigate } from 'react-router-dom';
-import { executionApiService } from '../../../services/executionApiService';
+import { executionApiService } from '../api'; // Use the working authenticated API service
 import { MCPStatus } from '../../../components/MCPStatus';
 import { useAuth } from '../../../contexts/AuthContext';
 import { useTheme } from '../../../contexts/ThemeContext';
@@ -535,6 +535,7 @@ interface ExecutionRecord {
   duration?: number;
   steps_completed?: number;
   total_steps?: number;
+  failed_steps?: number;
 }
 const ExecutionDashboard: React.FC = () => {
   const { theme } = useTheme();
@@ -558,84 +559,57 @@ const ExecutionDashboard: React.FC = () => {
       setLoading(true);
       setError(null);
       
-      // Fetch real execution statistics from authenticated API
-      console.log('🐛 Starting getExecutionStats call...');
-      try {
-        const statsData = await executionApiService.getExecutionStats();
-        console.log('🐛 Raw stats response:', statsData);
-        
-        // Extract the actual stats data from the MCP response
-        const statsValues = statsData?.data || statsData || {}; // Handle both nested and direct response formats
-        console.log('🐛 Stats values:', statsValues);
-        
-        const realStats: ExecutionStats = {
-          total_executions: statsValues.total_executions || 0,
-          successful_executions: statsValues.successful_executions || 0,
-          failed_executions: statsValues.failed_executions || 0,
-          success_rate: (statsValues.success_rate || 0) / 100, // API sends percentages, convert to decimal for internal use
-          recent_executions_24h: statsValues.recent_executions_24h || 0,
-          avg_execution_time: statsValues.avg_execution_time || 0
-        };
-        console.log('Mapped stats:', realStats);
-        setStats(realStats);
-      } catch (statsError) {
-        console.error('Error in getExecutionStats:', statsError);
-        console.error('Stats error details:', {
-          message: statsError instanceof Error ? statsError.message : String(statsError),
-          stack: statsError instanceof Error ? statsError.stack : undefined,
-          name: statsError instanceof Error ? statsError.name : 'Unknown'
-        });
-      }
-      // Fetch real execution logs from authenticated API
-      const executionsResponse = await executionApiService.getRecentExecutions({ limit: 20 });
-      console.log('Raw executions response:', executionsResponse);
+      console.log('🐛 Starting dashboard data fetch...');
       
-      let executionsData: any[] = [];
+      // Fetch stats and executions using the authenticated API service
+      const [statsData, executionsData] = await Promise.all([
+        executionApiService.getExecutionStats(),
+        executionApiService.getRecentExecutions({ limit: 20 })
+      ]);
       
-      // Handle different MCP response formats
-      if (Array.isArray(executionsResponse)) {
-        executionsData = executionsResponse;
-      } else if (executionsResponse?.data && Array.isArray(executionsResponse.data)) {
-        executionsData = executionsResponse.data;
-      } else if (executionsResponse?.content && Array.isArray(executionsResponse.content)) {
-        // MCP format: { content: [{ type: "text", text: "..." }] }
-        const content = executionsResponse.content[0];
-        if (content?.text) {
-          try {
-            const parsed = JSON.parse(content.text);
-            executionsData = Array.isArray(parsed) ? parsed : (parsed?.data || []);
-          } catch (e) {
-            console.error('Failed to parse MCP content:', e);
-            executionsData = [];
-          }
-        }
-      } else if (executionsResponse?.result) {
-        executionsData = Array.isArray(executionsResponse.result) ? executionsResponse.result : 
-                        (executionsResponse.result?.data || []);
-      }
+      console.log('🐛 Raw stats response:', statsData);
+      console.log('🐛 Raw executions response:', executionsData);
       
-      console.log('🐛 Raw executions response:', executionsResponse);
-      console.log('🐛 Raw executionsData before mapping:', executionsData);
+      // Map stats data
+      const realStats: ExecutionStats = {
+        total_executions: statsData.total_executions || 0,
+        successful_executions: statsData.successful_executions || 0,
+        failed_executions: statsData.failed_executions || 0,
+        success_rate: (statsData.success_rate || 0) / 100, // Convert percentage to decimal
+        recent_executions_24h: statsData.recent_executions_24h || 0,
+        avg_execution_time: statsData.avg_execution_time || 0
+      };
+      console.log('🐛 Mapped stats:', realStats);
+      setStats(realStats);
       
+      // Map executions data
       const realExecutions: ExecutionRecord[] = executionsData.map((exec: any, index: number) => {
         console.log(`🐛 Processing execution ${index}:`, exec);
+        console.log(`🐛 Execution ${index} step data:`, {
+          passed_steps: exec.passed_steps,
+          failed_steps: exec.failed_steps,
+          total_steps: exec.total_steps
+        });
         return {
-          execution_id: exec.id || exec.execution_id || 'unknown',
-          prompt_id: exec.prompt_id || '',
-          test_name: exec.test_name || 'Unknown Test',
-          prompt_description: exec.prompt_description || 'No description available', 
+          execution_id: exec.id || `exec-${index}`,
+          prompt_id: '', // Not needed for dashboard
+          test_name: exec.test_name || 'Test Execution',
+          prompt_description: exec.test_name || 'Test execution', 
           status: exec.status || 'unknown',
-          success_rate: (exec.success_rate || 0) / 100, // API now sends percentages, convert to decimal for internal use
-          start_time: exec.started_at || exec.start_time || new Date().toISOString(),
-          duration: exec.duration_seconds || exec.duration || 0,
-          steps_completed: exec.passed_steps || exec.steps_completed || 0,
-          total_steps: exec.total_steps || 0
+          success_rate: (exec.success_rate || 0) / 100,
+          start_time: exec.started_at || new Date().toISOString(),
+          duration: exec.duration_seconds || null,
+          steps_completed: exec.passed_steps || 0,
+          total_steps: exec.total_steps || 0,
+          failed_steps: exec.failed_steps || 0  // Add explicit failed steps from API
         };
       });
+      
       console.log('🐛 Final mapped executions:', realExecutions);
       setExecutions(realExecutions);
+      
     } catch (err) {
-      console.error(err);
+      console.error('Dashboard fetch error:', err);
       setError('Failed to load execution data. Please check your connection and try again.');
     } finally {
       setLoading(false);
@@ -667,15 +641,15 @@ const ExecutionDashboard: React.FC = () => {
     setGeneratingSummaries(prev => new Set(prev).add(executionId));
     
     try {
-      const summaryResponse = await executionApiService.generateExecutionSummary(executionId);
+      // For now, just show a placeholder since the method doesn't exist in the authenticated API
       const summary: ExecutionSummaryResponse = {
-        execution_id: summaryResponse.execution_id || executionId,
-        summary_text: summaryResponse.summary_text || "Summary generated successfully",
-        generated_at: summaryResponse.generated_at || new Date().toISOString(),
-        model_used: summaryResponse.model_used || "gpt-4",
-        key_insights: (summaryResponse as any).key_insights || [], // Will be populated from API if available
-        recommendations: (summaryResponse as any).recommendations || [], // Will be populated from API if available
-        performance_metrics: (summaryResponse as any).performance_metrics || {
+        execution_id: executionId,
+        summary_text: "Summary generation not yet implemented for authenticated API",
+        generated_at: new Date().toISOString(),
+        model_used: "placeholder",
+        key_insights: [],
+        recommendations: [],
+        performance_metrics: {
           avg_step_time: 0,
           slowest_step: '',
           fastest_step: ''
@@ -703,11 +677,8 @@ const ExecutionDashboard: React.FC = () => {
   };
   const loadCachedSummary = async (executionId: string) => {
     try {
-      const cachedSummary = await executionApiService.getCachedExecutionSummary(executionId);
-      setSummaries(prev => ({
-        ...prev,
-        [executionId]: cachedSummary
-      }));
+      // Placeholder - method doesn't exist in authenticated API yet
+      console.log('loadCachedSummary not implemented for', executionId);
     } catch (err) {
       // No cached summary available, that's okay
     }
@@ -728,10 +699,10 @@ const ExecutionDashboard: React.FC = () => {
     if (loadingBindings.has(executionId) || bindingUsages[executionId]) return;
     setLoadingBindings(prev => new Set(prev).add(executionId));
     try {
-      const bindingData = await executionApiService.getExecutionBindingUsage(executionId);
+      // Placeholder - method doesn't exist in authenticated API yet
       setBindingUsages(prev => ({
         ...prev,
-        [executionId]: bindingData
+        [executionId]: { bindings_count: 0, bindings_used: [] }
       }));
     } catch (err) {
       console.error(err);
@@ -879,7 +850,7 @@ const ExecutionDashboard: React.FC = () => {
                   onClick={() => handleExecutionClick(execution.execution_id)}
                 >
                   <ExecutionId>
-                    {execution.prompt_id ? execution.prompt_id.substring(0, 8).toUpperCase() : `RUN-${String(index + 121).padStart(5, '0')}`}
+                    {execution.execution_id.substring(0, 8).toUpperCase()}
                   </ExecutionId>
                   <ExecutionDescription>
                     {execution.prompt_description || execution.test_name || 'Test Execution'}
@@ -894,15 +865,16 @@ const ExecutionDashboard: React.FC = () => {
                   </DateValue>
                   <DateValue>
                     {execution.duration ? 
-                      new Date(execution.duration * 1000).toISOString().substr(11, 8) : 
-                      '00:02:04'}
+                      formatDuration(execution.duration) : 
+                      'N/A'}
                   </DateValue>
-                  <MetricValue>{execution.total_steps || 30}</MetricValue>
+                  <MetricValue>{execution.total_steps || 0}</MetricValue>
                   <MetricValue type="success">
-                    {execution.steps_completed || execution.total_steps || 27}
+                    {execution.steps_completed || 0}
                   </MetricValue>
                   <MetricValue type="error">
-                    {((execution.total_steps || 0) - (execution.steps_completed || execution.total_steps || 0))}
+                    {execution.failed_steps !== undefined ? execution.failed_steps : 
+                     ((execution.total_steps || 0) - (execution.steps_completed || 0))}
                   </MetricValue>
                   <div>
                     <StatusBadge $status={execution.status}>

@@ -170,7 +170,11 @@ class CostManagementService:
             'usage_percentage': (daily_used / daily_limit) * 100 if daily_limit > 0 else 0
         }
         
-        if not can_proceed:return can_proceed, budget_info
+        if not can_proceed:
+            # Add warning about budget limits
+            budget_info['warning'] = f"Daily token limit exceeded. Used: {daily_used}, Limit: {daily_limit}"
+        
+        return can_proceed, budget_info
     
     def optimize_payload(self, prompt_envelope: PromptEnvelope) -> Dict[str, Any]:
         """

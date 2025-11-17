@@ -5,7 +5,7 @@
 import { MCPFrontendManager } from '../../services/mcpFrontendClient';
 
 // API Base URL from environment or default
-const UNIFIED_API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const UNIFIED_API_BASE_URL = import.meta.env.VITE_UNIFIED_API_URL || 'https://testhelix.com';
 
 interface ApiResponse<T = any> {
   success: boolean;
@@ -333,6 +333,20 @@ class UnifiedApiClient {
       body: JSON.stringify({ element_data: elementData, session_info: sessionInfo }),
     });
   }
+
+  async getAllElements(options?: { limit?: number; offset?: number; page?: string }): Promise<{
+    success: boolean;
+    data: any[];
+  }> {
+    const params = new URLSearchParams();
+    if (options?.limit) params.append('limit', options.limit.toString());
+    if (options?.offset) params.append('offset', options.offset.toString());
+    if (options?.page) params.append('page', options.page);
+    
+    const url = `/api/v1/sql/elements${params.toString() ? '?' + params.toString() : ''}`;
+    return this.request(url);
+  }
+
   async recordExecution(executionData: any, sessionId: string): Promise<{
     success: boolean;
     data: any;

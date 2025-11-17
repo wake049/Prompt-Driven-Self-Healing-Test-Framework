@@ -47,12 +47,20 @@ const StatsRow = styled.div`
   margin-bottom: 24px;
 `;
 
-const StatCard = styled.div`
+const StatCard = styled.div<{ variant?: string }>`
   background: white;
   border: 1px solid #e9ecef;
   border-radius: 8px;
   padding: 16px;
   text-align: center;
+  ${props => props.variant === 'success' && `
+    border-color: #28a745;
+    background: #f8fff9;
+  `}
+  ${props => props.variant === 'warning' && `
+    border-color: #ffc107;
+    background: #fffcf0;
+  `}
 `;
 
 const StatValue = styled.div`
@@ -75,11 +83,118 @@ const StatSubtext = styled.div`
   margin-top: 2px;
 `;
 
+const StatTitle = styled.h3`
+  font-size: 14px;
+  font-weight: 600;
+  color: ${props => props.theme?.colors?.textSecondary || '#6c757d'};
+  margin: 0 0 16px 0;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+`;
+
+const StatChange = styled.div<{ positive?: boolean }>`
+  font-size: 14px;
+  color: ${props => props.positive ? (props.theme?.colors?.success || '#28a745') : (props.theme?.colors?.error || '#dc3545')};
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+`;
+
 const ExecutionsTable = styled.div`
   background: white;
   border: 1px solid #e9ecef;
   border-radius: 8px;
   overflow: hidden;
+`;
+
+const ExecutionItem = styled.div<{ clickable?: boolean }>`
+  display: grid;
+  grid-template-columns: 1fr 2fr 1fr 1fr 0.8fr 0.8fr 0.8fr 1fr 1fr;
+  padding: 12px 16px;
+  border-bottom: 1px solid #e9ecef;
+  align-items: center;
+  font-size: 13px;
+  cursor: ${props => props.clickable ? 'pointer' : 'default'};
+  
+  &:hover {
+    background: ${props => props.clickable ? '#f8f9fa' : 'transparent'};
+  }
+  
+  &:last-child {
+    border-bottom: none;
+  }
+`;
+
+const ExecutionId = styled.div`
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-size: 12px;
+  color: #0066cc;
+  font-weight: 600;
+`;
+
+const ExecutionDescription = styled.div`
+  color: #212529;
+  font-weight: 500;
+  
+  small {
+    display: block;
+    color: #6c757d;
+    font-size: 11px;
+    margin-top: 2px;
+  }
+`;
+
+const DateValue = styled.div`
+  color: #6c757d;
+  font-size: 12px;
+`;
+
+const MetricValue = styled.div<{ type?: string }>`
+  font-weight: 600;
+  color: ${props => {
+    switch (props.type) {
+      case 'success': return '#28a745';
+      case 'warning': return '#ffc107';
+      case 'danger': return '#dc3545';
+      default: return '#6c757d';
+    }
+  }};
+`;
+
+const ActionButton = styled.button`
+  background: transparent;
+  border: 1px solid #0066cc;
+  color: #0066cc;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  font-weight: 500;
+  
+  &:hover {
+    background: #0066cc;
+    color: white;
+  }
+`;
+
+const EmptyState = styled.div`
+  text-align: center;
+  padding: 48px 24px;
+  color: #6c757d;
+  
+  h4 {
+    margin: 0 0 8px 0;
+    color: #495057;
+  }
+  
+  p {
+    margin: 0;
+    font-size: 14px;
+  }
 `;
 
 const TableHeader = styled.div`
@@ -152,22 +267,6 @@ const LoadingSpinner = styled.div`
   color: #6c757d;
 `;
 
-const EmptyState = styled.div`
-  text-align: center;
-  padding: 40px;
-  color: #6c757d;
-  
-  h4 {
-    margin: 0 0 8px 0;
-    color: #495057;
-  }
-  
-  p {
-    margin: 0;
-    font-size: 14px;
-  }
-`;
-
 interface ExecutionStats {
   total_executions: number;
   successful_executions: number;
@@ -204,6 +303,7 @@ const TestCaseExecutionHistory: React.FC<TestCaseExecutionHistoryProps> = ({
   promptId, 
   title = "Execution History" 
 }) => {
+  const theme = useTheme();
   const [stats, setStats] = useState<ExecutionStats | null>(null);
   const [executions, setExecutions] = useState<ExecutionRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -234,15 +334,22 @@ const TestCaseExecutionHistory: React.FC<TestCaseExecutionHistoryProps> = ({
         filters.prompt_id = promptId;
       }
 
+      console.log('Fetching execution data with filters:', filters);
+      console.log('testCaseId:', testCaseId, 'promptId:', promptId);
+
       // Use authenticated API service
       const [statsResponse, executionsResponse] = await Promise.all([
         executionApiService.getExecutionStats(filters),
         executionApiService.getRecentExecutions({ ...filters, limit: 10 })
       ]);
 
+      console.log('Stats response:', statsResponse);
+      console.log('Executions response:', executionsResponse);
+
       setStats(statsResponse);
       setExecutions(executionsResponse);
     } catch (err: any) {
+      console.error('Error fetching execution data:', err);
       setError('Failed to load execution history');
     } finally {
       setLoading(false);
@@ -356,10 +463,10 @@ const TestCaseExecutionHistory: React.FC<TestCaseExecutionHistoryProps> = ({
         ) : (
           <>
             <ExecutionItem style={{ 
-              background: theme.colors.surface, 
+              background: '#f8f9fa', 
               fontWeight: 600,
-              color: theme.colors.text,
-              borderBottom: `2px solid ${theme.colors.border}`
+              color: '#212529',
+              borderBottom: `2px solid #e9ecef`
             }}>
               <div>Run ID</div>
               <div>Prompt Description</div>

@@ -51,7 +51,7 @@ export class MCPWebSocketClient {
   private authToken: string;
 
   constructor(
-    serverUrl: string = "ws://localhost:8765",
+    serverUrl: string = "wss://mcp.testhelix.com/mcp/ws",
     authToken: string = "devtoken"
   ) {
     this.serverUrl = serverUrl;

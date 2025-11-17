@@ -5,7 +5,7 @@ Handles database operations for test sessions, elements, and review queue
 """
 
 from fastapi import APIRouter, HTTPException, Query, Body, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 import json
@@ -39,6 +39,10 @@ class SessionInfo(BaseModel):
     page: Optional[str] = None
     description: Optional[str] = None
 
+class RecordElementRequest(BaseModel):
+    element_data: ElementData
+    session_info: Optional[SessionInfo] = None
+
 class ExecutionData(BaseModel):
     toolName: str
     parameters: Dict[str, Any] = {}
@@ -66,26 +70,64 @@ class HealingSubmission(BaseModel):
     healing_attempts: List[HealingAttempt]
 
 @router.post("/record-element")
-async def record_element(element_data: ElementData, session_info: Optional[SessionInfo] = None):
+async def record_element(request: RecordElementRequest):
     """
-    Record element data from Chrome Extension
+    Record element data from Chrome Extension (no auth required for extension)
     """
     try:
+        print(f"DEBUG: Received record-element request")
+        print(f"DEBUG: Full request body: {request}")
+        print(f"DEBUG: element_data: {request.element_data}")
+        print(f"DEBUG: session_info: {request.session_info}")
+        
+        # Validate required fields
+        if not request.element_data:
+            raise HTTPException(status_code=422, detail="element_data is required")
+        
+        if not request.element_data.tag:
+            raise HTTPException(status_code=422, detail="element_data.tag is required")
+        
+        if not request.element_data.page:
+            raise HTTPException(status_code=422, detail="element_data.page is required")
+        
         from core.database import get_database
-        db = await get_database()# First, ensure the page exists in repo.pages
+        db = await get_database()
+        
+        element_data = request.element_data
+        session_info = request.session_info
+        
+        # Get the most recent project (since extension doesn't have auth)
+        user_project = await db.fetchrow(
+            """
+            SELECT p.id, p.name 
+            FROM core.projects p 
+            WHERE p.is_active = true
+            ORDER BY p.created_at DESC 
+            LIMIT 1
+            """
+        )
+        
+        if not user_project:
+            raise HTTPException(status_code=400, detail="No projects found in system")
+        
+        project_id = user_project["id"]
+        print(f"DEBUG: Using project: {user_project['name']} (ID: {project_id})")
+        
+        # First, ensure the page exists in repo.pages
+        tags_value = json.dumps([])  # Convert empty array to JSON string
+        print(f"DEBUG: About to insert page with values: page='{element_data.page}', route_hint='{element_data.page}', tags='{tags_value}' (type: {type(tags_value)})")
+        
         page_result = await db.fetchrow(
             """
             INSERT INTO repo.pages (project_id, name, route_hint, tags)
-            VALUES (
-                (SELECT id FROM core.projects LIMIT 1),  -- Use first project for now
-                $1, $2, $3
-            )
+            VALUES ($1, $2, $3, $4)
             ON CONFLICT (project_id, name) DO UPDATE SET updated_at = NOW()
             RETURNING id
             """,
+            project_id,
             element_data.page,
             element_data.page,  # Use page name as route hint
-            []  # Empty tags array for now
+            tags_value
         )
         
         page_id = page_result["id"]
@@ -113,41 +155,56 @@ async def record_element(element_data: ElementData, session_info: Optional[Sessi
             attributes["text"] = element_data.text_content or element_data.text
         
         # Record the element in repo.elements
+        primary_selector_json = json.dumps(primary_selector)
+        alt_selectors_json = json.dumps(alt_selectors)
+        attributes_json = json.dumps(attributes)
+        
+        # Map to actual database schema
+        element_name = element_data.id or element_data.element_id or f"element_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        element_type = element_data.tag or "unknown"
+        
+        print(f"DEBUG: About to insert element with values: page_id={page_id}, name='{element_name}', element_type='{element_type}', primary_selector='{primary_selector_json}', fallback_selectors='{alt_selectors_json}', attributes='{attributes_json}'")
+        
         result = await db.fetchrow(
             """
             INSERT INTO repo.elements (
-                page_id, element_key, primary_selector, alt_selectors, 
-                attributes, is_active
+                page_id, name, element_type, primary_selector, fallback_selectors, 
+                attributes, is_active, description
             )
-            VALUES ($1, $2, $3, $4, $5, $6)
-            ON CONFLICT (page_id, element_key) DO UPDATE SET
-                primary_selector = EXCLUDED.primary_selector,
-                alt_selectors = EXCLUDED.alt_selectors,
-                attributes = EXCLUDED.attributes,
-                updated_at = NOW()
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING *
             """,
             page_id,
-            element_data.id or element_data.element_id or f"element_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-            json.dumps(primary_selector),
-            json.dumps(alt_selectors),
-            json.dumps(attributes),
-            True
+            element_name,
+            element_type,
+            primary_selector_json,
+            alt_selectors_json,
+            attributes_json,
+            True,
+            f"Element recorded from Chrome extension at {datetime.now()}"
         )
         return {
             "success": True,
             "data": {
                 "id": str(result["id"]),
-                "element_key": result["element_key"],
+                "name": result["name"],
                 "page_id": str(result["page_id"]),
                 "primary_selector": result["primary_selector"],
-                "alt_selectors": result["alt_selectors"],
+                "fallback_selectors": result["fallback_selectors"],
                 "attributes": result["attributes"]
             },
             "action": "created"
         }
         
-    except Exception as e:raise HTTPException(status_code=500, detail=f"Failed to record element: {str(e)}")
+    except ValidationError as e:
+        print(f"VALIDATION ERROR in record_element: {str(e)}")
+        print(f"VALIDATION ERROR details: {e.errors()}")
+        raise HTTPException(status_code=422, detail=f"Validation failed: {e.errors()}")
+    except Exception as e:
+        print(f"ERROR in record_element: {str(e)}")
+        import traceback
+        print(f"ERROR traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Failed to record element: {str(e)}")
 
 @router.post("/record-execution")
 async def record_execution(execution_data: ExecutionData, session_id: str):
@@ -591,35 +648,83 @@ async def submit_healing_data(submission: HealingSubmission):
 async def get_all_elements(
     limit: int = Query(100, description="Maximum number of elements to return"),
     offset: int = Query(0, description="Number of elements to skip"),
-    page: Optional[str] = Query(None, description="Filter by page name")
+    page: Optional[str] = Query(None, description="Filter by page name"),
+    current_user: CurrentUser = Depends(get_current_active_user)
 ):
     """
-    Get all recorded elements
+    Get all recorded elements for the current user's project
     """
     try:
-        from core.database import get_database
-        db = await get_database()
+        print(f"DEBUG: get_all_elements called with limit={limit}, offset={offset}, page={page}")
+        print(f"DEBUG: Current user: {current_user.user.email} (ID: {current_user.user.id})")
         
-        where_clause = "WHERE e.is_active = true"
-        params = []
+        from core.database import get_database
+        print("DEBUG: About to get database connection")
+        
+        db = await get_database()
+        print("DEBUG: Database connection established successfully")
+        
+        # Get user's project ID through the user_tenant_roles relationship
+        user_project = await db.fetchrow(
+            """
+            SELECT p.id, p.name 
+            FROM core.projects p 
+            JOIN core.tenants t ON p.tenant_id = t.id
+            JOIN core.user_tenant_roles utr ON t.id = utr.tenant_id
+            WHERE utr.user_id = $1 AND utr.is_active = true AND t.is_active = true AND p.is_active = true
+            ORDER BY p.created_at DESC 
+            LIMIT 1
+            """,
+            current_user.user.id
+        )
+        
+        if not user_project:
+            print("DEBUG: No project found for user, checking if user is admin or should get default project")
+            # Try to get the first available project as fallback (for admin users)
+            user_project = await db.fetchrow(
+                "SELECT id, name FROM core.projects WHERE is_active = true ORDER BY created_at DESC LIMIT 1"
+            )
+            
+            if not user_project:
+                print("DEBUG: No projects exist at all, returning empty result")
+                return {
+                    "success": True,
+                    "data": [],
+                    "count": 0,
+                    "message": "No projects found in the system"
+                }
+            
+            print(f"DEBUG: Using fallback project: {user_project['name']} (ID: {user_project['id']})")
+        
+        project_id = user_project["id"]
+        project_name = user_project["name"]
+        print(f"DEBUG: Using project: {project_name} (ID: {project_id})")
+        
+        where_clause = "WHERE e.is_active = true AND p.project_id = $1"
+        params = [project_id]
         
         if page:
-            where_clause += " AND p.name = $1"
+            where_clause += " AND p.name = $2"
             params.append(page)
+            print(f"DEBUG: Added page filter: {page}")
         
         # Add pagination
         params.extend([limit, offset])
         limit_offset = f"LIMIT ${len(params)-1} OFFSET ${len(params)}"
         
-        result = await db.execute(
-            f"""
+        print(f"DEBUG: Final query params: {params}")
+        print(f"DEBUG: Where clause: {where_clause}")
+        print(f"DEBUG: Limit/offset: {limit_offset}")
+        
+        query = f"""
             SELECT 
                 e.id,
-                e.element_key as logical_key,
+                e.name as logical_key,
+                e.element_type,
                 e.page_id,
                 p.name as page,
                 e.primary_selector,
-                e.alt_selectors,
+                e.fallback_selectors,
                 e.attributes,
                 e.is_active,
                 e.created_at as timestamp_recorded,
@@ -629,96 +734,152 @@ async def get_all_elements(
             {where_clause}
             ORDER BY e.updated_at DESC
             {limit_offset}
-            """,
-            *params
-        )
+            """
+        
+        print(f"DEBUG: About to execute query: {query}")
+        print(f"DEBUG: Query params: {params}")
+        
+        result = await db.fetch(query, *params)
+        print(f"DEBUG: Query executed successfully, result type: {type(result)}")
+        print(f"DEBUG: Result length/content: {len(result) if hasattr(result, '__len__') else 'N/A'}")
+        
+        if hasattr(result, '__iter__'):
+            print(f"DEBUG: First few rows: {list(result)[:2] if result else 'No rows'}")
+        else:
+            print(f"DEBUG: Result is not iterable: {result}")
         
         # Convert to format expected by frontend
+        print(f"DEBUG: Starting to process {len(result) if hasattr(result, '__len__') else 'unknown'} rows")
         elements = []
-        for row in result:
-            # Parse selectors - handle potential JSON strings
-            primary_selector = row.get("primary_selector")
-            if isinstance(primary_selector, str):
-                try:
-                    primary_selector = json.loads(primary_selector)
-                except:
-                    primary_selector = {}
-            elif not primary_selector:
-                primary_selector = {}
-            
-            alt_selectors = row.get("alt_selectors")
-            if isinstance(alt_selectors, str):
-                try:
-                    alt_selectors = json.loads(alt_selectors)
-                except:
-                    alt_selectors = []
-            elif not alt_selectors:
-                alt_selectors = []
-            
-            attributes = row.get("attributes")
-            if isinstance(attributes, str):
-                try:
-                    attributes = json.loads(attributes)
-                except:
-                    attributes = {}
-            elif not attributes:
-                attributes = {}
-            
-            # Extract main selectors and tag
-            css_selector = primary_selector.get("css_selector", primary_selector.get("css", "")) if primary_selector else ""
-            xpath = primary_selector.get("xpath", "") if primary_selector else ""
-            tag = primary_selector.get("tag", "unknown") if primary_selector else "unknown"
-            
-            # Build selectors list
-            selectors = []
-            if css_selector:
-                selectors.append(css_selector)
-            if xpath:
-                selectors.append(xpath)
-            
-            # Add alternative selectors
-            if alt_selectors:
-                for alt_sel in alt_selectors:
-                    if isinstance(alt_sel, dict):
-                        if alt_sel.get("css"):
-                            selectors.append(alt_sel["css"])
-                        if alt_sel.get("xpath"):
-                            selectors.append(alt_sel["xpath"])
-            
-            # Handle timestamp conversion
-            timestamp_recorded = row.get("timestamp_recorded")
-            if timestamp_recorded:
-                try:
-                    timestamp_iso = timestamp_recorded.isoformat() if hasattr(timestamp_recorded, 'isoformat') else str(timestamp_recorded)
-                except:
-                    timestamp_iso = None
-            else:
-                timestamp_iso = None
-            
-            elements.append({
-                "id": str(row["id"]),
-                "logical_key": row["logical_key"],
-                "tag": tag,
-                "text_content": attributes.get("text", "") if attributes else "",
-                "text": attributes.get("text", "") if attributes else "",
-                "attributes": attributes if attributes else {},
-                "xpath": xpath,
-                "css_selector": css_selector,
-                "position_x": 0,  # Not stored in new schema
-                "position_y": 0,  # Not stored in new schema
-                "selectors": selectors,
-                "page": row["page"],
-                "timestamp_recorded": timestamp_iso,
-                "is_active": row["is_active"]
-            })
         
-        return {
+        for i, row in enumerate(result):
+            try:
+                print(f"DEBUG: Processing row {i+1}: {dict(row) if hasattr(row, 'keys') else row}")
+                
+                # Parse selectors - handle potential JSON strings
+                primary_selector = row.get("primary_selector")
+                print(f"DEBUG: Raw primary_selector: {primary_selector} (type: {type(primary_selector)})")
+                
+                if isinstance(primary_selector, str):
+                    try:
+                        primary_selector = json.loads(primary_selector)
+                        print(f"DEBUG: Parsed primary_selector from JSON: {primary_selector}")
+                    except Exception as json_err:
+                        print(f"DEBUG: Failed to parse primary_selector JSON: {json_err}")
+                        primary_selector = {}
+                elif not primary_selector:
+                    primary_selector = {}
+                
+                alt_selectors = row.get("fallback_selectors")
+                print(f"DEBUG: Raw fallback_selectors: {alt_selectors} (type: {type(alt_selectors)})")
+                
+                if isinstance(alt_selectors, str):
+                    try:
+                        alt_selectors = json.loads(alt_selectors)
+                        print(f"DEBUG: Parsed fallback_selectors from JSON: {alt_selectors}")
+                    except Exception as json_err:
+                        print(f"DEBUG: Failed to parse fallback_selectors JSON: {json_err}")
+                        alt_selectors = []
+                elif not alt_selectors:
+                    alt_selectors = []
+                
+                attributes = row.get("attributes")
+                print(f"DEBUG: Raw attributes: {attributes} (type: {type(attributes)})")
+                
+                if isinstance(attributes, str):
+                    try:
+                        attributes = json.loads(attributes)
+                        print(f"DEBUG: Parsed attributes from JSON: {attributes}")
+                    except Exception as json_err:
+                        print(f"DEBUG: Failed to parse attributes JSON: {json_err}")
+                        attributes = {}
+                elif not attributes:
+                    attributes = {}
+                
+                # Extract main selectors and tag
+                css_selector = primary_selector.get("css_selector", primary_selector.get("css", "")) if primary_selector else ""
+                xpath = primary_selector.get("xpath", "") if primary_selector else ""
+                
+                # Get tag from element_type field first, then fallback to primary_selector
+                tag = row.get("element_type", "unknown")
+                if tag == "unknown" or not tag:
+                    tag = primary_selector.get("tag", "unknown") if primary_selector else "unknown"
+                
+                print(f"DEBUG: Extracted - css_selector: {css_selector}, xpath: {xpath}, tag: {tag} (from element_type: {row.get('element_type')})")
+                
+                # Build selectors list
+                selectors = []
+                if css_selector:
+                    selectors.append(css_selector)
+                if xpath:
+                    selectors.append(xpath)
+                
+                # Add alternative selectors
+                if alt_selectors:
+                    for alt_sel in alt_selectors:
+                        if isinstance(alt_sel, dict):
+                            if alt_sel.get("css"):
+                                selectors.append(alt_sel["css"])
+                            if alt_sel.get("xpath"):
+                                selectors.append(alt_sel["xpath"])
+                
+                print(f"DEBUG: Final selectors list: {selectors}")
+                
+                # Handle timestamp conversion
+                timestamp_recorded = row.get("timestamp_recorded")
+                if timestamp_recorded:
+                    try:
+                        timestamp_iso = timestamp_recorded.isoformat() if hasattr(timestamp_recorded, 'isoformat') else str(timestamp_recorded)
+                    except Exception as ts_err:
+                        print(f"DEBUG: Failed to convert timestamp: {ts_err}")
+                        timestamp_iso = None
+                else:
+                    timestamp_iso = None
+                
+                element_dict = {
+                    "id": row["logical_key"],  # Use name as ID for frontend display
+                    "logical_key": row["logical_key"],
+                    "dbId": str(row["id"]),  # Keep database UUID for operations
+                    "tag": tag,
+                    "text_content": attributes.get("text", "") if attributes else "",
+                    "text": attributes.get("text", "") if attributes else "",
+                    "attributes": attributes if attributes else {},
+                    "xpath": xpath,
+                    "css_selector": css_selector,
+                    "position_x": 0,  # Not stored in new schema
+                    "position_y": 0,  # Not stored in new schema
+                    "selectors": selectors,
+                    "page": row["page"],
+                    "timestamp_recorded": timestamp_iso,
+                    "is_active": row["is_active"]
+                }
+                
+                print(f"DEBUG: Created element dict: {element_dict}")
+                elements.append(element_dict)
+                
+            except Exception as row_err:
+                print(f"ERROR: Failed to process row {i+1}: {row_err}")
+                print(f"ERROR: Row data: {row}")
+                # Continue processing other rows
+                continue
+        
+        print(f"DEBUG: Successfully processed {len(elements)} elements")
+        
+        result_dict = {
             "success": True,
             "data": elements,
             "count": len(elements)
         }
         
-    except Exception as e:raise HTTPException(status_code=500, detail=f"Failed to fetch elements: {str(e)}")
+        print(f"DEBUG: Returning result: {result_dict}")
+        return result_dict
+        
+    except Exception as e:
+        print(f"ERROR: Exception in get_all_elements: {str(e)}")
+        print(f"ERROR: Exception type: {type(e).__name__}")
+        import traceback
+        print(f"ERROR: Full traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch elements: {str(e)}")
 
 @router.delete("/elements/{element_id}")
 async def delete_element(

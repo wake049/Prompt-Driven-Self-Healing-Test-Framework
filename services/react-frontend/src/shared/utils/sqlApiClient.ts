@@ -175,20 +175,19 @@ class MCPSqlApiClient {
   // Element Management
   async getAllElements(options?: { limit?: number; offset?: number }): Promise<ApiResponse<RecordedElementDB[]>> {
     try {
-      const client = await this.getMCPClient();
-      const limit = options?.limit || 1000;
-      const offset = options?.offset || 0;
-      
-      const result = await client.readResource(`elements://repository/list?limit=${limit}&offset=${offset}`);
+      // Use unified API directly to get real database elements
+      const { UnifiedApiClient } = await import('./unifiedApiClient');
+      const unifiedApi = new UnifiedApiClient();
+      const result = await unifiedApi.getAllElements(options);
       
       return {
-        success: true,
-        data: result.elements || result
+        success: result.success || true,
+        data: result.data || []
       };
     } catch (error: any) {
       return {
         success: false,
-        error: error.message || "Failed to fetch elements via MCP"
+        error: error.message || "Failed to fetch elements from database"
       };
     }
   }

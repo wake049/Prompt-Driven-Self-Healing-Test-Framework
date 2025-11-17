@@ -52,7 +52,7 @@ export class MCPFrontendClient {
   private connectionListeners: Array<(connected: boolean) => void> = [];
 
   constructor(
-    serverUrl: string = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/mcp/ws`,
+    serverUrl: string = 'wss://mcp.testhelix.com/mcp/ws',
     authToken: string = "devtoken"
   ) {
     this.serverUrl = serverUrl;
@@ -211,14 +211,36 @@ export class MCPFrontendClient {
    * Handle connection close and attempt reconnection
    */
   private handleConnectionClose(): void {
+    this.isConnected = false;
+    
+    // Notify listeners immediately about disconnection
+    this.notifyConnectionListeners(false);
+    
+    // Clear any pending requests
+    this.pendingRequests.forEach(({ reject, timeout }) => {
+      clearTimeout(timeout);
+      reject(new Error("Connection lost"));
+    });
+    this.pendingRequests.clear();
+    
+    // Attempt reconnection with exponential backoff
     if (this.reconnectAttempts < this.maxReconnectAttempts) {
       this.reconnectAttempts++;
       const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 10000);
-       setTimeout(() => {
+      
+      console.log(`MCP connection lost. Attempting reconnection ${this.reconnectAttempts}/${this.maxReconnectAttempts} in ${delay}ms...`);
+      
+      setTimeout(() => {
         this.connect().catch(error => {
-          console.error("Frontend MCP reconnection failed:", error);
+          console.error(`Frontend MCP reconnection attempt ${this.reconnectAttempts} failed:`, error);
+          // If this was the last attempt, log final failure
+          if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+            console.error("MCP reconnection failed after maximum attempts. Manual reconnection required.");
+          }
         });
       }, delay);
+    } else {
+      console.error("MCP reconnection failed after maximum attempts. Manual reconnection required.");
     }
   }
 

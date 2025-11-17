@@ -15,7 +15,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class SqlTestStepRepository {
-    private static final String SQL_BACKEND_URL = "http://localhost:8000";
+    private static final String SQL_BACKEND_URL = System.getenv("UNIFIED_API_URL") != null ? 
+        System.getenv("UNIFIED_API_URL") : 
+        "https://testhelix.com";
     private static final String ELEMENTS_ENDPOINT = "/api/v1/sql/elements";
     private static final String SESSIONS_ENDPOINT = "/api/v1/sql/sessions";
     private final ObjectMapper objectMapper;

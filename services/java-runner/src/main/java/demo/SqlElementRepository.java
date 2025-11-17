@@ -15,7 +15,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class SqlElementRepository {
-    private static final String SQL_BACKEND_URL = "http://localhost:3001";
+    private static final String SQL_BACKEND_URL = System.getenv("UNIFIED_API_URL") != null ? 
+        System.getenv("UNIFIED_API_URL") : 
+        "https://testhelix.com";
     private static final String ELEMENTS_ENDPOINT = "/api/elements";
     private final ObjectMapper objectMapper;
 
@@ -24,15 +26,19 @@ public class SqlElementRepository {
     }
 
     public List<String> getAlternatives(String elementId, String page) {
+        return getAlternatives(elementId, page, null);
+    }
+
+    public List<String> getAlternatives(String elementId, String page, String selectorPolicy) {
         try {
-            System.out.println("Fetching alternatives from SQL backend for element: " + elementId + " on page: " + page);
+            System.out.println("Fetching alternatives from SQL backend for element: " + elementId + " on page: " + page + " with policy: " + selectorPolicy);
             
             // Try to find element by element_id and page
-            List<String> alternatives = fetchAlternativesFromApi(elementId, page);
+            List<String> alternatives = fetchAlternativesFromApi(elementId, page, selectorPolicy);
             
             if (alternatives.isEmpty()) {
                 // Try to find element by element_id on any page (page = "*")
-                alternatives = fetchAlternativesFromApi(elementId, null);
+                alternatives = fetchAlternativesFromApi(elementId, null, selectorPolicy);
             }
             
             if (!alternatives.isEmpty()) {
@@ -48,8 +54,10 @@ public class SqlElementRepository {
         }
     }
 
-    private List<String> fetchAlternativesFromApi(String elementId, String page) throws IOException {
+    private List<String> fetchAlternativesFromApi(String elementId, String page, String selectorPolicy) throws IOException {
         List<String> alternatives = new ArrayList<>();
+        List<String> preferredSelectors = new ArrayList<>();
+        List<String> fallbackSelectors = new ArrayList<>();
         
         try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
             // Build query parameters
@@ -95,7 +103,12 @@ public class SqlElementRepository {
                                     if (xpathNode != null && !xpathNode.isNull()) {
                                         String xpath = xpathNode.asText();
                                         if (xpath != null && !xpath.trim().isEmpty()) {
-                                            alternatives.add("xpath=" + xpath);
+                                            String selector = "xpath=" + xpath;
+                                            if ("robust".equals(selectorPolicy)) {
+                                                preferredSelectors.add(selector);
+                                            } else {
+                                                fallbackSelectors.add(selector);
+                                            }
                                         }
                                     }
                                     
@@ -103,17 +116,15 @@ public class SqlElementRepository {
                                     if (cssSelectorNode != null && !cssSelectorNode.isNull()) {
                                         String cssSelector = cssSelectorNode.asText();
                                         if (cssSelector != null && !cssSelector.trim().isEmpty()) {
-                                            // Only add if it doesn't already start with css=
-                                            if (!cssSelector.startsWith("css=")) {
-                                                alternatives.add("css=" + cssSelector);
+                                            String selector = cssSelector.startsWith("css=") ? cssSelector : "css=" + cssSelector;
+                                            if ("fast".equals(selectorPolicy) || "balanced".equals(selectorPolicy)) {
+                                                preferredSelectors.add(selector);
                                             } else {
-                                                alternatives.add(cssSelector);
+                                                fallbackSelectors.add(selector);
                                             }
                                         }
                                     }
                                     
-<<<<<<< Updated upstream
-=======
                                     // Add preferred selectors first, then fallback selectors
                                     alternatives.addAll(preferredSelectors);
                                     alternatives.addAll(fallbackSelectors);
@@ -128,7 +139,6 @@ public class SqlElementRepository {
                                         System.out.println("  ⚠ Fallback selectors (policy mismatch): " + fallbackSelectors);
                                     }
                                     
->>>>>>> Stashed changes
                                     break; // Found the element, no need to continue
                                 }
                             }

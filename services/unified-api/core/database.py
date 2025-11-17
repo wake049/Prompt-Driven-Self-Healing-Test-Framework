@@ -22,8 +22,8 @@ class DatabaseManager:
             "database": os.getenv("DB_NAME", "testframework_db"),
             "user": os.getenv("DB_USER", "testframework"),
             "password": os.getenv("DB_PASSWORD", "securepassword"),
-            "min_size": int(os.getenv("DB_POOL_MIN", "5")),
-            "max_size": int(os.getenv("DB_POOL_MAX", "20")),
+            "min_size": int(os.getenv("DB_POOL_MIN", "2")),  # Reduced from 5
+            "max_size": int(os.getenv("DB_POOL_MAX", "10")), # Reduced from 20
             "command_timeout": int(os.getenv("DB_TIMEOUT", "60"))
         }
         
@@ -84,23 +84,44 @@ class DatabaseManager:
         async with self.pool.acquire() as conn:
             yield conn
     
-    async def execute(self, query: str, *args) -> List[Dict[str, Any]]:
+    async def execute_query(self, query: str, *args) -> List[Dict[str, Any]]:
         """Execute a query and return results"""
         async with self.get_connection() as conn:
             result = await conn.fetch(query, *args)
             return [dict(row) for row in result]
-    
+
     async def execute_one(self, query: str, *args) -> Optional[Dict[str, Any]]:
         """Execute a query and return one result"""
         async with self.get_connection() as conn:
             result = await conn.fetchrow(query, *args)
             return dict(result) if result else None
-    
+
     async def execute_scalar(self, query: str, *args) -> Any:
         """Execute a query and return a scalar value"""
         async with self.get_connection() as conn:
             return await conn.fetchval(query, *args)
-    
+
+    # Add direct asyncpg-style methods for backward compatibility
+    async def fetchrow(self, query: str, *args):
+        """Execute a query and return one row (asyncpg style)"""
+        async with self.get_connection() as conn:
+            return await conn.fetchrow(query, *args)
+
+    async def fetch(self, query: str, *args):
+        """Execute a query and return all rows (asyncpg style)"""
+        async with self.get_connection() as conn:
+            return await conn.fetch(query, *args)
+
+    async def execute(self, query: str, *args):
+        """Execute a query without returning results (asyncpg style)"""
+        async with self.get_connection() as conn:
+            return await conn.execute(query, *args)
+
+    async def fetchval(self, query: str, *args):
+        """Execute a query and return a scalar value (asyncpg style)"""
+        async with self.get_connection() as conn:
+            return await conn.fetchval(query, *args)
+
     async def execute_command(self, query: str, *args) -> str:
         """Execute a command (INSERT, UPDATE, DELETE)"""
         async with self.get_connection() as conn:
@@ -151,13 +172,13 @@ async def get_database_manager() -> DatabaseManager:
         _db_manager = DatabaseManager()
         await _db_manager.initialize()
     else:
-        await _db_manager.initialize()
         # Test if the pool is still working
         try:
             async with _db_manager.pool.acquire() as conn:
                 await conn.execute("SELECT 1")
         except Exception as e:
             logger.warning(f"Database pool error: {e}, reinitializing...")
+            await _db_manager.close()  # Close the old pool first
             _db_manager = DatabaseManager()
             await _db_manager.initialize()
             

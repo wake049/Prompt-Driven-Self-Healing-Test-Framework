@@ -183,12 +183,78 @@ class MCPExtensionPopup {
         
         // Show summary to user
         this.showElementSummary(aiResult.data);
+        
+        // NEW: Record elements to database
+        await this.recordElementsToDatabase(response.data);
       } else {
         throw new Error(aiResult.error || 'AI analysis failed');
       }
 
     } catch (error) {
       this.updateStatus(`❌ Failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  /**
+   * Record extracted elements to the database
+   */
+  private async recordElementsToDatabase(pageData: any) {
+    try {
+      this.updateStatus('💾 Recording elements to database...');
+      
+      // Import API client
+      const { default: apiClient } = await import('./api/api-client');
+      
+      // Get page context for session info
+      const input = document.getElementById('page-context') as HTMLInputElement;
+      const pageName = input?.value || 'Unknown Page';
+      
+      // Extract elements from page data - they should already be in RecordedElement format
+      const elements = pageData.elements || [];
+      
+      if (elements.length === 0) {
+        this.updateStatus('⚠️ No elements to record');
+        return;
+      }
+      
+      // Create session info
+      const sessionId = `session_${Date.now()}`;
+      
+      // Record elements in batches to avoid overwhelming the API
+      const batchSize = 10;
+      let recordedCount = 0;
+      
+      for (let i = 0; i < elements.length; i += batchSize) {
+        const batch = elements.slice(i, i + batchSize);
+        
+        for (const element of batch) {
+          try {
+            // Elements are already in the correct format from extractAllElementsForAI
+            console.log('Recording element:', element);
+            
+            const result = await apiClient.recordElement(element, sessionId);
+            
+            console.log('Record result:', result);
+            
+            if (result.success) {
+              recordedCount++;
+            } else {
+              console.error('Failed to record element:', element.id, result.error);
+            }
+          } catch (error) {
+            console.error('Error recording element:', element.id, error);
+          }
+        }
+        
+        // Update progress
+        this.updateStatus(`💾 Recording elements... ${Math.min(i + batchSize, elements.length)}/${elements.length}`);
+      }
+      
+      this.updateStatus(`✅ Recorded ${recordedCount}/${elements.length} elements to database`);
+      
+    } catch (error) {
+      console.error('Failed to record elements to database:', error);
+      this.updateStatus(`⚠️ Elements analyzed but database recording failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
 

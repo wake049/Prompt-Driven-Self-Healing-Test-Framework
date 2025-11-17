@@ -17,7 +17,9 @@ import java.util.HashMap;
 import java.util.ArrayList;
 
 public class HealingReviewService {
-    private static final String REVIEW_API_URL = "http://localhost:3001/api/v1/healing/submit";
+    private static final String REVIEW_API_URL = System.getenv("UNIFIED_API_URL") != null ? 
+        System.getenv("UNIFIED_API_URL") + "/api/v1/healing/submit" : 
+        "https://testhelix.com/api/v1/healing/submit";
     private final ObjectMapper objectMapper;
 
     public HealingReviewService() {
@@ -43,7 +45,13 @@ public class HealingReviewService {
             try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
                 HttpPost httpPost = new HttpPost(REVIEW_API_URL);
                 httpPost.setHeader("Content-Type", "application/json");
-                httpPost.setHeader("Authorization", "Bearer your-secret-token-here"); // TODO: Use proper auth
+                
+                // Add authentication if token is available
+                String authToken = System.getenv("API_AUTH_TOKEN");
+                if (authToken != null && !authToken.isEmpty()) {
+                    httpPost.setHeader("Authorization", "Bearer " + authToken);
+                }
+                
                 httpPost.setEntity(new StringEntity(jsonPayload, "UTF-8"));
                 
                 try (CloseableHttpResponse response = httpClient.execute(httpPost)) {
@@ -73,7 +81,10 @@ public class HealingReviewService {
 
     public boolean isReviewApiAvailable() {
         try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
-            HttpGet httpGet = new HttpGet("http://localhost:3001/health");
+            String healthUrl = System.getenv("UNIFIED_API_URL") != null ? 
+                System.getenv("UNIFIED_API_URL") + "/health" : 
+                "https://testhelix.com/health";
+            HttpGet httpGet = new HttpGet(healthUrl);
             httpGet.setHeader("Accept", "application/json");
             
             try (CloseableHttpResponse response = httpClient.execute(httpGet)) {

@@ -43,31 +43,38 @@ async def get_execution_stats(
     current_user: CurrentUser = Depends(get_current_active_user)
 ):
     """Get execution statistics using proper exec.runs and exec.step_results tables with tenant filtering"""
-    try:# Build WHERE clause for filtering including tenant/project isolation
+    try:
+        # DEBUG: Log the parameters being used
+        print(f"DEBUG - get_execution_stats called with prompt_id={prompt_id}, test_case_id={test_case_id}")
+        print(f"DEBUG - current_user.tenant={current_user.tenant.id if current_user.tenant else None}")
+        print(f"DEBUG - current_user.project={current_user.project.id if current_user.project else None}")
+
+        # Build WHERE clause for filtering including tenant isolation (not project-specific)
         where_conditions = ["r.started_at >= NOW() - INTERVAL '30 days'"]
         query_params = []
-        
-        # Add tenant/project filtering for multi-tenancy
-        if current_user.tenant and current_user.tenant.id:
-            # Filter by tenant - runs should belong to projects in this tenant
-            where_conditions.append("EXISTS (SELECT 1 FROM core.projects p WHERE p.id = r.project_id AND p.tenant_id = $" + str(len(query_params) + 1) + ")")
-            query_params.append(str(current_user.tenant.id))
-        elif current_user.project and current_user.project.id:
-            # Filter by specific project if no tenant but has project
-            where_conditions.append("r.project_id = $" + str(len(query_params) + 1))
-            query_params.append(str(current_user.project.id))
         
         if test_case_id:
             where_conditions.append("r.test_case_id = $" + str(len(query_params) + 1))
             query_params.append(test_case_id)
         
         if prompt_id:
-            # Join with tests.test_cases to filter by source_ref_id (prompt_id)
-            where_conditions.append("EXISTS (SELECT 1 FROM tests.test_cases tc WHERE tc.id = r.test_case_id AND tc.source_ref_id = $" + str(len(query_params) + 1) + ")")
-            query_params.append(prompt_id)
+            # Combined: Look for test cases that match prompt AND project
+            where_conditions.append("EXISTS (SELECT 1 FROM tests.test_cases tc WHERE tc.id = r.test_case_id AND tc.project_id = $" + str(len(query_params) + 1) + " AND (tc.title LIKE $" + str(len(query_params) + 2) + " OR tc.plan_id = $" + str(len(query_params) + 3) + "))")
+            query_params.append(str(current_user.project.id))
+            prompt_short = prompt_id[:8]  # First 8 characters: 4b41706c
+            prompt_pattern = f"%{prompt_short}%"
+            query_params.extend([prompt_pattern, prompt_id])
+        elif current_user.project and current_user.project.id:
+            # If no prompt_id, just filter by project
+            where_conditions.append("EXISTS (SELECT 1 FROM tests.test_cases tc WHERE tc.id = r.test_case_id AND tc.project_id = $" + str(len(query_params) + 1) + ")")
+            query_params.append(str(current_user.project.id))
         
         where_clause = " AND ".join(where_conditions)
         
+        # DEBUG: Log the query being built
+        print(f"DEBUG - where_clause: {where_clause}")
+        print(f"DEBUG - query_params: {query_params}")
+
         # Get main execution statistics from exec.runs
         stats_query = f"""
         SELECT 
@@ -87,7 +94,74 @@ async def get_execution_stats(
         WHERE {where_clause}
         """
         
+        print(f"DEBUG - Final stats query: {stats_query}")
+        
+        # Debug: Check what test cases exist for this prompt_id
+        if prompt_id:
+            # Check test cases that match our criteria
+            prompt_short = prompt_id[:8] if prompt_id else ""
+            matching_test_cases = await db.fetch("""
+                SELECT id, title, plan_id, project_id 
+                FROM tests.test_cases 
+                WHERE title LIKE $1 OR plan_id = $2
+            """, f'%{prompt_short}%', prompt_id)
+            print(f"DEBUG - Test cases matching prompt_id {prompt_id}: {[dict(row) for row in matching_test_cases]}")
+            
+            # Also check all test cases
+            all_test_cases = await db.fetch("""
+            SELECT id, plan_id, title FROM tests.test_cases LIMIT 5
+            """)
+            print(f"DEBUG - All test cases in database: {[dict(row) for row in all_test_cases]}")
+            
+            # Check what executions exist for matching test cases
+            if matching_test_cases:
+                test_case_ids = [str(tc['id']) for tc in matching_test_cases]
+                executions = await db.fetch("""
+                    SELECT id, test_case_id, status, started_at 
+                    FROM exec.runs 
+                    WHERE test_case_id = ANY($1::uuid[])
+                    LIMIT 5
+                """, test_case_ids)
+                print(f"DEBUG - Executions for matching test cases: {[dict(row) for row in executions]}")
+                
+                # Debug: Show all executions and their test_case_ids
+                all_executions = await db.fetch("SELECT id, test_case_id FROM exec.runs LIMIT 10")
+                print(f"DEBUG - All executions (first 10): {[dict(row) for row in all_executions]}")
+                print(f"DEBUG - Our test case ID: 0d12a44d-3527-5a4e-8ecb-0e1b59893f67")
+                print(f"DEBUG - Do any executions match our test case? {any(str(row['test_case_id']) == '0d12a44d-3527-5a4e-8ecb-0e1b59893f67' for row in all_executions)}")
+            
+            
+            # Check project filtering
+            tenant_projects = await db.fetch("""
+                SELECT id FROM core.projects WHERE tenant_id = $1
+            """, current_user.tenant.id)
+            print(f"DEBUG - Projects for tenant {current_user.tenant.id}: {[str(p['id']) for p in tenant_projects]}")
+            
+        # Execute the main query first
         stats_result = await db.execute_one(stats_query, *query_params)
+        print(f"DEBUG - Raw stats result from DB: {dict(stats_result) if stats_result else 'None'}")
+        
+        # Debug: If no results, check what's in the database
+        if stats_result['total_executions'] == 0:
+            # Check total runs without filtering
+            total_runs = await db.execute_one("SELECT COUNT(*) as count FROM exec.runs")
+            print(f"DEBUG - Total runs in database (no filtering): {total_runs['count']}")
+            
+            # Check what test cases exist
+            if prompt_id:
+                test_cases = await db.fetch("""
+                    SELECT id, title, plan_id FROM tests.test_cases 
+                    WHERE title LIKE $1 OR plan_id = $2
+                """, f'%{prompt_id}%', prompt_id)
+                print(f"DEBUG - Matching test cases: {[dict(tc) for tc in test_cases]}")
+                
+                if test_cases:
+                    tc_id = test_cases[0]['id']
+                    runs_for_tc = await db.fetch("""
+                        SELECT id, project_id, status FROM exec.runs 
+                        WHERE test_case_id = $1
+                    """, tc_id)
+                    print(f"DEBUG - Runs for test case {tc_id}: {[dict(r) for r in runs_for_tc]}")
         
         total = stats_result['total_executions'] or 0
         completed = stats_result['completed_executions'] or 0
@@ -126,6 +200,11 @@ async def get_execution_stats(
         }
         
     except Exception as e:
+        # Log the actual error instead of hiding it
+        print(f"ERROR in get_execution_stats: {str(e)}")
+        print(f"ERROR type: {type(e).__name__}")
+        import traceback
+        traceback.print_exc()
         # Fallback to basic data if needed
         return {
             'total_executions': 0,
@@ -133,7 +212,8 @@ async def get_execution_stats(
             'failed_executions': 0,
             'success_rate': 0.0,
             'recent_executions_24h': 0,
-            'avg_execution_time': 60
+            'avg_execution_time': 60,
+            'error': str(e)  # Include error in response for debugging
         }
 
 def calculate_realistic_success_rate(status: str) -> float:
@@ -161,28 +241,32 @@ async def get_recent_executions(
     current_user: CurrentUser = Depends(get_current_active_user)
 ):
     """Get recent test executions using proper exec.runs table with tenant filtering and optional element filtering"""
-    try:# Build WHERE clause for filtering including tenant/project isolation
+    print(f"EARLY DEBUG - get_recent_executions function reached!")
+    try:
+        # DEBUG: Log the parameters being used
+        print(f"DEBUG - get_recent_executions called with limit={limit}, prompt_id={prompt_id}, test_case_id={test_case_id}")
+        print(f"DEBUG - current_user.tenant={current_user.tenant.id if current_user.tenant else None}")
+        print(f"DEBUG - current_user.project={current_user.project.id if current_user.project else None}")
+
+        # Build WHERE clause for filtering including tenant isolation (not project-specific)
         where_conditions = ["1=1"]  # Base condition
         query_params = []
-        
-        # Add tenant/project filtering for multi-tenancy
-        if current_user.tenant and current_user.tenant.id:
-            # Filter by tenant - runs should belong to projects in this tenant
-            where_conditions.append("EXISTS (SELECT 1 FROM core.projects p WHERE p.id = r.project_id AND p.tenant_id = $" + str(len(query_params) + 1) + ")")
-            query_params.append(str(current_user.tenant.id))
-        elif current_user.project and current_user.project.id:
-            # Filter by specific project if no tenant but has project
-            where_conditions.append("r.project_id = $" + str(len(query_params) + 1))
-            query_params.append(str(current_user.project.id))
         
         if test_case_id:
             where_conditions.append("r.test_case_id = $" + str(len(query_params) + 1))
             query_params.append(test_case_id)
         
         if prompt_id:
-            # Join with tests.test_cases to filter by source_ref_id (prompt_id)
-            where_conditions.append("EXISTS (SELECT 1 FROM tests.test_cases tc WHERE tc.id = r.test_case_id AND tc.source_ref_id = $" + str(len(query_params) + 1) + ")")
-            query_params.append(prompt_id)
+            # Combined: Look for test cases that match prompt AND project
+            where_conditions.append("EXISTS (SELECT 1 FROM tests.test_cases tc WHERE tc.id = r.test_case_id AND tc.project_id = $" + str(len(query_params) + 1) + " AND (tc.title LIKE $" + str(len(query_params) + 2) + " OR tc.plan_id = $" + str(len(query_params) + 3) + "))")
+            query_params.append(str(current_user.project.id))
+            prompt_short = prompt_id[:8]  # First 8 characters: 4b41706c
+            prompt_pattern = f"%{prompt_short}%"
+            query_params.extend([prompt_pattern, prompt_id])
+        elif current_user.project and current_user.project.id:
+            # If no prompt_id, just filter by project
+            where_conditions.append("EXISTS (SELECT 1 FROM tests.test_cases tc WHERE tc.id = r.test_case_id AND tc.project_id = $" + str(len(query_params) + 1) + ")")
+            query_params.append(str(current_user.project.id))
         
         where_clause = " AND ".join(where_conditions)
         
@@ -190,13 +274,17 @@ async def get_recent_executions(
         query_params.append(limit)
         limit_param = "$" + str(len(query_params))
         
+        # DEBUG: Log the query being built
+        print(f"DEBUG - where_clause: {where_clause}")
+        print(f"DEBUG - query_params: {query_params}")
+
         # Get recent executions with step statistics from proper tables
         query = f"""
         SELECT 
             r.id,
             r.test_case_id,
-            COALESCE(r.project_id::text, 'self-healing-framework') as project_id,
-            COALESCE(r.environment_id::text, 'development') as environment_id,
+            'unknown' as project_id,
+            COALESCE(r.environment_info::text, 'development') as environment_id,
             r.status as run_status,
             r.started_at,
             r.finished_at,
@@ -212,16 +300,24 @@ async def get_recent_executions(
         FROM exec.runs r
         LEFT JOIN exec.step_results sr ON r.id = sr.test_run_id
         WHERE {where_clause}
-        GROUP BY r.id, r.test_case_id, r.project_id, r.environment_id, r.status, 
+        GROUP BY r.id, r.test_case_id, r.environment_info, r.status, 
                  r.started_at, r.finished_at, r.runner_meta
         ORDER BY r.started_at DESC
         LIMIT {limit_param}
         """
         
-        results = await db.execute(query, *query_params)
+        print(f"DEBUG - Final recent executions query: {query}")
+        
+        results = await db.fetch(query, *query_params)
+        print(f"DEBUG - Recent executions result count: {len(results)}")
+        print(f"DEBUG - First row type: {type(results[0]) if results else 'No results'}")
+        print(f"DEBUG - First row content: {dict(results[0]) if results else 'No results'}")
         
         executions = []
-        for row in results:
+        for i, row in enumerate(results):
+            print(f"DEBUG - Row {i} status: {row.get('run_status')}, total_steps: {row.get('total_steps')}, failed_steps: {row.get('failed_steps')}")
+            if i < 3:  # Only log first 3 rows to avoid spam
+                print(f"DEBUG - Full row {i}: {dict(row)}")
             total_steps = row.get('total_steps', 0)
             passed_steps = row.get('passed_steps', 0)
             failed_steps = row.get('failed_steps', 0)
@@ -291,6 +387,11 @@ async def get_recent_executions(
         return executions
         
     except Exception as e:
+        # Log the actual error instead of hiding it
+        print(f"ERROR in get_recent_executions: {str(e)}")
+        print(f"ERROR type: {type(e).__name__}")
+        import traceback
+        traceback.print_exc()
         # Return empty list rather than error for dashboard resilience
         return []
 
@@ -309,7 +410,7 @@ async def get_execution_details_for_ui(
             r.status,
             r.started_at,
             r.finished_at,
-            tc.source_ref_id as prompt_id,
+            tc.plan_id as prompt_id,
             p.title as prompt_title,
             p.text as prompt_description,
             CASE 
@@ -319,7 +420,7 @@ async def get_execution_details_for_ui(
             END as duration_ms
         FROM exec.runs r
         LEFT JOIN tests.test_cases tc ON r.test_case_id = tc.id
-        LEFT JOIN planner.prompts p ON tc.source_ref_id = p.id
+        LEFT JOIN planner.prompts p ON tc.plan_id = p.id
         WHERE r.id = $1
         """
         
@@ -548,6 +649,99 @@ async def health_check():
         "service": "execution_dashboard_api", 
         "timestamp": datetime.now().isoformat()
     }
+
+@router.get("/debug/database-counts")
+async def debug_database_counts(
+    db: DatabaseManager = Depends(get_database_manager)
+):
+    """Debug endpoint to check what data exists in the database"""
+    try:
+        # Check counts in all relevant tables
+        tables_to_check = [
+            "exec.runs",
+            "exec.step_results", 
+            "tests.test_cases",
+            "planner.prompts",
+            "core.projects",
+            "plans"
+        ]
+        
+        results = {}
+        
+        for table in tables_to_check:
+            try:
+                count_result = await db.execute_one(f"SELECT COUNT(*) as count FROM {table}")
+                results[table] = count_result['count']
+            except Exception as e:
+                results[table] = f"Error: {str(e)}"
+        
+        # Also check for prompt relationships (using plan_id instead of source_ref_id)
+        try:
+            prompt_test_cases = await db.execute("""
+            SELECT 
+                p.id as prompt_id,
+                p.title as prompt_title,
+                tc.id as test_case_id,
+                tc.plan_id,
+                tc.title as test_case_title
+            FROM planner.prompts p
+            LEFT JOIN tests.test_cases tc ON p.id = tc.plan_id
+            LIMIT 5
+            """)
+            results['sample_prompt_test_case_relationships'] = list(prompt_test_cases)
+        except Exception as e:
+            results['sample_prompt_test_case_relationships'] = f"Error: {str(e)}"
+        
+        # Check the plans table and its relationship to prompts
+        try:
+            plans_data = await db.execute("""
+            SELECT 
+                pl.id as plan_id,
+                pl.title as plan_title,
+                pr.id as prompt_id,
+                pr.title as prompt_title
+            FROM plans pl
+            LEFT JOIN planner.prompts pr ON pl.prompt_id = pr.id
+            LIMIT 5
+            """)
+            results['plans_to_prompts'] = list(plans_data)
+        except Exception as e:
+            # Maybe the relationship field is different
+            try:
+                plans_simple = await db.execute("SELECT id, title FROM plans LIMIT 5")
+                results['plans_simple'] = list(plans_simple)
+            except Exception as e2:
+                results['plans_to_prompts'] = f"Error: {str(e)} - {str(e2)}"
+        
+        # Check for recent runs
+        try:
+            recent_runs = await db.execute("""
+            SELECT 
+                r.id as run_id,
+                r.test_case_id,
+                r.status,
+                r.started_at,
+                tc.plan_id as prompt_id,
+                tc.title as test_case_title
+            FROM exec.runs r
+            LEFT JOIN tests.test_cases tc ON r.test_case_id = tc.id
+            ORDER BY r.started_at DESC
+            LIMIT 5
+            """)
+            results['sample_recent_runs'] = list(recent_runs)
+        except Exception as e:
+            results['sample_recent_runs'] = f"Error: {str(e)}"
+        
+        return {
+            "debug_info": results,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        return {
+            "error": f"Failed to get debug info: {str(e)}",
+            "timestamp": datetime.now().isoformat()
+        }
 
 # M7 SCRUM-15: Enhanced Dashboard APIs
 @router.get("/trends")

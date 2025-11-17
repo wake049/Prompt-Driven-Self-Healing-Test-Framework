@@ -113,7 +113,7 @@ const SyncDebugger: React.FC = () => {
         const testPlansData = [];
         for (const prompt of promptsData.data || []) {
           try {
-            const testPlanResponse = await fetch(`https://testhelix.com/generated-test-plans/by-prompt/${prompt.id}`, {
+            const testPlanResponse = await fetch(`https://testhelix.com/api/v1/generated-test-plans/by-prompt/${prompt.id}`, {
               headers: { 'Authorization': `Bearer ${token}` },
             });
             if (testPlanResponse.ok) {
