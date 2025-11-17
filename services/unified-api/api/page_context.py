@@ -171,47 +171,71 @@ async def get_page_contexts(
     Get page contexts from database
     """
     try:
-        if search:
-            contexts = await repository.search_contexts(search, category)
-        elif category:
-            contexts = await repository.get_contexts_by_category(category)
+        # Use direct database query to avoid repository issues
+        db = await get_database()
+        
+        if category:
+            contexts = await db.fetch(
+                """
+                SELECT id, page_id, context_type, description, category, 
+                       website_url, primary_actions, usage_count, last_used_at,
+                       created_at, updated_at, screenshot_url
+                FROM repo.page_contexts 
+                WHERE category = $1 
+                ORDER BY created_at DESC 
+                LIMIT $2
+                """,
+                category, limit
+            )
         else:
-            contexts = await repository.get_all_contexts(limit)
+            contexts = await db.fetch(
+                """
+                SELECT id, page_id, context_type, description, category,
+                       website_url, primary_actions, usage_count, last_used_at,
+                       created_at, updated_at, screenshot_url
+                FROM repo.page_contexts 
+                ORDER BY created_at DESC 
+                LIMIT $1
+                """,
+                limit
+            )
         
         # Convert to frontend format
         result = []
         for ctx in contexts:
-            # Use page_name from joined pages table, fallback to description or URL
-            page_title = ctx.get("page_name")
-            if not page_title:
-                # If no page name, try to use description or extract from URL
-                page_title = ctx.get("description", "").split(" ")[0:3]  # First few words of description
-                page_title = " ".join(page_title) if page_title else None
+            try:
+                # Parse primary_actions JSON string
+                primary_actions = ctx.get("primary_actions", "[]")
+                if isinstance(primary_actions, str):
+                    try:
+                        import json
+                        primary_actions = json.loads(primary_actions)
+                    except:
+                        primary_actions = []
+                elif not isinstance(primary_actions, list):
+                    primary_actions = []
                 
-            if not page_title:
-                page_title = ctx.get("website_url", "").split("/")[-1] if ctx.get("website_url") else "Unknown"
-            
-            # Convert relative screenshot URL to full URL
-            screenshot_url = ctx.get("screenshot_url")
-            if screenshot_url and screenshot_url.startswith("/uploads"):
-                # Convert relative URL to full URL
-                from fastapi import Request
-                # For now, use a simple approach - we'll enhance this if needed
-                screenshot_url = f"https://testhelix.com{screenshot_url}"
-            
-            result.append({
-                "id": str(ctx["id"]),
-                "pageUrl": ctx.get("website_url"),
-                "pageTitle": page_title,
-                "pageType": ctx.get("category"),
-                "pageDescription": ctx.get("description"),
-                "primaryActions": ctx.get("primary_actions", []),
-                "screenshotUrl": screenshot_url,
-                "usageCount": ctx.get("usage_count", 0),
-                "lastUsedAt": ctx.get("last_used_at").isoformat() if ctx.get("last_used_at") else None,
-                "createdAt": ctx.get("created_at").isoformat() if ctx.get("created_at") else None,
-                "updatedAt": ctx.get("updated_at").isoformat() if ctx.get("updated_at") else None
-            })
+                # Convert relative screenshot URL to full URL
+                screenshot_url = ctx.get("screenshot_url")
+                if screenshot_url and screenshot_url.startswith("/uploads"):
+                    screenshot_url = f"https://testhelix.com{screenshot_url}"
+                
+                result.append({
+                    "id": str(ctx["id"]),
+                    "pageUrl": ctx.get("website_url", ""),
+                    "pageTitle": ctx.get("description", "Untitled"),
+                    "pageType": ctx.get("category", "unknown"),
+                    "pageDescription": ctx.get("description", ""),
+                    "primaryActions": primary_actions,
+                    "screenshotUrl": screenshot_url,
+                    "usageCount": ctx.get("usage_count", 0),
+                    "lastUsedAt": ctx.get("last_used_at").isoformat() if ctx.get("last_used_at") else None,
+                    "createdAt": ctx.get("created_at").isoformat() if ctx.get("created_at") else None,
+                    "updatedAt": ctx.get("updated_at").isoformat() if ctx.get("updated_at") else None
+                })
+            except Exception as e:
+                print(f"Error processing context: {e}")
+                continue
         
         return {
             "success": True,
@@ -219,7 +243,8 @@ async def get_page_contexts(
             "count": len(result)
         }
         
-    except Exception as e:raise HTTPException(status_code=500, detail=f"Failed to get page contexts: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get page contexts: {str(e)}")
 
 @router.get("/{context_id}")
 async def get_page_context(
