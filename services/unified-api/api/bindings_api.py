@@ -32,13 +32,14 @@ async def get_prompt_bindings(
         
         # Load active data bindings from datahub.data_bindings table
         bindings_query = """
-            SELECT rule_name, scope, source_ref, target 
+            SELECT name, binding_type, source_config, schema_definition 
             FROM datahub.data_bindings 
             WHERE is_active = true 
-            ORDER BY priority DESC, created_at DESC
+            ORDER BY created_at DESC
         """
         
-        db_bindings = await db.execute(bindings_query)
+        db_bindings = await db.fetch(bindings_query)
+        print(f"🔍 Found {len(db_bindings) if db_bindings else 0} bindings in database")
         
         # Convert to frontend format
         bindings = []
@@ -46,47 +47,61 @@ async def get_prompt_bindings(
             # Parse JSON fields if they're strings
             import json
             
-            source_ref = binding.get('source_ref', {})
-            if isinstance(source_ref, str):
+            source_config = binding.get('source_config', {})
+            if isinstance(source_config, str):
                 try:
-                    source_ref = json.loads(source_ref)
+                    source_config = json.loads(source_config)
                 except (json.JSONDecodeError, TypeError):
-                    source_ref = {}
+                    source_config = {}
             
-            target = binding.get('target', {})
-            if isinstance(target, str):
+            schema_definition = binding.get('schema_definition', {})
+            if isinstance(schema_definition, str):
                 try:
-                    target = json.loads(target)
+                    schema_definition = json.loads(schema_definition)
                 except (json.JSONDecodeError, TypeError):
-                    target = {}
+                    schema_definition = {}
             
             # Extract binding information
-            var_name = target.get('variable_name', binding.get('rule_name', 'unknown'))
-            var_type = target.get('type', 'text')
-            category = target.get('category', 'data')
+            var_name = binding.get('name', 'unknown')
+            binding_type = binding.get('binding_type', 'extract')
             
-            # Convert to frontend format
-            if 'selector' in source_ref:
-                # Data extraction binding
+            # Convert to frontend format based on binding type
+            print(f"🔍 Processing binding for GET: name='{var_name}', binding_type='{binding_type}', source_config keys: {list(source_config.keys())}")
+            
+            if binding_type == 'constant':
+                # Constant value binding
                 frontend_binding = {
                     "name": var_name,
-                    "description": f"Extract {category} from page elements",
-                    "type": "extract",
-                    "selector": source_ref.get('selector', ''),
-                    "extract_type": source_ref.get('extract_type', 'text'),
-                    "fallback_value": ""
+                    "description": f"Variable: {var_name}",
+                    "type": "constant",
+                    "value": source_config.get('value', ''),
+                    "fallback_value": source_config.get('fallback_value', '')
                 }
-            elif 'formula' in source_ref:
+                print(f"   → Returned as CONSTANT with value: '{source_config.get('value', '')}'")
+            elif binding_type == 'formula':
                 # Calculation binding
                 frontend_binding = {
                     "name": var_name,
-                    "description": f"Calculate {category} using formula",
+                    "description": f"Calculate value using formula",
                     "type": "formula",
-                    "formula": source_ref.get('formula', ''),
-                    "fallback_value": ""
+                    "formula": source_config.get('formula', ''),
+                    "fallback_value": source_config.get('fallback_value', '')
                 }
+                print(f"   → Returned as FORMULA")
+            elif binding_type == 'extract':
+                # Data extraction binding
+                frontend_binding = {
+                    "name": var_name,
+                    "description": f"Extract data from page elements",
+                    "type": "extract",
+                    "selector": source_config.get('selector', ''),
+                    "extract_type": source_config.get('extract_type', 'text'),
+                    "fallback_value": source_config.get('fallback_value', '')
+                }
+                print(f"   → Returned as EXTRACT")
             else:
-                # Default binding
+                # Default to extract binding
+                print(f"   → WARNING: Unknown binding type '{binding_type}', defaulting to extract")
                 frontend_binding = {
                     "name": var_name,
                     "description": f"Variable: {var_name}",
@@ -101,7 +116,10 @@ async def get_prompt_bindings(
         return {"bindings": bindings}
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail="Failed to get bindings")
+        print(f"❌ Error in get_prompt_bindings: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to get bindings: {str(e)}")
 
 @router.post("/prompts/{prompt_id}/bindings")
 async def update_prompt_bindings(
@@ -117,8 +135,13 @@ async def update_prompt_bindings(
         print(f" Bindings data: {bindings_data}")
         
         # Validate bindings data
-        bindings = TestBindings(**bindings_data)
-        print(f" Bindings validation successful: {len(bindings.bindings)} bindings")
+        try:
+            bindings = TestBindings(**bindings_data)
+            print(f" Bindings validation successful: {len(bindings.bindings)} bindings")
+        except Exception as validation_error:
+            print(f" Bindings validation failed: {validation_error}")
+            print(f" Validation error details: {type(validation_error).__name__}: {str(validation_error)}")
+            raise HTTPException(status_code=400, detail=f"Invalid bindings data: {str(validation_error)}")
         
         # Get or create a project ID for this user
         project_query = """
@@ -136,13 +159,19 @@ async def update_prompt_bindings(
             print(f" Created project: {project_id}")
         else:
             project_id = project_result['id']
-        # Clear existing bindings for this project and prompt scope
-        scope_name = f"prompt_{prompt_id}"
-        await db.execute_command("""
-            UPDATE datahub.data_bindings 
-            SET is_active = false 
-            WHERE project_id = $1 AND (scope = $2 OR scope LIKE 'prompt_%' OR scope = 'shopping_cart')
-        """, project_id, scope_name)
+        # Deactivate existing bindings that will be replaced (only those with matching names)
+        binding_names = [binding.name for binding in bindings.bindings]
+        if binding_names:
+            placeholders = ', '.join(['$' + str(i+2) for i in range(len(binding_names))])
+            deactivate_query = f"""
+                UPDATE datahub.data_bindings 
+                SET is_active = false 
+                WHERE project_id = $1 AND name IN ({placeholders})
+            """
+            await db.execute_command(deactivate_query, project_id, *binding_names)
+            print(f"🗑️ Deactivated existing bindings for names: {binding_names}")
+        else:
+            print("🗑️ No bindings to deactivate")
         # Insert new bindings
         import time
         timestamp = int(time.time())
@@ -151,8 +180,11 @@ async def update_prompt_bindings(
             binding_id = str(uuid.uuid4())
             rule_name = f"{binding.name}_{timestamp}_{i}"  # Add timestamp for uniqueness
             
+            print(f"🔍 Processing binding {i+1}: name='{binding.name}', type='{binding.type}', value='{getattr(binding, 'value', 'N/A')}'")
+            
             # Prepare source_ref and target based on binding type
             if binding.type == "extract":
+                print(f"   → Processing as EXTRACT binding")
                 source_ref = {
                     "selector": getattr(binding, 'selector', ''),
                     "extract_type": getattr(binding, 'extract_type', 'text'),
@@ -167,6 +199,7 @@ async def update_prompt_bindings(
                     "category": "extract"
                 }
             elif binding.type == "formula":
+                print(f"   → Processing as FORMULA binding")
                 source_ref = {
                     "formula": getattr(binding, 'formula', '')
                 }
@@ -176,6 +209,7 @@ async def update_prompt_bindings(
                     "category": "formula"
                 }
             else:  # constant or other
+                print(f"   → Processing as CONSTANT binding with value: '{getattr(binding, 'value', '')}'")
                 source_ref = {
                     "value": getattr(binding, 'value', '')
                 }
@@ -185,53 +219,55 @@ async def update_prompt_bindings(
                     "category": "constant"
                 }
             
-            # Insert the binding
+            print(f"   → source_ref: {source_ref}")
+            print(f"   → target: {target}")
+            
+            # Insert the binding using the correct table schema
+            print(f"   → Inserting to database: binding_type='{binding.type}', source_config={json.dumps(source_ref)}")
             await db.execute_command("""
                 INSERT INTO datahub.data_bindings 
-                (id, project_id, rule_name, scope, matcher, source_ref, target, priority, is_active, created_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+                (id, project_id, name, binding_type, source_config, schema_definition, is_active, created_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
             """, 
             binding_id,
             project_id,
-            rule_name,
-            scope_name,
-            json.dumps({"binding_type": binding.type}),  # Simple matcher
-            json.dumps(source_ref),
-            json.dumps(target),
-            100 - i,  # Higher priority for earlier bindings
+            binding.name,  # Use binding.name for the name column
+            binding.type,  # Use binding.type for binding_type
+            json.dumps(source_ref),  # source_config contains the source configuration
+            json.dumps(target),  # schema_definition contains the target schema
             True
             )
         # Verify the save by counting active bindings
         verify_query = """
         SELECT COUNT(*) as count
         FROM datahub.data_bindings 
-        WHERE scope = $1 AND is_active = true
+        WHERE project_id = $1 AND is_active = true
         """
         
-        verify_result = await db.execute_one(verify_query, scope_name)
+        verify_result = await db.execute_one(verify_query, project_id)
         saved_count = verify_result['count'] if verify_result else 0
         return {
             "success": True,
             "message": f"Successfully saved {len(bindings.bindings)} bindings",
             "bindings_count": len(bindings.bindings),
-            "scope": scope_name
+            "project_id": str(project_id)
         }
         
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail="Failed to update bindings")
-        
-        return {
-            "success": True,
-            "message": f"Updated {len(bindings.bindings)} bindings",
-            "bindings": bindings.dict()
-        }
-
     except Exception as e:
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Failed to update bindings: {str(e)}")
+
+@router.put("/prompts/{prompt_id}/bindings")
+async def update_prompt_bindings_put(
+    prompt_id: str,
+    bindings_data: Dict[str, Any],
+    db: DatabaseManager = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_active_user)
+):
+    """Update bindings in datahub.data_bindings table (PUT endpoint)"""
+    # Delegate to the POST handler to avoid code duplication
+    return await update_prompt_bindings(prompt_id, bindings_data, db, current_user)
 
 @router.post("/prompts/{prompt_id}/bindings/generate-cart-verification")
 async def generate_cart_verification_bindings(

@@ -15,9 +15,15 @@ services:
       - DB_USER=prompt_qa
       - DB_PASSWORD=St70698!2#4
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - AI_SERVICE_URL=http://localhost:8000
       - ENVIRONMENT=production
       - LOG_LEVEL=INFO
+      # AI Configuration defaults (can be overridden via API)
+      - OPENAI_ENABLED=true
+      - ANTHROPIC_ENABLED=false
+      - OPENAI_MODEL=gpt-4o
+      - ANTHROPIC_MODEL=claude-3-5-sonnet-20241022
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]

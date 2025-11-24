@@ -249,55 +249,79 @@ class AuthenticationManager:
         # Create a project for the user in the core.projects table
         project_name = f"{full_name}'s Project"
         
-        # Get or create default tenant first
-        tenant = await db.execute_one(
-            """
-            INSERT INTO core.tenants (id, name, slug, description, is_active, created_at, updated_at)
-            VALUES (gen_random_uuid(), $1, $2, $3, true, NOW(), NOW())
-            ON CONFLICT (slug) DO UPDATE SET updated_at = NOW()
-            RETURNING id
-            """,
-            f"{full_name}'s Organization",
-            f"{full_name.lower().replace(' ', '-')}-org",
-            f"Default organization for {full_name}"
-        )
+        # Use or create a shared tenant for all users
+        shared_tenant_name = "Test Helix"
+        shared_tenant_slug = "test-helix"
+        
+        try:
+            tenant = await db.execute_one(
+                """
+                INSERT INTO core.tenants (id, name, slug, description, is_active, created_at, updated_at)
+                VALUES (gen_random_uuid(), $1, $2, $3, true, NOW(), NOW())
+                RETURNING id
+                """,
+                shared_tenant_name,
+                shared_tenant_slug,
+                "Shared organization for all Test Helix users"
+            )
+        except Exception:
+            # If tenant already exists, get it
+            tenant = await db.execute_one(
+                "SELECT id FROM core.tenants WHERE slug = $1",
+                shared_tenant_slug
+            )
         
         tenant_id = str(tenant["id"])
         
         # Get or create default role
-        role = await db.execute_one(
-            """
-            INSERT INTO core.roles (id, name, description, is_active, created_at, updated_at)
-            VALUES (gen_random_uuid(), 'Owner', 'Organization owner with full access', true, NOW(), NOW())
-            ON CONFLICT (name) DO UPDATE SET updated_at = NOW()
-            RETURNING id
-            """
-        )
+        try:
+            role = await db.execute_one(
+                """
+                INSERT INTO core.roles (id, name, description, is_active, created_at, updated_at)
+                VALUES (gen_random_uuid(), 'Owner', 'Organization owner with full access', true, NOW(), NOW())
+                RETURNING id
+                """
+            )
+        except Exception:
+            # If role already exists, get it
+            role = await db.execute_one(
+                "SELECT id FROM core.roles WHERE name = 'Owner'"
+            )
         
         role_id = str(role["id"])
         
         # Link user to tenant with owner role
-        await db.execute_one(
-            """
-            INSERT INTO core.user_tenant_roles (id, user_id, tenant_id, role_id, is_active, created_at, updated_at)
-            VALUES (gen_random_uuid(), $1, $2, $3, true, NOW(), NOW())
-            ON CONFLICT (user_id, tenant_id) DO UPDATE SET role_id = $3, updated_at = NOW()
-            """,
-            str(user["id"]), tenant_id, role_id
-        )
+        try:
+            await db.execute_one(
+                """
+                INSERT INTO core.user_tenant_roles (id, user_id, tenant_id, role_id, is_active, created_at, updated_at)
+                VALUES (gen_random_uuid(), $1, $2, $3, true, NOW(), NOW())
+                """,
+                str(user["id"]), tenant_id, role_id
+            )
+        except Exception:
+            # If relationship already exists, that's fine
+            pass
         
         # Create project under the tenant
-        project = await db.execute_one(
-            """
-            INSERT INTO core.projects (id, tenant_id, name, slug, description, is_active, created_at, updated_at)
-            VALUES (gen_random_uuid(), $1, $2, $3, $4, true, NOW(), NOW())
-            RETURNING id, name
-            """,
-            tenant_id, 
-            project_name, 
-            project_name.lower().replace(' ', '-').replace("'", ""), 
-            f"Default project for {full_name}"
-        )
+        project_base = project_name.lower().replace(' ', '-').replace("'", "")
+        project_slug = f"{project_base}-{str(user['id'])[:8]}"
+        try:
+            project = await db.execute_one(
+                """
+                INSERT INTO core.projects (id, tenant_id, name, slug, description, is_active, created_at, updated_at)
+                VALUES (gen_random_uuid(), $1, $2, $3, $4, true, NOW(), NOW())
+                RETURNING id, name
+                """,
+                tenant_id, 
+                project_name, 
+                project_slug,
+                f"Default project for {full_name}"
+            )
+        except Exception as e:
+            # If project creation fails, still return the user (project creation is optional)
+            print(f"WARNING: Failed to create project for user {email}: {str(e)}")
+            return user
         
         print(f"DEBUG: Created project for new user {email}: {project['name']} (ID: {project['id']})")
         

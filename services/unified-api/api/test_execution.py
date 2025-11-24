@@ -14,6 +14,12 @@ import os
 import shlex
 import contextlib
 import tempfile
+import uuid
+import random
+
+# Authentication imports
+from core.auth import get_current_active_user
+from models.auth_models import CurrentUser
 import psycopg2
 import uuid
 from pathlib import Path
@@ -421,7 +427,8 @@ async def execute_prompt(
     prompt_id: str,
     background_tasks: BackgroundTasks,
     authorization: Optional[str] = Header(None),
-    db: DatabaseManager = Depends(get_db)
+    db: DatabaseManager = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_active_user)
 ):
     """Execute a test based on a prompt"""
     logger.info(f"=== EXECUTE PROMPT REQUEST ===")
@@ -464,6 +471,8 @@ async def execute_prompt(
             p.created_at
         FROM planner.plans p
         WHERE p.prompt_id = $1
+        ORDER BY p.created_at DESC
+        LIMIT 1
         """
         
         plan_result = await db.execute_one(plan_query, prompt_id)
@@ -501,10 +510,10 @@ async def execute_prompt(
         active_bindings = []
         try:
             bindings_query = """
-                SELECT rule_name, scope, source_ref, target 
+                SELECT name, binding_type, source_config, schema_definition 
                 FROM datahub.data_bindings 
                 WHERE is_active = true 
-                ORDER BY priority DESC, created_at DESC
+                ORDER BY created_at DESC
             """
             db_bindings = await db.fetch(bindings_query)
             logger.info(f"Found {len(db_bindings) if db_bindings else 0} active bindings")
@@ -512,22 +521,22 @@ async def execute_prompt(
             if db_bindings:
                 for binding in db_bindings:
                     binding_dict = dict(binding)  # Convert asyncpg.Record to dict
-                    source_ref = binding_dict.get('source_ref', {})
-                    target = binding_dict.get('target', {})
+                    source_config = binding_dict.get('source_config', {})
+                    schema_definition = binding_dict.get('schema_definition', {})
                     
                     # Extract binding information
-                    var_name = target.get('variable_name', binding_dict.get('rule_name', 'unknown'))
-                    var_type = target.get('type', 'text')
-                    category = target.get('category', 'data')
+                    var_name = binding_dict.get('name', 'unknown')
+                    var_type = schema_definition.get('type', 'text') if isinstance(schema_definition, dict) else 'text'
+                    category = schema_definition.get('category', 'data') if isinstance(schema_definition, dict) else 'data'
                     
                     # Create binding data structure
                     binding_data = {
                         "name": var_name,
                         "type": var_type,
                         "category": category,
-                        "selector": source_ref.get('selector', ''),
-                        "extract_type": source_ref.get('extract_type', 'text'),
-                        "formula": source_ref.get('formula', '')
+                        "selector": source_config.get('selector', '') if isinstance(source_config, dict) else '',
+                        "extract_type": source_config.get('extract_type', 'text') if isinstance(source_config, dict) else 'text',
+                        "formula": source_config.get('formula', '') if isinstance(source_config, dict) else ''
                     }
                     active_bindings.append(binding_data)
         except Exception as e:
@@ -712,7 +721,7 @@ async def execute_prompt(
                 })
         
         # ENFORCE DATABASE MODE: Create execution record FIRST
-        execution_id = await create_execution_record(db, prompt_id, test_steps)
+        execution_id, step_ids = await create_execution_record(db, prompt_id, test_steps, current_user)
         
         # Extract auth token from Authorization header
         auth_token = None
@@ -760,15 +769,28 @@ async def execute_prompt(
                 "screenshot": "screenshot"
             }
             
-            for step in test_steps:
+            logger.info(f"Starting step mapping. test_steps count: {len(test_steps)}, step_ids count: {len(step_ids)}")
+            logger.info(f"Step IDs: {step_ids}")
+            
+            for i, step in enumerate(test_steps):
                 mapped_step = step.copy()  # Create a copy to avoid modifying original
                 original_action = step["action"]
                 if original_action in action_mapping:
                     mapped_step["action"] = action_mapping[original_action]
-                    logger.info(f"Mapped action '{original_action}' -> '{mapped_step['action']}'")
+                    logger.info(f"Step {i+1}: Mapped action '{original_action}' -> '{mapped_step['action']}'")
                 else:
-                    logger.info(f"Action '{original_action}' passed through unchanged")
+                    logger.info(f"Step {i+1}: Action '{original_action}' passed through unchanged")
+                
+                # Add the actual step ID from the database
+                if i < len(step_ids):
+                    mapped_step["id"] = step_ids[i]
+                    logger.info(f"Step {i+1}: Added step ID {step_ids[i]}")
+                else:
+                    logger.error(f"Step {i+1}: No step ID available! step_ids length: {len(step_ids)}, current index: {i}")
+                
                 mapped_steps.append(mapped_step)
+                
+            logger.info(f"Final mapped_steps count: {len(mapped_steps)}")
             
             execution_request = {
                 "promptId": prompt_id,
@@ -853,52 +875,18 @@ async def execute_prompt(
         logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Failed to execute prompt: {str(e)}")
 
-async def create_execution_record(db: DatabaseManager, prompt_id: str, steps: List[Dict]) -> str:
-    """Create a new execution record using proper exec.runs table"""
+async def create_execution_record(db: DatabaseManager, prompt_id: str, steps: List[Dict], current_user: 'CurrentUser') -> tuple[str, List[str]]:
+    """Create a new execution record using proper exec.runs table and return execution_id and step_ids"""
     try:
-        # Find any existing test case to see what project_id is actually used in tests.test_cases table
-        try:
-            existing_test_case = await db.fetch("SELECT project_id FROM tests.test_cases LIMIT 1")
-            if existing_test_case and len(existing_test_case) > 0:
-                first_row = dict(existing_test_case[0])
-                if first_row.get('project_id'):
-                    project_uuid = first_row['project_id']
-                else:
-                    raise Exception("No project_id found in test_cases")
-            else:
-                # If no test cases exist, try to find a project from core.projects table
-                try:
-                    existing_project = await db.fetch("SELECT id FROM core.projects LIMIT 1")
-                    if existing_project and len(existing_project) > 0:
-                        project_uuid = dict(existing_project[0])['id']
-                    else:
-                        # Create a default project if none exists
-                        default_tenant = await db.fetch("SELECT id FROM core.tenants LIMIT 1")
-                        if default_tenant and len(default_tenant) > 0:
-                            tenant_uuid = dict(default_tenant[0])['id']
-                        else:
-                            # Create default tenant first
-                            tenant_result = await db.execute_one("""
-                                INSERT INTO core.tenants (name, slug, description) 
-                                VALUES ($1, $2, $3) 
-                                RETURNING id
-                            """, 'Default Tenant', 'default', 'Auto-created tenant for test execution')
-                            tenant_uuid = tenant_result['id']
-                        
-                        # Create default project
-                        project_result = await db.execute_one("""
-                            INSERT INTO core.projects (tenant_id, name, slug, description, base_url) 
-                            VALUES ($1, $2, $3, $4, $5) 
-                            RETURNING id
-                        """, tenant_uuid, 'Self-Healing Framework', 'self-healing', 'Auto-created project for test execution', 'https://www.saucedemo.com')
-                        project_uuid = project_result['id']
-                except Exception as e:
-                    raise Exception(f"Failed to create/find project: {e}")
-        except Exception as e:
-            raise Exception(f"Failed to find project_id: {e}")
+        # Ensure user has a project
+        if not current_user.project or not current_user.project.id:
+            raise Exception("User must be assigned to a project to create executions")
         
-        # Use confirmed existing user UUID
-        created_by_uuid = uuid.UUID('25616325-6f9d-4dad-8e4d-16affd24e7cf')
+        # Use current user's project
+        project_uuid = current_user.project.id
+        
+        # Use current user's UUID
+        created_by_uuid = current_user.user.id
         
         # Create or get a test case record in the tests.test_cases table
         test_case_uuid = uuid.uuid5(uuid.NAMESPACE_URL, f"prompt:{prompt_id}")
@@ -957,8 +945,9 @@ async def create_execution_record(db: DatabaseManager, prompt_id: str, steps: Li
         
         execution_id = str(execution_result["id"])
         
-        # Also create step_results records for each step
+        # Also create step_results records for each step and collect their IDs
         # Note: Using test_run_id column name as per actual table schema
+        step_ids = []
         for i, step in enumerate(steps):
             step_query = """
             INSERT INTO exec.step_results (
@@ -968,9 +957,10 @@ async def create_execution_record(db: DatabaseManager, prompt_id: str, steps: Li
                 status
             )
             VALUES ($1, $2, $3, $4)
+            RETURNING id
             """
             
-            await db.execute_one(
+            step_result = await db.execute_one(
                 step_query,
                 execution_id,  # This should reference our exec.runs record
                 i + 1,
@@ -983,7 +973,9 @@ async def create_execution_record(db: DatabaseManager, prompt_id: str, steps: Li
                 "pending"
             )
             
-        return execution_id
+            step_ids.append(str(step_result['id']))
+            
+        return execution_id, step_ids
         
     except Exception as e:
         logger.error(f"Failed to create execution record: {e}")
@@ -1424,7 +1416,8 @@ async def update_execution_status(db: DatabaseManager, execution_id: str, status
 async def execute_debug_steps(
     request_data: Dict[str, Any],
     background_tasks: BackgroundTasks,
-    db: DatabaseManager = Depends(get_db)
+    db: DatabaseManager = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_active_user)
 ):
     """Execute AI-generated debug steps through the Java runner"""
     try:
@@ -1435,28 +1428,12 @@ async def execute_debug_steps(
         if not prompt_id or not steps:
             raise HTTPException(status_code=400, detail="prompt_id and steps are required")
         
-        # Get project and environment IDs (same logic as regular execution)
-        try:
-            # Use the first available project (simplified for debug execution)
-            projects_query = """
-            SELECT table_schema 
-            FROM information_schema.tables 
-            WHERE table_name = 'projects' AND table_type = 'BASE TABLE'
-            """
-            project_tables = await db.execute(projects_query)
-            if project_tables:
-                schema_name = project_tables[0]['table_schema']
-                projects_in_schema = await db.execute(f"SELECT id FROM {schema_name}.projects LIMIT 1")
-                if projects_in_schema:
-                    project_uuid = projects_in_schema[0]['id']
-                else:
-                    raise Exception("Projects table found but empty")
-            else:
-                raise Exception("No projects table found in any schema")
-        except Exception as e:
-            raise
-        # Since environments are not set up yet, use NULL for environment_id
-        # Environment setup not needed - using single environment mode")
+        # Ensure user has a project
+        if not current_user.project or not current_user.project.id:
+            raise HTTPException(status_code=400, detail="User must be assigned to a project to execute debug steps")
+        
+        # Use current user's project
+        project_uuid = current_user.project.id
         
         # Create a test case for the debug execution (required by foreign key constraint)
         test_case_uuid = uuid.uuid4()
@@ -1478,8 +1455,8 @@ async def execute_debug_steps(
         ON CONFLICT (id) DO NOTHING
         """
         
-        # Use a default user ID (you might want to get this from the current user)
-        default_user_id = uuid.UUID('25616325-6f9d-4dad-8e4d-16affd24e7cf')  # Use same confirmed user as regular execution
+        # Use current user ID
+        default_user_id = current_user.user.id
         
         await db.execute_one(
             test_case_query,
@@ -1714,3 +1691,71 @@ async def report_step_result_endpoint(
     except Exception as e:
         logger.error(f"Error updating step result: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to update step result: {str(e)}")
+
+
+@router.put("/step/{step_id}/status")
+async def update_step_status(
+    step_id: str,
+    request: dict,
+    db: DatabaseManager = Depends(get_database),
+    authorization: str = Header(None)
+):
+    """
+    Endpoint for Java runner to update individual step status by step ID
+    """
+    try:
+        status = request.get("status")
+        error_details = request.get("error_details")
+        screenshot_path = request.get("screenshot_path")
+        finished_at = request.get("finished_at")
+        
+        if not status:
+            raise HTTPException(status_code=400, detail="status is required")
+            
+        # Update the step result by step ID
+        update_query = """
+        UPDATE exec.step_results 
+        SET 
+            status = $1,
+            error_details = $2,
+            screenshot_path = $3,
+            finished_at = $4,
+            updated_at = $5
+        WHERE id = $6
+        """
+        
+        # Parse finished_at if provided as string
+        from datetime import datetime
+        
+        finished_timestamp = None
+        if finished_at:
+            if isinstance(finished_at, str):
+                try:
+                    finished_timestamp = datetime.fromisoformat(finished_at.replace('Z', '+00:00'))
+                except ValueError:
+                    finished_timestamp = datetime.now()
+            else:
+                finished_timestamp = datetime.now()
+        else:
+            finished_timestamp = datetime.now()
+        
+        await db.execute_command(
+            update_query,
+            status,
+            error_details,
+            screenshot_path,
+            finished_timestamp,
+            datetime.now(),
+            step_id
+        )
+        
+        return {
+            "success": True,
+            "message": f"Step {step_id} status updated to {status}"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating step status: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update step status: {str(e)}")

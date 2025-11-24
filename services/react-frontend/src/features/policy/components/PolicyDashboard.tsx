@@ -3,7 +3,7 @@
  * Real-time visualization of policy execution and outcomes
  */
 import React, { useState, useEffect, useCallback } from 'react';
-import styled, { ThemeProvider } from 'styled-components';
+import styled, { ThemeProvider, keyframes } from 'styled-components';
 import { useTheme } from '../../../contexts/ThemeContext';
 import mcpPolicyApiClient from '../../../shared/utils/mcpPolicyApiClient';
 import unifiedApiClient from '../../../shared/utils/unifiedApiClient';
@@ -51,6 +51,37 @@ interface ActivePolicy {
   status: 'active' | 'inactive';
   executions_count: number;
   last_executed: string;
+}
+
+interface AIProviderConfig {
+  provider: string;
+  model: string;
+  api_key: string;
+  api_base?: string;
+  enabled: boolean;
+  timeout_ms: number;
+  max_retries: number;
+  temperature: number;
+  max_tokens: number;
+}
+
+interface AIConfigurationResponse {
+  active_provider: string;
+  providers: AIProviderConfig[];
+  available_models: Record<string, string[]>;
+  status: Record<string, any>;
+}
+
+interface ProviderTestResult {
+  success: boolean;
+  response_text?: string;
+  latency_ms?: number;
+  error_message?: string;
+  token_usage?: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+  };
 }
 
 // ================================
@@ -339,6 +370,162 @@ const LiveDot = styled.div`
   }
 `;
 
+const AIConfigSection = styled.div`
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 12px;
+  padding: 24px;
+  color: white;
+  margin-bottom: 30px;
+  box-shadow: 0 4px 16px rgba(102, 126, 234, 0.3);
+`;
+
+const AIConfigHeader = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+`;
+
+const AIConfigTitle = styled.h3`
+  margin: 0;
+  font-size: 1.3rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+`;
+
+const AIProviderGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 16px;
+  margin-top: 16px;
+`;
+
+const AIProviderCard = styled.div<{ active: boolean; enabled: boolean }>`
+  background: rgba(255, 255, 255, 0.1);
+  border: 2px solid ${props => props.active ? 'rgba(255, 255, 255, 0.8)' : 'rgba(255, 255, 255, 0.2)'};
+  border-radius: 8px;
+  padding: 16px;
+  backdrop-filter: blur(10px);
+  opacity: ${props => props.enabled ? 1 : 0.6};
+  transition: all 0.2s ease;
+  cursor: pointer;
+  
+  &:hover {
+    background: rgba(255, 255, 255, 0.15);
+    border-color: rgba(255, 255, 255, 0.4);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+  }
+  
+  &:active {
+    transform: translateY(0);
+  }
+`;
+
+const ProviderHeader = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+`;
+
+const ProviderName = styled.div`
+  font-weight: 600;
+  font-size: 1.1rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+`;
+
+const ProviderStatus = styled.div<{ enabled: boolean }>`
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  background: ${props => props.enabled ? 'rgba(255, 255, 255, 0.2)' : 'rgba(220, 53, 69, 0.8)'};
+  color: white;
+`;
+
+const ProviderDetails = styled.div`
+  font-size: 0.9rem;
+  opacity: 0.9;
+  line-height: 1.4;
+`;
+
+const ProviderActions = styled.div`
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+`;
+
+const SmallButton = styled.button<{ variant?: 'primary' | 'secondary' | 'success' }>`
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-weight: 600;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid;
+  
+  ${props => {
+    switch (props.variant) {
+      case 'primary':
+        return `
+          background: rgba(102, 126, 234, 0.8);
+          color: white;
+          border-color: rgba(102, 126, 234, 0.8);
+          &:hover { background: rgba(102, 126, 234, 1); }
+        `;
+      case 'success':
+        return `
+          background: rgba(102, 126, 234, 0.6);
+          color: white;
+          border-color: rgba(102, 126, 234, 0.6);
+          &:hover { background: rgba(102, 126, 234, 0.8); }
+        `;
+      default:
+        return `
+          background: rgba(255, 255, 255, 0.2);
+          color: white;
+          border-color: rgba(255, 255, 255, 0.3);
+          &:hover { background: rgba(255, 255, 255, 0.3); }
+        `;
+    }
+  }}
+  
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+`;
+
+const TabContainer = styled.div`
+  display: flex;
+  gap: 16px;
+  margin-bottom: 24px;
+  border-bottom: 1px solid #e9ecef;
+`;
+
+const Tab = styled.button<{ active: boolean }>`
+  padding: 12px 24px;
+  background: none;
+  border: none;
+  border-bottom: 3px solid ${props => props.active ? '#007bff' : 'transparent'};
+  color: ${props => props.active ? '#007bff' : '#6c757d'};
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  
+  &:hover {
+    color: #007bff;
+  }
+`;
+
 const ErrorMessage = styled.div`
   background: #f8d7da;
   border: 1px solid #f5c6cb;
@@ -489,6 +676,14 @@ export const PolicyDashboard: React.FC = () => {
   }>>([]);
   const [governanceScore, setGovernanceScore] = useState(0);
   const [safetyBlocks, setSafetyBlocks] = useState(0);
+  
+  // AI Configuration state
+  const [activeTab, setActiveTab] = useState<'policy' | 'ai-config'>('policy');
+  const [aiConfig, setAiConfig] = useState<AIConfigurationResponse | null>(null);
+  const [aiConfigLoading, setAiConfigLoading] = useState(false);
+  const [testResults, setTestResults] = useState<Record<string, ProviderTestResult>>({});
+  const [testingProvider, setTestingProvider] = useState<string | null>(null);
+  const [aiConfigError, setAiConfigError] = useState<string | null>(null);
 
   // Real-time data fetcher using Unified API with MCP fallback
   const fetchRealTimeData = useCallback(async () => {
@@ -765,6 +960,102 @@ export const PolicyDashboard: React.FC = () => {
     }
   }, []);
 
+  // AI Configuration functions
+  const loadAIConfiguration = async () => {
+    try {
+      setAiConfigLoading(true);
+      setAiConfigError(null);
+      
+      const response = await fetch('/api/v1/ai-config/config');
+      if (!response.ok) {
+        throw new Error(`Failed to load AI configuration: ${response.statusText}`);
+      }
+      
+      const data = await response.json();
+      setAiConfig(data);
+    } catch (err: any) {
+      setAiConfigError(err.message);
+    } finally {
+      setAiConfigLoading(false);
+    }
+  };
+
+  const testAIProvider = async (provider: AIProviderConfig) => {
+    try {
+      setTestingProvider(provider.provider);
+      setAiConfigError(null);
+
+      const response = await fetch('/api/v1/ai-config/test-provider', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          provider_config: provider,
+          test_prompt: 'Hello! Please respond with "AI connection successful" to confirm connectivity.',
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Test request failed: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      setTestResults(prev => ({
+        ...prev,
+        [provider.provider]: result,
+      }));
+
+    } catch (err: any) {
+      setTestResults(prev => ({
+        ...prev,
+        [provider.provider]: {
+          success: false,
+          error_message: err.message,
+        },
+      }));
+    } finally {
+      setTestingProvider(null);
+    }
+  };
+
+  const switchActiveProvider = async (providerName: string) => {
+    try {
+      const response = await fetch('/api/v1/ai-config/switch-provider', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ provider: providerName }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to switch provider: ${response.statusText}`);
+      }
+
+      // Reload configuration to get updated status
+      await loadAIConfiguration();
+
+    } catch (err: any) {
+      setAiConfigError(err.message);
+    }
+  };
+
+  const getProviderIcon = (provider: string) => {
+    switch (provider.toLowerCase()) {
+      case 'openai':
+        return '';
+      case 'anthropic':
+        return '';
+      case 'azure':
+        return '☁️';
+      case 'local':
+        return '🖥️';
+      default:
+        return '⚡';
+    }
+  };
+
   // Real-time updates every 30 seconds
   useEffect(() => {
     fetchRealTimeData();
@@ -775,6 +1066,13 @@ export const PolicyDashboard: React.FC = () => {
 
     return () => clearInterval(interval);
   }, [fetchRealTimeData]);
+
+  // Load AI configuration when AI tab is selected
+  useEffect(() => {
+    if (activeTab === 'ai-config' && !aiConfig) {
+      loadAIConfiguration();
+    }
+  }, [activeTab]);
 
   const handleRefresh = () => {
     setLoading(true);
@@ -832,8 +1130,26 @@ export const PolicyDashboard: React.FC = () => {
         )}
         
         <ContentArea>
-          {/* Policy Engine Status */}
-          <PolicyEngineCard>
+          {/* Tab Navigation */}
+          <TabContainer>
+            <Tab 
+              active={activeTab === 'policy'} 
+              onClick={() => setActiveTab('policy')}
+            >
+              🛡️ Policy Engine
+            </Tab>
+            <Tab 
+              active={activeTab === 'ai-config'} 
+              onClick={() => setActiveTab('ai-config')}
+            >
+               AI Configuration
+            </Tab>
+          </TabContainer>
+
+          {activeTab === 'policy' && (
+            <>
+              {/* Policy Engine Status */}
+              <PolicyEngineCard>
             <PolicyEngineHeader>
               <PolicyEngineTitle>
                  Policy Engine
@@ -1056,6 +1372,150 @@ export const PolicyDashboard: React.FC = () => {
               ))}
             </ExecutionList>
           </ChartCard>
+            </>
+          )}
+
+          {activeTab === 'ai-config' && (
+            <>
+              {aiConfigError && (
+                <ErrorMessage>
+                  ⚠️ {aiConfigError}
+                </ErrorMessage>
+              )}
+
+              {/* AI Configuration Section */}
+              <AIConfigSection>
+                <AIConfigHeader>
+                  <AIConfigTitle>
+                     AI Provider Configuration
+                  </AIConfigTitle>
+                  <PolicyEngineButton onClick={() => loadAIConfiguration()}>
+                    🔄 Refresh Config
+                  </PolicyEngineButton>
+                </AIConfigHeader>
+
+                {aiConfigLoading ? (
+                  <div style={{ textAlign: 'center', padding: '20px' }}>
+                    <LoadingSpinner>Loading AI configuration...</LoadingSpinner>
+                  </div>
+                ) : aiConfig ? (
+                  <>
+                    <PolicyConfigGrid>
+                      <PolicyConfigItem>
+                        <PolicyConfigLabel>Active Provider</PolicyConfigLabel>
+                        <PolicyConfigValue>{aiConfig.active_provider.toUpperCase()}</PolicyConfigValue>
+                      </PolicyConfigItem>
+                      <PolicyConfigItem>
+                        <PolicyConfigLabel>Total Providers</PolicyConfigLabel>
+                        <PolicyConfigValue>{aiConfig.providers.length}</PolicyConfigValue>
+                      </PolicyConfigItem>
+                      <PolicyConfigItem>
+                        <PolicyConfigLabel>Enabled Providers</PolicyConfigLabel>
+                        <PolicyConfigValue>{aiConfig.providers.filter(p => p.enabled).length}</PolicyConfigValue>
+                      </PolicyConfigItem>
+                      <PolicyConfigItem>
+                        <PolicyConfigLabel>Status</PolicyConfigLabel>
+                        <PolicyConfigValue>
+                          {aiConfig.providers.find(p => p.provider === aiConfig.active_provider && p.enabled && p.api_key) ? 'Ready' : 'Needs Setup'}
+                        </PolicyConfigValue>
+                      </PolicyConfigItem>
+                    </PolicyConfigGrid>
+
+                    <AIProviderGrid>
+                      {aiConfig.providers.map((provider) => (
+                        <AIProviderCard
+                          key={provider.provider}
+                          active={provider.provider === aiConfig.active_provider}
+                          enabled={provider.enabled}
+                          onClick={() => {
+                            // Toggle provider enabled state
+                            const updatedConfig = {
+                              ...aiConfig,
+                              providers: aiConfig.providers.map(p =>
+                                p.provider === provider.provider 
+                                  ? { ...p, enabled: !p.enabled }
+                                  : p
+                              )
+                            };
+                            setAiConfig(updatedConfig);
+                          }}
+                        >
+                          <ProviderHeader>
+                            <ProviderName>
+                              {getProviderIcon(provider.provider)} {provider.provider.toUpperCase()}
+                              {provider.provider === aiConfig.active_provider && <span style={{ fontSize: '0.8rem', opacity: 0.8 }}>• Active</span>}
+                            </ProviderName>
+                            <ProviderStatus enabled={provider.enabled}>
+                              {provider.enabled ? 'Enabled' : 'Disabled'}
+                            </ProviderStatus>
+                          </ProviderHeader>
+
+                          <ProviderDetails>
+                            <div>Model: {provider.model}</div>
+                            <div>API Key: {provider.api_key ? '••••••••' : 'Not configured'}</div>
+                            <div>Temperature: {provider.temperature}</div>
+                            <div>Max Tokens: {provider.max_tokens}</div>
+                          </ProviderDetails>
+
+                          <ProviderActions>
+                            {provider.provider !== aiConfig.active_provider && provider.enabled && provider.api_key && (
+                              <SmallButton
+                                variant="success"
+                                onClick={() => switchActiveProvider(provider.provider)}
+                              >
+                                ▶️ Set Active
+                              </SmallButton>
+                            )}
+                            
+                            <SmallButton
+                              variant="primary"
+                              onClick={() => testAIProvider(provider)}
+                              disabled={!provider.enabled || !provider.api_key || testingProvider === provider.provider}
+                            >
+                              {testingProvider === provider.provider ? '🔄 Testing...' : '🧪 Test'}
+                            </SmallButton>
+                          </ProviderActions>
+
+                          {testResults[provider.provider] && (
+                            <div style={{ 
+                              marginTop: '12px', 
+                              padding: '8px', 
+                              borderRadius: '4px',
+                              background: testResults[provider.provider].success 
+                                ? 'rgba(40, 167, 69, 0.2)' 
+                                : 'rgba(220, 53, 69, 0.2)',
+                              fontSize: '0.8rem'
+                            }}>
+                              {testResults[provider.provider].success ? (
+                                <>
+                                  ✅ Test passed ({testResults[provider.provider].latency_ms}ms)
+                                  <br />
+                                  Response: "{testResults[provider.provider].response_text}"
+                                </>
+                              ) : (
+                                <>
+                                  ❌ Test failed
+                                  <br />
+                                  {testResults[provider.provider].error_message}
+                                </>
+                              )}
+                            </div>
+                          )}
+                        </AIProviderCard>
+                      ))}
+                    </AIProviderGrid>
+                  </>
+                ) : (
+                  <div style={{ textAlign: 'center', padding: '20px' }}>
+                    <div style={{ marginBottom: '12px' }}>No AI configuration loaded</div>
+                    <SmallButton onClick={() => loadAIConfiguration()}>
+                      Load Configuration
+                    </SmallButton>
+                  </div>
+                )}
+              </AIConfigSection>
+            </>
+          )}
         </ContentArea>
       </MainContent>
     </Container>

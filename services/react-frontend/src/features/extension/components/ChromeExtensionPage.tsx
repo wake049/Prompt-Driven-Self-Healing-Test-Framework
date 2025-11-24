@@ -324,6 +324,9 @@ interface ChromeExtensionPageProps {
 
 const ChromeExtensionPage: React.FC<ChromeExtensionPageProps> = ({ className }) => {
   const navigate = useNavigate();
+
+  const EXTENSION_STORE_URL =     'https://chromewebstore.google.com/detail/mjhcjndhkplegodllohpaiaojifnkagj?utm_source=item-share-cb';
+  // Allow overriding the extension store URL via environment variable
   const [extensionStatus, setExtensionStatus] = useState<'available' | 'installed' | 'connected'>('available');
 
   // Check if Chrome extension is installed/connected
@@ -351,7 +354,8 @@ const ChromeExtensionPage: React.FC<ChromeExtensionPageProps> = ({ className }) 
   }, []);
 
   const handleGetExtension = () => {
-    window.open('https://github.com/wake049/capstone-self-healing/tree/main/chrome-extension', '_blank');
+    // Open the configured Chrome Web Store URL (falls back to repository link)
+    window.open(EXTENSION_STORE_URL, '_blank');
   };
 
   const handleViewDocs = () => {

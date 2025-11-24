@@ -48,7 +48,7 @@ See [AI Model Specification](docs/AI_MODEL_SPECIFICATION.md) for complete techni
 ## ✨ Features
 
 - 🗣️ **Natural Language Input** - Write tests in plain English
-- 🤖 **AI Planning Engine** - Converts prompts to executable actions
+-  **AI Planning Engine** - Converts prompts to executable actions
 - 🔄 **Self-Healing** - Automatically recovers from element changes
 - 🐳 **Containerized** - Easy deployment with Docker Compose
 -  **Test Reporting** - Comprehensive test execution reports

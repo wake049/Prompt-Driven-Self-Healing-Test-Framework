@@ -4127,7 +4127,7 @@ export const PromptDetailView: React.FC = () => {
                               fontSize: '14px',
                               fontWeight: '600'
                             }}>
-                              🤖 AI-Generated Minimal Reproduction Steps
+                               AI-Generated Minimal Reproduction Steps
                             </h4>
                             <p style={{ 
                               margin: '4px 0 0 0',

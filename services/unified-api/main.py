@@ -31,6 +31,7 @@ load_dotenv()
 from api.policy_engine import router as policy_router
 from api.page_context import router as page_context_router
 from api.ai_service import router as ai_router  # Enterprise AI service (consolidated)
+from api.ai_config_api import router as ai_config_router  # AI Configuration API
 from api.healing_api import router as healing_router
 from api.selector_generation_api import router as selector_router
 from api.execution_dashboard_api import router as execution_dashboard_router
@@ -225,6 +226,12 @@ app.include_router(
 )
 
 app.include_router(
+    ai_config_router,
+    prefix="/api/v1/ai-config",
+    tags=["AI Configuration"]
+)
+
+app.include_router(
     healing_router,
     prefix="/api/v1/healing",
     tags=["Healing API"]
@@ -241,6 +248,28 @@ app.include_router(
     prefix="/api/v1/dashboard/execution",
     tags=["Execution Dashboard API"]
 )
+
+# Add execution dashboard router at the expected frontend path
+app.include_router(
+    execution_dashboard_router,
+    prefix="/api/execution-dashboard",
+    tags=["Execution Dashboard API - Frontend Compatible"]
+)
+
+# Add AI service route for recent failed executions at the expected path
+from api.ai_service import get_recent_failed_executions_for_analysis
+from api.prompts_api import get_db  # Import get_db function
+from core.database import DatabaseManager  # Import DatabaseManager
+
+@app.get("/api/execution-dashboard/recent")
+async def execution_dashboard_recent_failed(
+    prompt_id: str,
+    limit: int = 10,
+    status: str = "failed",
+    db: DatabaseManager = Depends(get_db)
+):
+    """Get recent failed executions for AI analysis - delegated to AI service"""
+    return await get_recent_failed_executions_for_analysis(prompt_id, limit, db)
 
 app.include_router(
     prompts_router,

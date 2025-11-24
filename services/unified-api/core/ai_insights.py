@@ -731,7 +731,7 @@ Provide maximum 3 high-impact insights with specific, actionable recommendations
                 id=f"openai_insight_{index}_{int(datetime.now().timestamp())}",
                 category=category,
                 severity=severity_map.get(insight_data.get('severity', 'MEDIUM'), InsightSeverity.MEDIUM),
-                title=f"🤖 AI: {insight_data.get('title', 'OpenAI Analysis')}",
+                title=f" AI: {insight_data.get('title', 'OpenAI Analysis')}",
                 description=insight_data.get('description', 'OpenAI analysis completed'),
                 confidence=min(insight_data.get('confidence', 0.8), 0.95),  # Cap AI confidence at 95%
                 evidence=insight_data.get('evidence', [])[:5],  # Limit evidence

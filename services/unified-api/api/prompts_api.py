@@ -213,8 +213,12 @@ async def get_prompts(
         where_conditions = ["1=1"]
         query_params = []
         
-        # Add tenant filtering (use project_id since prompts table doesn't have tenant_id)
-        if current_user.project and current_user.project.id:
+        # Add tenant filtering to show user's prompts + examples in same tenant
+        if current_user.project and current_user.project.id and current_user.tenant and current_user.tenant.id:
+            where_conditions.append("EXISTS (SELECT 1 FROM core.projects proj WHERE proj.id = p.project_id AND proj.tenant_id = $" + str(len(query_params) + 1) + ")")
+            query_params.append(str(current_user.tenant.id))
+        elif current_user.project and current_user.project.id:
+            # Fallback to project-only if no tenant
             where_conditions.append("p.project_id = $" + str(len(query_params) + 1))  
             query_params.append(str(current_user.project.id))
         
@@ -374,11 +378,19 @@ async def get_prompt(prompt_id: str, db: DatabaseManager = Depends(get_db)):
         raise HTTPException(status_code=500, detail="Failed to fetch prompt")
 
 @router.post("/prompts")
-async def create_prompt(prompt_data: Dict[str, Any], db: DatabaseManager = Depends(get_db)):
+async def create_prompt(
+    prompt_data: Dict[str, Any], 
+    db: DatabaseManager = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_active_user)
+):
     """Create a new prompt"""
     try:
         print(f"🔍 Received prompt data: {prompt_data}")
         print(f"🔍 Database manager: {db}")
+        
+        # Ensure user has a project
+        if not current_user.project or not current_user.project.id:
+            raise HTTPException(status_code=400, detail="User must be assigned to a project to create prompts")
         
         # Insert the new prompt into the correct schema
         # Use the actual planner.prompts table structure based on schema
@@ -401,9 +413,9 @@ async def create_prompt(prompt_data: Dict[str, Any], db: DatabaseManager = Depen
         intent_field = prompt_data.get("description", "") or prompt_data.get("intent", "")
         category = prompt_data.get("category", "Functional")
         tags = prompt_data.get("tags", [])
-        # Use hardcoded IDs for now (in production, these should come from auth context)
-        project_id = "4a8ed320-b109-432c-9b07-1b206bb2edb2"  # Default project
-        user_id = "f0a27595-4f2e-4362-815b-5b2b83a686f6"     # Default user
+        # Use current user's project and user ID
+        project_id = str(current_user.project.id)
+        user_id = str(current_user.user.id)
         status = prompt_data.get("status", "pending")
         
         # Execute the insert with the correct parameters for the actual schema
@@ -461,12 +473,31 @@ async def create_prompt(prompt_data: Dict[str, Any], db: DatabaseManager = Depen
         raise HTTPException(status_code=500, detail=f"Failed to create prompt: {str(e)}")
 
 @router.put("/prompts/{prompt_id}")
-async def update_prompt(prompt_id: str, prompt_data: Dict[str, Any], db: DatabaseManager = Depends(get_db)):
+async def update_prompt(
+    prompt_id: str, 
+    prompt_data: Dict[str, Any], 
+    db: DatabaseManager = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_active_user)
+):
     """Update an existing prompt"""
     try:
         # Debug logging
         print(f"🔧 Updating prompt {prompt_id}")
         print(f"📝 Received data: {prompt_data}")
+        
+        # Ensure user has a project
+        if not current_user.project or not current_user.project.id:
+            raise HTTPException(status_code=400, detail="User must be assigned to a project to update prompts")
+        
+        # Verify the prompt belongs to the user's project
+        verify_query = """
+        SELECT id FROM planner.prompts 
+        WHERE id = $1 AND project_id = $2
+        """
+        prompt_check = await db.execute_one(verify_query, prompt_id, str(current_user.project.id))
+        
+        if not prompt_check:
+            raise HTTPException(status_code=404, detail="Prompt not found or not accessible")
         
         # Extract values with fallbacks
         content_value = prompt_data.get("content") or prompt_data.get("text", "")
@@ -483,7 +514,7 @@ async def update_prompt(prompt_id: str, prompt_data: Dict[str, Any], db: Databas
         SET text = $2, intent = $3, starting_url = $4, category = $5, 
             tags = $6, priority = $7, version = $8, usage_count = $9, 
             estimated_duration = $10, updated_at = CURRENT_TIMESTAMP
-        WHERE id = $1
+        WHERE id = $1 AND project_id = $11
         RETURNING id, text, intent, starting_url, category, tags, 
                   priority, version, usage_count, estimated_duration, 
                   status, created_at, updated_at
@@ -508,7 +539,8 @@ async def update_prompt(prompt_id: str, prompt_data: Dict[str, Any], db: Databas
             prompt_data.get("priority", "medium"),  # priority
             prompt_data.get("version", 1),  # version
             prompt_data.get("usage_count", 0),  # usage_count
-            prompt_data.get("estimated_duration")  # estimated_duration
+            prompt_data.get("estimated_duration"),  # estimated_duration
+            str(current_user.project.id)  # project_id for WHERE clause ($11)
         )
         
         if not result:
@@ -575,43 +607,74 @@ async def get_test_plans_by_prompt_debug(prompt_id: str):
         raise HTTPException(status_code=500, detail="Failed to fetch test plans")
 
 @router.get("/generated-test-plans/by-prompt/{prompt_id}")
-async def get_test_plans_by_prompt(prompt_id: str):
-    """Get test plans for a specific prompt - temporarily no auth required"""
+async def get_test_plans_by_prompt(prompt_id: str, db: DatabaseManager = Depends(get_db)):
+    """Get test plans for a specific prompt from database"""
     try:
-        # Return mock test plans for now
-        mock_plans = [
-            {
-                "id": "plan_1",
-                "prompt_id": prompt_id,
-                "title": f"Test Plan for Prompt {prompt_id}",
-                "steps": [
-                    {
-                        "action": "navigate",
-                        "url": "https://example.com",
-                        "description": "Navigate to the website"
-                    },
-                    {
-                        "action": "click",
-                        "selector": "button.login",
-                        "description": "Click the login button"
-                    }
-                ],
-                "status": "active",
-                "created_at": "2025-01-01T10:00:00Z",
-                "generation_success": True,
-                "created_by": "system",
-                "prompt_text": "Sample prompt text",
-                "starting_url": "",
-                "step_count": 2,
-                "generation_method": "ai-powered",
-                "ai_model": "gpt-4o",
-                "enterprise_mode": True,
-                "chunks_processed": 1,
-                "processing_time_ms": 1000
-            }
-        ]
+        # Query the planner.plans table for this prompt
+        plans_query = """
+        SELECT 
+            id,
+            prompt_id,
+            plan_json,
+            confidence_score,
+            model_used,
+            generation_time_ms,
+            status,
+            created_at,
+            updated_at
+        FROM planner.plans 
+        WHERE prompt_id = $1 AND status = 'active'
+        ORDER BY created_at DESC
+        """
         
-        return {"test_plans": mock_plans, "total": len(mock_plans)}
+        plans = await db.fetch(plans_query, prompt_id)
+        
+        if not plans:
+            return {"test_plans": [], "total": 0}
+        
+        # Transform database results to frontend format
+        test_plans = []
+        for plan in plans:
+            try:
+                # Parse the JSON plan data
+                plan_data = plan['plan_json']
+                if isinstance(plan_data, str):
+                    plan_data = json.loads(plan_data)
+                
+                # Extract steps from the plan data
+                steps = plan_data.get('steps', [])
+                metadata = plan_data.get('metadata', {})
+                
+                test_plan = {
+                    "id": plan['id'],
+                    "prompt_id": plan['prompt_id'], 
+                    "title": f"Test Plan for Prompt {prompt_id}",
+                    "steps": steps,  # This contains the actual 8 steps from your data
+                    "status": plan['status'],
+                    "created_at": plan['created_at'].isoformat() if plan['created_at'] else None,
+                    "updated_at": plan['updated_at'].isoformat() if plan['updated_at'] else None,
+                    "generation_success": True,
+                    "created_by": "ai-system",
+                    "prompt_text": metadata.get('prompt_text', ''),
+                    "starting_url": "",
+                    "step_count": len(steps),
+                    "generation_method": metadata.get('generation_method', 'ai-powered'),
+                    "ai_model": plan['model_used'],
+                    "enterprise_mode": True,
+                    "chunks_processed": 1,
+                    "processing_time_ms": plan['generation_time_ms'],
+                    "confidence_score": plan['confidence_score'],
+                    "total_elements_count": 0,
+                    "original_step_count": len(steps)
+                }
+                
+                test_plans.append(test_plan)
+                
+            except Exception as parse_error:
+                print(f"❌ Error parsing plan {plan['id']}: {str(parse_error)}")
+                continue
+        
+        return {"test_plans": test_plans, "total": len(test_plans)}
         
     except Exception as e:
         print(f"❌ Exception in get_test_plans_by_prompt: {str(e)}")

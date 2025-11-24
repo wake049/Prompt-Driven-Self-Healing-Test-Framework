@@ -76,13 +76,13 @@ public class SelfHealing {
         // Tier 2: Intelligent selector variations based on original locator
         List<String> intelligentVariations = generateIntelligentVariations(originalLocator, step.getSelectorPolicy());
         alternatives.addAll(intelligentVariations);
-        System.out.println("🧠 Tier 2: Generated " + intelligentVariations.size() + " intelligent variations");
+        System.out.println(" Tier 2: Generated " + intelligentVariations.size() + " intelligent variations");
         
         // Tier 3: AI-generated alternatives (fallback)
         if (alternatives.size() < 3) { // Only use AI if we don't have enough alternatives
             List<String> aiAlternatives = getAIGeneratedAlternatives(step);
             alternatives.addAll(aiAlternatives);
-            System.out.println("🤖 Tier 3: AI generated " + aiAlternatives.size() + " additional alternatives");
+            System.out.println(" Tier 3: AI generated " + aiAlternatives.size() + " additional alternatives");
         }
         
         // Tier 4: Heuristic-based fallbacks
@@ -693,7 +693,7 @@ public class SelfHealing {
             String type = element.getAttribute("type");
             String name = element.getAttribute("name");
             
-            System.out.println("🧠 Semantic validation: " + tagName + " for action '" + action + "'");
+            System.out.println(" Semantic validation: " + tagName + " for action '" + action + "'");
             
             // For text verification, validate the text content makes sense
             if ("verify_text".equals(action) && expectedData != null && !expectedData.trim().isEmpty()) {

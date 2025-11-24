@@ -3,6 +3,7 @@ Execution Dashboard API
 Provides real-time execution statistics and recent test run data
 """
 
+import json
 from fastapi import APIRouter, HTTPException, Depends
 from typing import List, Dict, Any, Optional
 
@@ -12,6 +13,15 @@ from core.auth import get_current_active_user
 from models.auth_models import CurrentUser
 
 router = APIRouter()
+
+def safe_parse_action_data(action_data_str: str) -> Dict[str, Any]:
+    """Safely parse action_data JSON string"""
+    if not action_data_str:
+        return {}
+    try:
+        return json.loads(action_data_str)
+    except (json.JSONDecodeError, TypeError):
+        return {}
 
 class ExecutionStats:
     """Execution statistics for dashboard"""
@@ -42,32 +52,36 @@ async def get_execution_stats(
     db: DatabaseManager = Depends(get_database_manager),
     current_user: CurrentUser = Depends(get_current_active_user)
 ):
-    """Get execution statistics using proper exec.runs and exec.step_results tables with tenant filtering"""
+    """Get execution statistics using proper exec.runs and exec.step_results tables with project filtering + examples"""
     try:
         # DEBUG: Log the parameters being used
         print(f"DEBUG - get_execution_stats called with prompt_id={prompt_id}, test_case_id={test_case_id}")
         print(f"DEBUG - current_user.tenant={current_user.tenant.id if current_user.tenant else None}")
         print(f"DEBUG - current_user.project={current_user.project.id if current_user.project else None}")
 
-        # Build WHERE clause for filtering including tenant isolation (not project-specific)
+        # Build WHERE clause for filtering - show user's project + example data
         where_conditions = ["r.started_at >= NOW() - INTERVAL '30 days'"]
         query_params = []
+        
+        if current_user.project and current_user.project.id:
+            # Show user's own project data + any projects in the same tenant (for examples)
+            where_conditions.append("EXISTS (SELECT 1 FROM tests.test_cases tc, core.projects p WHERE tc.id = r.test_case_id AND tc.project_id = p.id AND p.tenant_id = $" + str(len(query_params) + 1) + ")")
+            # Get user's tenant ID to show all projects in the same tenant
+            query_params.append(str(current_user.tenant.id) if current_user.tenant else str(current_user.project.id))
+        else:
+            # Fallback: show all data if user has no project assigned
+            where_conditions.append("1=1")
         
         if test_case_id:
             where_conditions.append("r.test_case_id = $" + str(len(query_params) + 1))
             query_params.append(test_case_id)
         
         if prompt_id:
-            # Combined: Look for test cases that match prompt AND project
-            where_conditions.append("EXISTS (SELECT 1 FROM tests.test_cases tc WHERE tc.id = r.test_case_id AND tc.project_id = $" + str(len(query_params) + 1) + " AND (tc.title LIKE $" + str(len(query_params) + 2) + " OR tc.plan_id = $" + str(len(query_params) + 3) + "))")
-            query_params.append(str(current_user.project.id))
+            # Additional prompt filtering
+            where_conditions.append("EXISTS (SELECT 1 FROM tests.test_cases tc WHERE tc.id = r.test_case_id AND (tc.title LIKE $" + str(len(query_params) + 1) + " OR tc.plan_id = $" + str(len(query_params) + 2) + "))")
             prompt_short = prompt_id[:8]  # First 8 characters: 4b41706c
             prompt_pattern = f"%{prompt_short}%"
             query_params.extend([prompt_pattern, prompt_id])
-        elif current_user.project and current_user.project.id:
-            # If no prompt_id, just filter by project
-            where_conditions.append("EXISTS (SELECT 1 FROM tests.test_cases tc WHERE tc.id = r.test_case_id AND tc.project_id = $" + str(len(query_params) + 1) + ")")
-            query_params.append(str(current_user.project.id))
         
         where_clause = " AND ".join(where_conditions)
         
@@ -240,7 +254,7 @@ async def get_recent_executions(
     db: DatabaseManager = Depends(get_database_manager),
     current_user: CurrentUser = Depends(get_current_active_user)
 ):
-    """Get recent test executions using proper exec.runs table with tenant filtering and optional element filtering"""
+    """Get recent test executions using proper exec.runs table with project filtering + examples for onboarding"""
     print(f"EARLY DEBUG - get_recent_executions function reached!")
     try:
         # DEBUG: Log the parameters being used
@@ -248,25 +262,29 @@ async def get_recent_executions(
         print(f"DEBUG - current_user.tenant={current_user.tenant.id if current_user.tenant else None}")
         print(f"DEBUG - current_user.project={current_user.project.id if current_user.project else None}")
 
-        # Build WHERE clause for filtering including tenant isolation (not project-specific)
+        # Build WHERE clause for filtering - show user's project + example data
         where_conditions = ["1=1"]  # Base condition
         query_params = []
+        
+        if current_user.project and current_user.project.id:
+            # Show user's own project data + any projects in the same tenant (for examples)
+            where_conditions.append("EXISTS (SELECT 1 FROM tests.test_cases tc, core.projects p WHERE tc.id = r.test_case_id AND tc.project_id = p.id AND p.tenant_id = $" + str(len(query_params) + 1) + ")")
+            # Get user's tenant ID to show all projects in the same tenant
+            query_params.append(str(current_user.tenant.id) if current_user.tenant else str(current_user.project.id))
+        else:
+            # Fallback: show all data if user has no project assigned
+            where_conditions.append("1=1")
         
         if test_case_id:
             where_conditions.append("r.test_case_id = $" + str(len(query_params) + 1))
             query_params.append(test_case_id)
         
         if prompt_id:
-            # Combined: Look for test cases that match prompt AND project
-            where_conditions.append("EXISTS (SELECT 1 FROM tests.test_cases tc WHERE tc.id = r.test_case_id AND tc.project_id = $" + str(len(query_params) + 1) + " AND (tc.title LIKE $" + str(len(query_params) + 2) + " OR tc.plan_id = $" + str(len(query_params) + 3) + "))")
-            query_params.append(str(current_user.project.id))
+            # Additional prompt filtering
+            where_conditions.append("EXISTS (SELECT 1 FROM tests.test_cases tc WHERE tc.id = r.test_case_id AND (tc.title LIKE $" + str(len(query_params) + 1) + " OR tc.plan_id = $" + str(len(query_params) + 2) + "))")
             prompt_short = prompt_id[:8]  # First 8 characters: 4b41706c
             prompt_pattern = f"%{prompt_short}%"
             query_params.extend([prompt_pattern, prompt_id])
-        elif current_user.project and current_user.project.id:
-            # If no prompt_id, just filter by project
-            where_conditions.append("EXISTS (SELECT 1 FROM tests.test_cases tc WHERE tc.id = r.test_case_id AND tc.project_id = $" + str(len(query_params) + 1) + ")")
-            query_params.append(str(current_user.project.id))
         
         where_clause = " AND ".join(where_conditions)
         
@@ -346,37 +364,38 @@ async def get_recent_executions(
                 try:
                     # Get step details for this execution
                     steps_query = """
-                    SELECT step_order, action, target, status, error_message, created_at
+                    SELECT step_order, action_data, result_data, status, error_details, created_at
                     FROM exec.step_results 
                     WHERE test_run_id = $1 
                     ORDER BY step_order ASC
                     """
-                    step_results = await db.execute(steps_query, str(row.get('id')))
+                    step_results = await db.fetch(steps_query, str(row.get('id')))
                     
                     execution_data['steps'] = [
                         {
                             'step_order': step.get('step_order'),
-                            'action': step.get('action', 'unknown'),
-                            'target': step.get('target', ''),
+                            'action': safe_parse_action_data(step.get('action_data', '')).get('action', 'unknown'),
+                            'target': safe_parse_action_data(step.get('action_data', '')).get('locator', ''),
                             'status': step.get('status'),
-                            'error_message': step.get('error_message'),
+                            'error_message': step.get('error_details'),
                             'created_at': step.get('created_at').isoformat() if step.get('created_at') else None
                         }
                         for step in step_results
                     ]
                     
                     # Extract failed steps specifically for AI analysis
-                    failed_steps = [
-                        {
-                            'action': step.get('action', 'unknown'),
-                            'element_type': 'css' if step.get('target', '').startswith('css=') else 'xpath' if step.get('target', '').startswith('xpath=') else 'selector',
-                            'selector': step.get('target', ''),
-                            'error_message': step.get('error_message', ''),
-                            'step_index': step.get('step_order', 1) - 1  # Convert to 0-based index
-                        }
-                        for step in step_results
-                        if step.get('status') == 'failed'
-                    ]
+                    failed_steps = []
+                    for step in step_results:
+                        if step.get('status') == 'failed':
+                            action_data = safe_parse_action_data(step.get('action_data', ''))
+                            locator = action_data.get('locator', '')
+                            failed_steps.append({
+                                'action': action_data.get('action', 'unknown'),
+                                'element_type': 'css' if locator.startswith('css=') else 'xpath' if locator.startswith('xpath=') else 'selector',
+                                'selector': locator,
+                                'error_message': step.get('error_details', ''),
+                                'step_index': step.get('step_order', 1) - 1  # Convert to 0-based index
+                            })
                     execution_data['failed_steps'] = failed_steps
 
                 except Exception as e:
@@ -426,12 +445,12 @@ async def get_execution_details_for_ui(
         
         query_params = [execution_id]
         
-        # Add tenant/project filtering for security
+        # Add tenant filtering to show user's data + examples in same tenant
         if current_user.tenant and current_user.tenant.id:
-            execution_query += " AND EXISTS (SELECT 1 FROM core.projects proj WHERE proj.id = r.project_id AND proj.tenant_id = $2)"
+            execution_query += " AND EXISTS (SELECT 1 FROM core.projects proj WHERE proj.id = tc.project_id AND proj.tenant_id = $2)"
             query_params.append(str(current_user.tenant.id))
         elif current_user.project and current_user.project.id:
-            execution_query += " AND r.project_id = $2"
+            execution_query += " AND tc.project_id = $2"
             query_params.append(str(current_user.project.id))
         
         execution = await db.execute_one(execution_query, *query_params)
@@ -443,10 +462,10 @@ async def get_execution_details_for_ui(
         steps_query = """
         SELECT 
             step_order,
-            action,
-            target,
+            action_data,
+            result_data,
             status,
-            error_message,
+            error_details,
             created_at,
             EXTRACT(EPOCH FROM (
                 CASE 
@@ -460,16 +479,17 @@ async def get_execution_details_for_ui(
         ORDER BY step_order
         """
         
-        steps_result = await db.execute(steps_query, execution_id, execution['started_at'])
+        steps_result = await db.fetch(steps_query, execution_id, execution['started_at'])
         
         # Format steps for UI
         steps = []
         for step in steps_result:
+            action_data = safe_parse_action_data(step['action_data'])
             steps.append({
                 'step_number': step['step_order'],
-                'step_description': step['action'],
+                'step_description': action_data.get('action', 'unknown'),
                 'result': 'PASS' if step['status'] == 'passed' else 'FAIL',
-                'details': step['error_message'] if step['error_message'] else None,
+                'details': step['error_details'] if step['error_details'] else None,
                 'duration_ms': int(step['duration_ms']) if step['duration_ms'] else None
             })
         
@@ -564,17 +584,18 @@ async def get_execution_steps(
             r.finished_at,
             EXTRACT(EPOCH FROM (r.finished_at - r.started_at))::INTEGER as duration_seconds
         FROM exec.runs r
+        LEFT JOIN tests.test_cases tc ON r.test_case_id = tc.id
         WHERE r.id = $1
         """
         
         query_params = [execution_id]
         
-        # Add tenant/project filtering for security
+        # Add tenant filtering to show user's data + examples in same tenant
         if current_user.tenant and current_user.tenant.id:
-            execution_query += " AND EXISTS (SELECT 1 FROM core.projects p WHERE p.id = r.project_id AND p.tenant_id = $2)"
+            execution_query += " AND EXISTS (SELECT 1 FROM core.projects p WHERE p.id = tc.project_id AND p.tenant_id = $2)"
             query_params.append(str(current_user.tenant.id))
         elif current_user.project and current_user.project.id:
-            execution_query += " AND r.project_id = $2"
+            execution_query += " AND tc.project_id = $2"
             query_params.append(str(current_user.project.id))
         
         execution = await db.execute_one(execution_query, *query_params)
@@ -586,17 +607,17 @@ async def get_execution_steps(
         steps_query = """
         SELECT 
             step_order,
-            action,
-            target,
+            action_data,
+            result_data,
             status,
-            error_message,
+            error_details,
             created_at
         FROM exec.step_results
         WHERE test_run_id = $1
         ORDER BY step_order
         """
         
-        steps = await db.execute(steps_query, execution_id)
+        steps = await db.fetch(steps_query, execution_id)
         
         # Calculate summary statistics
         total_steps = len(steps)
@@ -618,10 +639,11 @@ async def get_execution_steps(
             'steps': [
                 {
                     'step_order': step['step_order'],
-                    'action': step['action'],
-                    'target': step['target'],
+                    'action': safe_parse_action_data(step['action_data']).get('action', ''),
+                    'target': safe_parse_action_data(step['action_data']).get('locator', ''),
+                    'description': safe_parse_action_data(step['action_data']).get('description', ''),
                     'status': step['status'],
-                    'error_message': step['error_message'],
+                    'error_message': step['error_details'],
                     'created_at': step['created_at'].isoformat() if step['created_at'] else None
                 }
                 for step in steps
@@ -648,6 +670,27 @@ async def health_check():
         "status": "healthy",
         "service": "execution_dashboard_api", 
         "timestamp": datetime.now().isoformat()
+    }
+
+@router.get("/debug/current-user")
+async def debug_current_user(
+    current_user: CurrentUser = Depends(get_current_active_user)
+):
+    """Debug endpoint to check current user's project and tenant info"""
+    return {
+        "user_id": str(current_user.user.id),
+        "email": current_user.user.email,
+        "full_name": current_user.user.full_name,
+        "tenant": {
+            "id": str(current_user.tenant.id) if current_user.tenant else None,
+            "name": current_user.tenant.name if current_user.tenant else None,
+            "slug": current_user.tenant.slug if current_user.tenant else None,
+        } if current_user.tenant else None,
+        "project": {
+            "id": str(current_user.project.id) if current_user.project else None,
+            "name": current_user.project.name if current_user.project else None,
+            "slug": current_user.project.slug if current_user.project else None,
+        } if current_user.project else None
     }
 
 @router.get("/debug/database-counts")
@@ -677,7 +720,7 @@ async def debug_database_counts(
         
         # Also check for prompt relationships (using plan_id instead of source_ref_id)
         try:
-            prompt_test_cases = await db.execute("""
+            prompt_test_cases = await db.fetch("""
             SELECT 
                 p.id as prompt_id,
                 p.title as prompt_title,
@@ -694,7 +737,7 @@ async def debug_database_counts(
         
         # Check the plans table and its relationship to prompts
         try:
-            plans_data = await db.execute("""
+            plans_data = await db.fetch("""
             SELECT 
                 pl.id as plan_id,
                 pl.title as plan_title,
@@ -708,14 +751,14 @@ async def debug_database_counts(
         except Exception as e:
             # Maybe the relationship field is different
             try:
-                plans_simple = await db.execute("SELECT id, title FROM plans LIMIT 5")
+                plans_simple = await db.fetch("SELECT id, title FROM plans LIMIT 5")
                 results['plans_simple'] = list(plans_simple)
             except Exception as e2:
                 results['plans_to_prompts'] = f"Error: {str(e)} - {str(e2)}"
         
         # Check for recent runs
         try:
-            recent_runs = await db.execute("""
+            recent_runs = await db.fetch("""
             SELECT 
                 r.id as run_id,
                 r.test_case_id,
@@ -773,7 +816,7 @@ async def get_execution_trends(
         LIMIT 30
         """.format(days)
         
-        trends_data = await db.execute(trends_query)
+        trends_data = await db.fetch(trends_query)
         
         # Process trends data
         trends = []
@@ -826,7 +869,7 @@ async def get_failure_analysis(
         LIMIT {}
         """.format(days, limit)
         
-        failure_data = await db.execute(failure_query)
+        failure_data = await db.fetch(failure_query)
         
         # Get failure trends by action type
         action_failure_query = """
@@ -843,7 +886,7 @@ async def get_failure_analysis(
         ORDER BY failure_rate DESC, failures DESC
         """.format(days)
         
-        action_failure_data = await db.execute(action_failure_query)
+        action_failure_data = await db.fetch(action_failure_query)
         
         # Process results
         failure_patterns = []
@@ -921,7 +964,7 @@ async def get_performance_metrics(
         ORDER BY avg_step_duration DESC
         """.format(days)
         
-        performance_data = await db.execute(performance_query)
+        performance_data = await db.fetch(performance_query)
         
         # Get overall execution performance
         exec_performance_query = """
@@ -991,14 +1034,16 @@ async def delete_execution(
         
         # Verify execution exists and user has access
         execution_check_query = """
-        SELECT r.id FROM exec.runs r WHERE r.id = $1
+        SELECT r.id FROM exec.runs r 
+        LEFT JOIN tests.test_cases tc ON r.test_case_id = tc.id
+        WHERE r.id = $1
         """
         
         query_params = [execution_id]
         
-        # Add tenant filtering
+        # Add tenant filtering using test_cases table
         if current_user.tenant and current_user.tenant.id:
-            execution_check_query += " AND EXISTS (SELECT 1 FROM core.projects p WHERE p.id = r.project_id AND p.tenant_id = $2)"
+            execution_check_query += " AND EXISTS (SELECT 1 FROM core.projects p WHERE p.id = tc.project_id AND p.tenant_id = $2)"
             query_params.append(str(current_user.tenant.id))
         
         execution = await db.execute_one(execution_check_query, *query_params)
@@ -1058,7 +1103,7 @@ async def cleanup_old_executions(
         """
         
         if current_user.tenant and current_user.tenant.id:
-            count_query += f" AND EXISTS (SELECT 1 FROM core.projects p WHERE p.id = r.project_id AND p.tenant_id = '{current_user.tenant.id}')"
+            count_query += f" AND EXISTS (SELECT 1 FROM core.projects p, tests.test_cases tc WHERE p.id = tc.project_id AND tc.id = r.test_case_id AND p.tenant_id = '{current_user.tenant.id}')"
         
         counts = await db.execute_one(count_query)
         

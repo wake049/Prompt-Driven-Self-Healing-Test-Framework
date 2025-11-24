@@ -2030,7 +2030,7 @@ class DOMActionExecutor {
       const payload = { domData, includeCategories: ['authentication','navigation','form','action','verification','general'], maxSuggestions: 100 };
       const response = await safeSendMessage({ type: 'SUGGEST_ELEMENTS', payload });
       if (response?.success && response?.suggestions) {
-        showTemporaryNotification('🤖 AI Suggestions Ready', `Found ${response.suggestions.length} recommended test elements`, '#4caf50', 3000);
+        showTemporaryNotification(' AI Suggestions Ready', `Found ${response.suggestions.length} recommended test elements`, '#4caf50', 3000);
         let ok = 0;
         for (const suggestion of response.suggestions) {
           try {

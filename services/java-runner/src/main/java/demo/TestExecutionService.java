@@ -134,6 +134,66 @@ public class TestExecutionService {
         }
     }
     
+    private void updateStepStatus(String stepId, String status, String errorDetails, String screenshotPath) {
+        try {
+            if (stepId == null) {
+                System.err.println("Cannot update step status: stepId is null");
+                return;
+            }
+            
+            System.out.println("=== UPDATING STEP STATUS ===");
+            System.out.println("Step ID: " + stepId);
+            System.out.println("Status: " + status);
+            System.out.println("Error Details: " + errorDetails);
+            System.out.println("Screenshot Path: " + screenshotPath);
+            
+            String stepStatusUrl = UNIFIED_API_URL + "/api/v1/execution/step/" + stepId + "/status";
+            System.out.println("Step Status URL: " + stepStatusUrl);
+            
+            try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
+                HttpPut httpPut = new HttpPut(stepStatusUrl);
+                httpPut.setHeader("Content-Type", "application/json");
+                
+                if (API_AUTH_TOKEN != null) {
+                    httpPut.setHeader("Authorization", "Bearer " + API_AUTH_TOKEN);
+                }
+                
+                // Create request body for step status update
+                ObjectMapper mapper = new ObjectMapper();
+                Map<String, Object> requestBody = new HashMap<>();
+                requestBody.put("status", status);
+                
+                if (errorDetails != null) {
+                    requestBody.put("error_details", errorDetails);
+                }
+                
+                if (screenshotPath != null) {
+                    requestBody.put("screenshot_path", screenshotPath);
+                }
+                
+                // Add timestamp
+                requestBody.put("finished_at", new Date());
+                
+                String jsonBody = mapper.writeValueAsString(requestBody);
+                httpPut.setEntity(new StringEntity(jsonBody));
+                
+                try (CloseableHttpResponse response = httpClient.execute(httpPut)) {
+                    String responseText = EntityUtils.toString(response.getEntity());
+                    int statusCode = response.getStatusLine().getStatusCode();
+                    
+                    if (statusCode >= 200 && statusCode < 300) {
+                        System.out.println("✓ Successfully updated step status in unified API");
+                    } else {
+                        System.err.println("Failed to update step status. HTTP " + statusCode + ": " + responseText);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("Error updating step status to unified API: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+    
     private WebDriver createWebDriverInstance() {
         ChromeOptions options = new ChromeOptions();
         
@@ -196,67 +256,109 @@ public class TestExecutionService {
         String value = (String) step.get("value");
         String url = (String) step.get("url");
         String locator = (String) step.get("locator");
+        String stepId = (String) step.get("id"); // Get step ID for database updates
         
         System.out.println(">>> Individual Step Execution <<<");
+        System.out.println("Step ID: " + stepId);
         System.out.println("Action: " + action);
         System.out.println("Element ID: " + elementId);
         System.out.println("Value: " + value);
         System.out.println("URL: " + url);
         System.out.println("Locator: " + locator);
         
-        // Convert API step format to Step object
-        Step stepObj = new Step();
-        stepObj.setAction(action);
-        stepObj.setElementId(elementId);
-        stepObj.setData(value);  // Use setData() instead of setValue()
+        // Update step status to running
+        updateStepStatus(stepId, "running", null, null);
         
-        // Set locator if available (fallback to elementId)
-        if (locator != null) {
-            stepObj.setLocator(locator);
-            System.out.println("Using provided locator: " + locator);
-        } else if (elementId != null) {
-            stepObj.setLocator("#" + elementId); // Assume ID selector as fallback
-            System.out.println("Using fallback locator (ID): #" + elementId);
-        } else {
-            System.out.println("WARNING: No locator available for step");
+        StepResult result = null;
+        boolean success = false;
+        Exception stepException = null;
+        
+        try {
+            // Convert API step format to Step object
+            Step stepObj = new Step();
+            stepObj.setAction(action);
+            stepObj.setElementId(elementId);
+            stepObj.setData(value);  // Use setData() instead of setValue()
+            
+            // Set locator if available (fallback to elementId)
+            if (locator != null) {
+                stepObj.setLocator(locator);
+                System.out.println("Using provided locator: " + locator);
+            } else if (elementId != null) {
+                stepObj.setLocator("#" + elementId); // Assume ID selector as fallback
+                System.out.println("Using fallback locator (ID): #" + elementId);
+            } else {
+                System.out.println("WARNING: No locator available for step");
+            }
+            
+            System.out.println("Created Step object: " + stepObj);
+            
+            // Execute step using the existing ExecutionService
+            System.out.println("Executing action: " + action.toLowerCase());
+            switch (action.toLowerCase()) {
+                case "navigate":
+                case "open":
+                    System.out.println("Navigating to URL: " + (url != null ? url : value));
+                    context.driver.get(url != null ? url : value);
+                    System.out.println("Navigation completed");
+                    success = true;
+                    break;
+                    
+                case "click":
+                case "type":
+                case "enter_text":
+                case "select":
+                case "verify":
+                case "verify_text":
+                case "verify_element":
+                case "assert_text":
+                case "assert_element":
+                case "assert_visible":
+                case "screenshot":
+                case "wait":
+                case "wait_for":
+                case "extract_data":
+                case "calculate":
+                    System.out.println("Using ExecutionService for action: " + action);
+                    // Use ExecutionService which handles self-healing automatically
+                    result = executionService.executeStep(stepIndex, stepObj);  // Pass stepIndex as required
+                    success = "PASS".equals(result.getStatus()) || "HEALED".equals(result.getStatus());
+                    System.out.println("ExecutionService completed action: " + action + " with status: " + result.getStatus());
+                    break;
+                    
+                default:
+                    System.err.println("UNSUPPORTED ACTION: " + action);
+                    throw new IllegalArgumentException("Unsupported action: " + action);
+            }
+            
+        } catch (Exception e) {
+            stepException = e;
+            success = false;
+            System.err.println("Step execution failed: " + e.getMessage());
         }
         
-        System.out.println("Created Step object: " + stepObj);
+        // Update step status in database based on result
+        try {
+            if (success) {
+                String status = "passed";
+                if (result != null && "HEALED".equals(result.getStatus())) {
+                    status = "healed";  // Special status for healed steps
+                }
+                updateStepStatus(stepId, status, null, result != null ? result.getScreenshotPath() : null);
+                System.out.println("Updated step " + (stepIndex + 1) + " status to: " + status);
+            } else {
+                String errorDetails = stepException != null ? stepException.getMessage() : 
+                    (result != null ? result.getError() : "Unknown error");
+                updateStepStatus(stepId, "failed", errorDetails, result != null ? result.getScreenshotPath() : null);
+                System.out.println("Updated step " + (stepIndex + 1) + " status to failed: " + errorDetails);
+            }
+        } catch (Exception e) {
+            System.err.println("Failed to update step status in database: " + e.getMessage());
+        }
         
-        // Execute step using the existing ExecutionService
-        System.out.println("Executing action: " + action.toLowerCase());
-        switch (action.toLowerCase()) {
-            case "navigate":
-            case "open":
-                System.out.println("Navigating to URL: " + (url != null ? url : value));
-                context.driver.get(url != null ? url : value);
-                System.out.println("Navigation completed");
-                break;
-                
-            case "click":
-            case "type":
-            case "enter_text":
-            case "select":
-            case "verify":
-            case "verify_text":
-            case "verify_element":
-            case "assert_text":
-            case "assert_element":
-            case "assert_visible":
-            case "screenshot":
-            case "wait":
-            case "wait_for":
-            case "extract_data":
-            case "calculate":
-                System.out.println("Using ExecutionService for action: " + action);
-                // Use ExecutionService which handles self-healing automatically
-                executionService.executeStep(stepIndex, stepObj);  // Pass stepIndex as required
-                System.out.println("ExecutionService completed action: " + action);
-                break;
-                
-            default:
-                System.err.println("UNSUPPORTED ACTION: " + action);
-                throw new IllegalArgumentException("Unsupported action: " + action);
+        // Re-throw the original exception if the step failed
+        if (stepException != null) {
+            throw stepException;
         }
         
         System.out.println("<<< Individual Step Execution Complete <<<");

@@ -238,55 +238,200 @@ class EnterpriseAIService:
         self.cost_management = CostManagementService()
         self.variable_validator = VariableValidationService()
         
-        # Initialize OpenAI
+        # Store constant bindings (for login credentials, etc.)
+        self.constant_bindings = {}  # {variable_name: value}
+        
+        # Initialize AI clients
         self.client = None
+        self.anthropic_client = None
         self.config = self._load_config()
-        self._initialize_openai()
+        self._initialize_openai()  # This now initializes all providers
         
         # Rate limiting
         self.last_openai_call = 0
-        self.min_call_interval = 2.0  # Minimum 2 seconds between OpenAI calls
+        self.min_call_interval = 2.0  # Minimum 2 seconds between AI calls
 
     def _load_config(self) -> Dict[str, Any]:
-        """Load configuration for OpenAI and other services"""
+        """Load configuration for AI services - supports dynamic configuration"""
+        try:
+            # Try to load from AI config API first
+            from .ai_config_api import load_ai_configuration
+            ai_config = load_ai_configuration()
+            
+            if ai_config and ai_config.get("providers"):
+                active_provider = ai_config.get("active_provider", "openai")
+                active_config = None
+                
+                # Find the active provider configuration
+                for provider in ai_config.get("providers", []):
+                    if provider.get("provider") == active_provider and provider.get("enabled"):
+                        active_config = provider
+                        break
+                
+                if active_config:
+                    logger.info(f"🔄 Loading dynamic AI config - Active provider: {active_provider}")
+                    
+                    # Map provider config to expected format
+                    config = {
+                        "current_provider": active_provider,
+                        "openai": {
+                            "apiKey": "",
+                            "enabled": False,
+                            "timeout": 20000,
+                            "maxRetries": 1,
+                            "model": "gpt-4o",
+                        },
+                        "anthropic": {
+                            "apiKey": "",
+                            "enabled": False,
+                            "timeout": 20000,
+                            "maxRetries": 1,
+                            "model": "claude-3-5-sonnet-20241022",
+                        }
+                    }
+                    
+                    # Set configuration for active provider
+                    if active_provider in config:
+                        config[active_provider] = {
+                            "apiKey": active_config.get("api_key", ""),
+                            "enabled": active_config.get("enabled", False),
+                            "timeout": active_config.get("timeout_ms", 20000),
+                            "maxRetries": active_config.get("max_retries", 1),
+                            "model": active_config.get("model", ""),
+                            "temperature": active_config.get("temperature", 0.1),
+                            "maxTokens": active_config.get("max_tokens", 4000),
+                        }
+                    
+                    return config
+        
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to load dynamic AI config: {e} - falling back to environment variables")
+        
+        # Fallback to environment variables (backward compatibility)
         return {
+            "current_provider": "openai",  # Default to OpenAI
             "openai": {
                 "apiKey": os.getenv("OPENAI_API_KEY", ""),
                 "enabled": _bool_env("OPENAI_ENABLED", True),
                 "timeout": int(os.getenv("OPENAI_TIMEOUT_MS", "20000")),
                 "maxRetries": int(os.getenv("OPENAI_MAX_RETRIES", "1")),
                 "model": os.getenv("OPENAI_MODEL", "gpt-4o"),
+                "temperature": float(os.getenv("OPENAI_TEMPERATURE", "0.1")),
+                "maxTokens": int(os.getenv("OPENAI_MAX_TOKENS", "4000")),
+            },
+            "anthropic": {
+                "apiKey": os.getenv("ANTHROPIC_API_KEY", ""),
+                "enabled": _bool_env("ANTHROPIC_ENABLED", False),
+                "timeout": int(os.getenv("ANTHROPIC_TIMEOUT_MS", "20000")),
+                "maxRetries": int(os.getenv("ANTHROPIC_MAX_RETRIES", "1")),
+                "model": os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022"),
+                "temperature": float(os.getenv("ANTHROPIC_TEMPERATURE", "0.1")),
+                "maxTokens": int(os.getenv("ANTHROPIC_MAX_TOKENS", "4000")),
             }
         }
 
     def _initialize_openai(self) -> None:
-        """Initialize OpenAI client"""
+        """Initialize AI clients based on configuration"""
+        current_provider = self.config.get("current_provider", "openai")
+        logger.info(f" Initializing AI service - Current provider: {current_provider}")
+        
+        # Initialize clients
+        self.client = None
+        self.anthropic_client = None
+        
         try:
-            api_key = self.config["openai"]["apiKey"]
-            logger.info(f"Initializing OpenAI client - API key present: {bool(api_key)}, length: {len(api_key) if api_key else 0}")
+            # Initialize OpenAI if configured
+            openai_config = self.config.get("openai", {})
+            if openai_config.get("enabled") and openai_config.get("apiKey"):
+                if OpenAI is None:
+                    logger.warning("⚠️  OpenAI library not available")
+                else:
+                    api_key = openai_config["apiKey"]
+                    if api_key.startswith('sk-'):
+                        self.client = OpenAI(api_key=api_key)
+                        logger.info("✅ OpenAI client initialized successfully")
+                    else:
+                        logger.error("❌ Invalid OpenAI API key format (should start with 'sk-')")
             
-            if not api_key:
-                logger.warning("⚠️  OPENAI_API_KEY not set - falling back to heuristic mode")
+            # Initialize Anthropic if configured
+            anthropic_config = self.config.get("anthropic", {})
+            if anthropic_config.get("enabled") and anthropic_config.get("apiKey"):
+                try:
+                    import anthropic
+                    api_key = anthropic_config["apiKey"]
+                    if api_key.startswith('sk-ant-'):
+                        self.anthropic_client = anthropic.Anthropic(api_key=api_key)
+                        logger.info("✅ Anthropic client initialized successfully")
+                    else:
+                        logger.error("❌ Invalid Anthropic API key format (should start with 'sk-ant-')")
+                except ImportError:
+                    logger.warning("⚠️  Anthropic library not available")
+            
+            # Set active client based on current provider
+            if current_provider == "anthropic" and self.anthropic_client:
+                logger.info(" Using Anthropic as active provider")
+            elif current_provider == "openai" and self.client:
+                logger.info(" Using OpenAI as active provider")
+            else:
+                logger.warning(f"⚠️  Configured provider '{current_provider}' not available, falling back to heuristic mode")
                 self.client = None
-                return
+                self.anthropic_client = None
                 
-            if OpenAI is None:
-                logger.warning("⚠️  OpenAI library not available - falling back to heuristic mode")
-                self.client = None
-                return
-            
-            # Validate API key format
-            if not api_key.startswith('sk-'):
-                logger.error("❌ Invalid OpenAI API key format (should start with 'sk-')")
-                self.client = None
-                return
-                
-            self.client = OpenAI(api_key=api_key)
-            logger.info("✅ OpenAI client initialized successfully")
-            
         except Exception as e:
-            logger.error(f"❌ Failed to initialize OpenAI client: {str(e)}")
+            logger.error(f"❌ Error initializing AI clients: {e}")
             self.client = None
+            self.anthropic_client = None
+
+    def _get_current_provider_config(self) -> Dict[str, Any]:
+        """Get configuration for the currently active provider"""
+        current_provider = self.config.get("current_provider", "openai")
+        return self.config.get(current_provider, self.config.get("openai", {}))
+
+    def _get_current_model(self) -> str:
+        """Get model for the currently active provider"""
+        provider_config = self._get_current_provider_config()
+        return provider_config.get("model", "gpt-4o")
+
+    def load_constant_bindings(self, bindings: List[Dict[str, Any]]) -> None:
+        """Load constant bindings from database bindings data"""
+        self.constant_bindings.clear()
+        logger.info(f"🔑 Loading constant bindings from {len(bindings)} total bindings...")
+        
+        for binding in bindings:
+            binding_type = binding.get('binding_type', '').lower()
+            source_config = binding.get('source_config', {})
+            
+            # Parse source_config if it's a string
+            if isinstance(source_config, str):
+                try:
+                    import json
+                    source_config = json.loads(source_config)
+                    logger.debug(f"   Parsed source_config string for {binding.get('name')}")
+                except json.JSONDecodeError:
+                    source_config = {}
+                    logger.warning(f"   Failed to parse source_config string for {binding.get('name')}")
+            
+            # Look for constant/fixed value bindings
+            if binding_type == 'constant' and isinstance(source_config, dict):
+                var_name = binding.get('name', '')
+                constant_value = source_config.get('value', '')
+                
+                if var_name and constant_value:
+                    self.constant_bindings[var_name] = constant_value
+                    logger.info(f"🔑 Loaded constant binding: {var_name} = {constant_value}")
+                else:
+                    logger.warning(f"   Skipped constant binding with missing name/value: name='{var_name}', value='{constant_value}'")
+            else:
+                logger.debug(f"   Skipped binding: {binding.get('name')} (type='{binding_type}', source_config type: {type(source_config)})")
+        
+        logger.info(f"🔑 Final constant bindings loaded: {dict(self.constant_bindings)}")
+    
+    def get_constant_value(self, variable_name: str, default: str = None) -> str:
+        """Get constant value for a variable name"""
+        value = self.constant_bindings.get(variable_name, default)
+        logger.debug(f"🔑 get_constant_value('{variable_name}') -> '{value}' (available: {list(self.constant_bindings.keys())})")
+        return value
+
     def _enforce_rate_limit(self) -> None:
         """Enforce rate limiting between OpenAI API calls"""
         current_time = time.time()
@@ -394,25 +539,22 @@ class EnterpriseAIService:
                     db = await get_database_manager()
                     
                     # Load existing bindings from datahub.data_bindings table for this specific prompt
-                    scope_name = f"prompt_{prompt_id}"
                     bindings_query = """
-                        SELECT rule_name, scope, matcher, source_ref, target 
+                        SELECT name, binding_type, source_config, schema_definition 
                         FROM datahub.data_bindings 
-                        WHERE is_active = true AND scope = $1
-                        ORDER BY priority DESC, created_at DESC
+                        WHERE is_active = true
+                        ORDER BY created_at DESC
                     """
-                    existing_bindings = await db.execute(bindings_query, scope_name)
+                    existing_bindings = await db.fetch(bindings_query)
                     
-                    # If no prompt-specific bindings found, try general active bindings
+                    # Debug: Log what bindings we retrieved
+                    logger.info(f"🔍 Retrieved {len(existing_bindings) if existing_bindings else 0} bindings from database")
+                    for i, binding in enumerate(existing_bindings or []):
+                        logger.info(f"   Binding {i+1}: name='{binding.get('name')}', type='{binding.get('binding_type')}', source_config keys: {list(binding.get('source_config', {}).keys()) if isinstance(binding.get('source_config'), dict) else 'string' if binding.get('source_config') else 'none'}")
+                    
+                    # If no bindings found, that's OK - we'll generate new ones
                     if not existing_bindings:
-                        fallback_query = """
-                            SELECT rule_name, scope, matcher, source_ref, target 
-                            FROM datahub.data_bindings 
-                            WHERE is_active = true 
-                            ORDER BY priority DESC, created_at DESC
-                            LIMIT 10
-                        """
-                        existing_bindings = await db.execute(fallback_query)
+                        existing_bindings = []
                     
                     # Debug: Log first binding structure
                     if existing_bindings and len(existing_bindings) > 0:
@@ -455,135 +597,149 @@ class EnterpriseAIService:
                         # Cache the preference for sync methods
                         self._cache_policy_preference(prefer_css)
                         
-                    except Exception as e:self._cache_policy_preference(True)
+                    except Exception as e:
+                        logger.warning(f"Failed to load policy preference: {e}")
+                        self._cache_policy_preference(True)
                     
-                except Exception as e:existing_bindings = None
+                except Exception as e:
+                    logger.warning(f"Failed to load bindings: {e}")
+                    existing_bindings = None
                 
                 # Process bindings if they were loaded successfully
                 if existing_bindings:
+                    logger.info(f"🔑 Processing {len(existing_bindings)} bindings for constant loading...")
                     
-                            # Load allowed variables into the validator
-                            self.variable_validator.load_allowed_variables(existing_bindings)
-                            # Analyze bindings to understand relationships
-                            binding_names = []
-                            price_bindings = []
-                            total_bindings = []
-                            
-                            for binding in existing_bindings:
-                                rule_name = binding.get('rule_name', '')
-                                target = binding.get('target', {})
-                                
-                                # Parse target JSON if it's a string
-                                if isinstance(target, str):
-                                    try:
-                                        target = json.loads(target)
-                                    except json.JSONDecodeError:target = {}
-                                
-                                # Extract variable name from target
-                                if isinstance(target, dict):
-                                    var_name = target.get('variable_name') or target.get('name') or rule_name
-                                else:
-                                    var_name = rule_name
-                                
-                                binding_names.append(var_name)
-                                
-                                # Always add to extraction bindings - we extract ALL defined variables
-                                price_bindings.append(binding)# Also classify by type for additional context
-                                if 'total' in var_name.lower() or 'sum' in var_name.lower():
-                                    total_bindings.append(binding)
-                            # Build intelligent context based on variable analysis
-                            binding_context = f"\n\nIMPORTANT: This test has predefined data bindings: {', '.join(binding_names)}."
-                            
-                            # Add explicit list of allowed variables
-                            if self.variable_validator.allowed_variables:
-                                allowed_list = sorted(self.variable_validator.allowed_variables)
-                                binding_context += f"\n\nALLOWED VARIABLES (use ONLY these exact names):"
-                                for var_name in allowed_list:
-                                    binding_context += f"\n- {var_name}"
-                                binding_context += f"\n\nCRITICAL: Do NOT invent variable names. Use ONLY the {len(allowed_list)} variables listed above."
-                                binding_context += f"\nAny step using unlisted variable names will be rejected."
+                    # Load allowed variables into the validator
+                    self.variable_validator.load_allowed_variables(existing_bindings)
+                    
+                    # Load constant bindings for login credentials, etc.
+                    logger.info(f"🔑 About to call load_constant_bindings...")
+                    self.load_constant_bindings(existing_bindings)
+                    logger.info(f"🔑 Finished loading constant bindings")
+                    
+                    # Analyze bindings to understand relationships
+                    binding_names = []
+                    price_bindings = []
+                    total_bindings = []
+                    
+                    for binding in existing_bindings:
+                        rule_name = binding.get('rule_name', '')
+                        target = binding.get('target', {})
                         
-                            if price_bindings:
-                                price_names = []
-                                for binding in price_bindings:
-                                    target = binding.get('target', {})
-                                    # Parse target JSON if it's a string
-                                    if isinstance(target, str):
-                                        try:
-                                            target = json.loads(target)
-                                        except json.JSONDecodeError:
-                                            target = {}
-                                    var_name = target.get('variable_name') or target.get('name') or binding.get('rule_name', '')
-                                    price_names.append(var_name)
-                                
-                                total_names = []
-                                for binding in total_bindings:
-                                    target = binding.get('target', {})
-                                    # Parse target JSON if it's a string
-                                    if isinstance(target, str):
-                                        try:
-                                            target = json.loads(target)
-                                        except json.JSONDecodeError:
-                                            target = {}
-                                    var_name = target.get('variable_name') or target.get('name') or binding.get('rule_name', '')
-                                    total_names.append(var_name)
-                                
-                                binding_context += f"\n\nDATA EXTRACTION LOGIC:"
-                                binding_context += f"\n- Extract individual values: {', '.join(price_names)}"
-                                if total_bindings:
-                                    binding_context += f"\n- Extract displayed values for comparison: {', '.join(total_names)}"
-                                else:
-                                    binding_context += f"\n- Calculate computed values as needed"
-                                binding_context += f"\n- When testing websites with dynamic content, extract actual displayed values for verification"
-                                binding_context += f"\n- Use calculated values when testing mathematical relationships between extracted data"
-                                
-                                binding_context += f"\n\nSTEP GENERATION RULES:"
-                                binding_context += f"\n- For individual data extraction: extract_data action with variable assignment"
-                                binding_context += f"\n- Format: action='extract_data', locator='[appropriate selector]', data='[variable_name]'"
-                                binding_context += f"\n- Use these specific variable names: {', '.join(price_names)}"
-                                binding_context += f"\n- CRITICAL: Use the EXACT variable names provided: {', '.join(price_names)}"
-                                binding_context += f"\n- For data that requires calculation: use calculate action before assertions"
-                                binding_context += f"\n- IMPORTANT: Use different variable names for calculated vs displayed values"
-                                binding_context += f"\n- When asserting calculated values, use the calculated variable: ${{{total_names[0] if total_names else 'calculatedValue'}}}"
-                                binding_context += f"\n- AVOID: extract_data followed immediately by assert_text on same element"
-                                binding_context += f"\n- CORRECT: calculate → assert_text using calculated variable"
-                                binding_context += f"\n- INCORRECT: extract_data → assert_text (creates redundant extraction)"
-                                binding_context += f"\n- Example: verify text containing calculated result, not page-extracted duplicates"
-                                
-                                # Add repository selector information
-                                if element_selectors:
-                                    binding_context += f"\n\nAVAILABLE SELECTORS FROM ELEMENT REPOSITORY:"
-                                    for element_key, selector in element_selectors.items():
-                                        binding_context += f"\n- {element_key}: {selector}"
-                                    binding_context += f"\n- Use these repository selectors for extraction steps instead of guessing selectors"
-                                    binding_context += f"\n- For price extraction, use: {element_selectors.get('inventoryItemPrice', '.inventory_item_price')}"
-                                    if 'subtotalLabel' in element_selectors:
-                                        binding_context += f"\n- For total verification, use: {element_selectors['subtotalLabel']}"
-                                
-                                binding_context += f"\n- Add calculation steps to compute derived values: action='calculate', data='[result_variable]', locator='[formula]'"
-                                binding_context += f"\n- Formula format: use variable names directly or with ${{}}, e.g., '{' + '.join(price_names)} = var1 + var2'"
-                                binding_context += f"\n- Calculate {total_names[0] if total_names else 'DEFINED_TOTAL_VARIABLE'} using formula: {' + '.join([f'${{{name}}}' for name in price_names])}"
-                                binding_context += f"\n- EXACT calculation example: {total_names[0] if total_names else 'DEFINED_TOTAL_VARIABLE'} = {' + '.join(price_names)}"
-                                binding_context += f"\n- When asserting calculated values, use calculated variable: ${{{total_names[0] if total_names else 'DEFINED_TOTAL_VARIABLE'}}}"
-                                binding_context += f"\n- Example: verify text containing '${{{total_names[0] if total_names else 'DEFINED_TOTAL_VARIABLE'}}}' instead of hardcoded values"
-                            
-                            elif binding_names:
-                                binding_context += f"\n\nDATA BINDING INSTRUCTIONS:"
-                                binding_context += f"\n- When generating steps that verify or assert dynamic values, use variable syntax like ${{variableName}} instead of hardcoded values"
-                                binding_context += f"\n- Available variables: {', '.join(binding_names)}"
-                                binding_context += f"\n- Extract data first, then use variables in assertions"
-                                binding_context += f"\n- Example: use '${{total}}' instead of specific amounts like '$58.29'"
-                                    
-                                binding_context += f"\n\nGENERAL RULES:"
-                                binding_context += f"\n- Generate extraction steps before calculation steps to populate variables from actual page content"
-                                binding_context += f"\n- Use extract_data action to capture dynamic values like prices, totals, counts, or any changing data"
-                                binding_context += f"\n- Use calculate action to perform mathematical operations on extracted variables"
-                                binding_context += f"\n- Calculate step format: action='calculate', data='result_variable_name', text='formula_expression'"
-                                binding_context += f"\n- Formulas can use +, -, *, / operators and reference variables by name or ${{name}} syntax"
-                                binding_context += f"\n- Always use variable syntax in verification steps when dynamic data is involved"
-                                # Modify the prompt to include intelligent binding context
-                                original_prompt = prompt_envelope.prompt
-                                prompt_envelope.prompt = original_prompt + binding_context
+                        # Parse target JSON if it's a string
+                        if isinstance(target, str):
+                            try:
+                                target = json.loads(target)
+                            except json.JSONDecodeError:
+                                target = {}
+                        
+                        # Extract variable name from target
+                        if isinstance(target, dict):
+                            var_name = target.get('variable_name') or target.get('name') or rule_name
+                        else:
+                            var_name = rule_name
+                        
+                        binding_names.append(var_name)
+                        
+                        # Always add to extraction bindings - we extract ALL defined variables
+                        price_bindings.append(binding)
+                        # Also classify by type for additional context
+                        if 'total' in var_name.lower() or 'sum' in var_name.lower():
+                            total_bindings.append(binding)
+                    
+                    # Build intelligent context based on variable analysis
+                    binding_context = f"\n\nIMPORTANT: This test has predefined data bindings: {', '.join(binding_names)}."
+                    
+                    # Add explicit list of allowed variables
+                    if self.variable_validator.allowed_variables:
+                        allowed_list = sorted(self.variable_validator.allowed_variables)
+                        binding_context += f"\n\nALLOWED VARIABLES (use ONLY these exact names):"
+                        for var_name in allowed_list:
+                            binding_context += f"\n- {var_name}"
+                        binding_context += f"\n\nCRITICAL: Do NOT invent variable names. Use ONLY the {len(allowed_list)} variables listed above."
+                        binding_context += f"\nAny step using unlisted variable names will be rejected."
+                    
+                    if price_bindings:
+                        price_names = []
+                        for binding in price_bindings:
+                            target = binding.get('target', {})
+                            # Parse target JSON if it's a string
+                            if isinstance(target, str):
+                                try:
+                                    target = json.loads(target)
+                                except json.JSONDecodeError:
+                                    target = {}
+                            var_name = target.get('variable_name') or target.get('name') or binding.get('rule_name', '')
+                            price_names.append(var_name)
+                        
+                        total_names = []
+                        for binding in total_bindings:
+                            target = binding.get('target', {})
+                            # Parse target JSON if it's a string
+                            if isinstance(target, str):
+                                try:
+                                    target = json.loads(target)
+                                except json.JSONDecodeError:
+                                    target = {}
+                            var_name = target.get('variable_name') or target.get('name') or binding.get('rule_name', '')
+                            total_names.append(var_name)
+                        
+                        binding_context += f"\n\nDATA EXTRACTION LOGIC:"
+                        binding_context += f"\n- Extract individual values: {', '.join(price_names)}"
+                        if total_bindings:
+                            binding_context += f"\n- Extract displayed values for comparison: {', '.join(total_names)}"
+                        else:
+                            binding_context += f"\n- Calculate computed values as needed"
+                        binding_context += f"\n- When testing websites with dynamic content, extract actual displayed values for verification"
+                        binding_context += f"\n- Use calculated values when testing mathematical relationships between extracted data"
+                        
+                        binding_context += f"\n\nSTEP GENERATION RULES:"
+                        binding_context += f"\n- For individual data extraction: extract_data action with variable assignment"
+                        binding_context += f"\n- Format: action='extract_data', locator='[appropriate selector]', data='[variable_name]'"
+                        binding_context += f"\n- Use these specific variable names: {', '.join(price_names)}"
+                        binding_context += f"\n- CRITICAL: Use the EXACT variable names provided: {', '.join(price_names)}"
+                        binding_context += f"\n- For data that requires calculation: use calculate action before assertions"
+                        binding_context += f"\n- IMPORTANT: Use different variable names for calculated vs displayed values"
+                        binding_context += f"\n- When asserting calculated values, use the calculated variable: ${{{total_names[0] if total_names else 'calculatedValue'}}}"
+                        binding_context += f"\n- AVOID: extract_data followed immediately by assert_text on same element"
+                        binding_context += f"\n- CORRECT: calculate → assert_text using calculated variable"
+                        binding_context += f"\n- INCORRECT: extract_data → assert_text (creates redundant extraction)"
+                        binding_context += f"\n- Example: verify text containing calculated result, not page-extracted duplicates"
+                        
+                        # Add repository selector information
+                        if element_selectors:
+                            binding_context += f"\n\nAVAILABLE SELECTORS FROM ELEMENT REPOSITORY:"
+                            for element_key, selector in element_selectors.items():
+                                binding_context += f"\n- {element_key}: {selector}"
+                            binding_context += f"\n- Use these repository selectors for extraction steps instead of guessing selectors"
+                            binding_context += f"\n- For price extraction, use: {element_selectors.get('inventoryItemPrice', '.inventory_item_price')}"
+                            if 'subtotalLabel' in element_selectors:
+                                binding_context += f"\n- For total verification, use: {element_selectors['subtotalLabel']}"
+                        
+                        binding_context += f"\n- Add calculation steps to compute derived values: action='calculate', data='[result_variable]', locator='[formula]'"
+                        binding_context += f"\n- Formula format: use variable names directly or with ${{}}, e.g., '{' + '.join(price_names)} = var1 + var2'"
+                        binding_context += f"\n- Calculate {total_names[0] if total_names else 'DEFINED_TOTAL_VARIABLE'} using formula: {' + '.join([f'${{{name}}}' for name in price_names])}"
+                        binding_context += f"\n- EXACT calculation example: {total_names[0] if total_names else 'DEFINED_TOTAL_VARIABLE'} = {' + '.join(price_names)}"
+                        binding_context += f"\n- When asserting calculated values, use calculated variable: ${{{total_names[0] if total_names else 'DEFINED_TOTAL_VARIABLE'}}}"
+                        binding_context += f"\n- Example: verify text containing '${{{total_names[0] if total_names else 'DEFINED_TOTAL_VARIABLE'}}}' instead of hardcoded values"
+                    
+                    elif binding_names:
+                        binding_context += f"\n\nDATA BINDING INSTRUCTIONS:"
+                        binding_context += f"\n- When generating steps that verify or assert dynamic values, use variable syntax like ${{variableName}} instead of hardcoded values"
+                        binding_context += f"\n- Available variables: {', '.join(binding_names)}"
+                        binding_context += f"\n- Extract data first, then use variables in assertions"
+                        binding_context += f"\n- Example: use '${{total}}' instead of specific amounts like '$58.29'"
+                        
+                    binding_context += f"\n\nGENERAL RULES:"
+                    binding_context += f"\n- Generate extraction steps before calculation steps to populate variables from actual page content"
+                    binding_context += f"\n- Use extract_data action to capture dynamic values like prices, totals, counts, or any changing data"
+                    binding_context += f"\n- Use calculate action to perform mathematical operations on extracted variables"
+                    binding_context += f"\n- Calculate step format: action='calculate', data='result_variable_name', text='formula_expression'"
+                    binding_context += f"\n- Formulas can use +, -, *, / operators and reference variables by name or ${{name}} syntax"
+                    binding_context += f"\n- Always use variable syntax in verification steps when dynamic data is involved"
+                    # Modify the prompt to include intelligent binding context
+                    original_prompt = prompt_envelope.prompt
+                    prompt_envelope.prompt = original_prompt + binding_context
                         
                 
                 # Check budget before processing
@@ -715,7 +871,7 @@ class EnterpriseAIService:
             model = "unknown"
 
             # Generate test steps using AI when available, fallback to heuristic
-            logger.info(f"🤖 Checking AI availability - Client: {bool(self.client)}, Enabled: {self.config['openai']['enabled']}")
+            logger.info(f" Checking AI availability - Client: {bool(self.client)}, Enabled: {self.config['openai']['enabled']}")
             
             if self.client and self.config["openai"]["enabled"]:
                 logger.info("✅ Using AI-powered plan generation")
@@ -872,7 +1028,7 @@ class EnterpriseAIService:
     ) -> Tuple[List[PlanStep], Dict[str, int]]:
         """Generate plan using AI with intelligent element analysis"""
         
-        logger.info(f"🤖 Starting AI plan generation with {len(ranked_elements)} elements")
+        logger.info(f" Starting AI plan generation with {len(ranked_elements)} elements")
         
         # Build optimized prompts with full context
         system_prompt = self._build_enhanced_system_prompt()
@@ -886,19 +1042,23 @@ class EnterpriseAIService:
         logger.info(f"💰 Estimated input tokens: {input_tokens}")
         
         try:
-            logger.info(f"🔗 Calling OpenAI API - Model: {self.config['openai']['model']}")
+            current_provider = self.config.get("current_provider", "openai")
+            current_model = self._get_current_model()
+            provider_config = self._get_current_provider_config()
+            
+            logger.info(f"🔗 Calling {current_provider.upper()} API - Model: {current_model}")
             
             response = await self._chat_json(
-                model=self.config["openai"]["model"],
+                model=current_model,
                 system=system_prompt,
                 user=user_prompt,
-                max_tokens=min(4000, prompt_envelope.max_steps * 150),  # Increased token limit for comprehensive tests
-                temperature=0.1,  # Lower temperature for more consistent JSON
-                retries=self.config["openai"]["maxRetries"],
+                max_tokens=min(provider_config.get("maxTokens", 4000), prompt_envelope.max_steps * 150),
+                temperature=provider_config.get("temperature", 0.1),
+                retries=provider_config.get("maxRetries", 2),
                 timeout_ms=prompt_envelope.timeout_ms
             )
             
-            logger.info(f"✅ OpenAI API response received, length: {len(response)} chars")
+            logger.info(f"✅ {current_provider.upper()} API response received, length: {len(response)} chars")
             logger.debug(f"📝 Raw AI response: {response[:200]}...")
             
             # Try to parse JSON with better error handling
@@ -1134,17 +1294,22 @@ class EnterpriseAIService:
         if username_el:
             logger.debug(f"✅ Found username element: {self._get_element_selector(username_el)}")
             username_selector = await self._get_policy_based_element_selector(username_el)
+            
+            # Get username value from constant bindings or fallback to default
+            username_value = self.get_constant_value("userName", self.get_constant_value("username", "standard_user"))
+            
             steps.append(PlanStep(
                 action="type",
                 target=self._get_element_id(username_el),
                 args={
                     "selector": self._get_element_selector(username_el), 
-                    "text": "standard_user",
+                    "text": username_value,
                     "element_type": "username_field"
                 },
                 description="Enter username/email",
                 confidence=0.9
             ))
+            logger.debug(f"🔑 Using username value: {username_value}")
         else:
             logger.debug("❌ No username field found")
 
@@ -1153,17 +1318,22 @@ class EnterpriseAIService:
         if password_el:
             logger.debug(f"✅ Found password element: {self._get_element_selector(password_el)}")
             password_selector = await self._get_policy_based_element_selector(password_el)
+            
+            # Get password value from constant bindings or fallback to default
+            password_value = self.get_constant_value("password", "secret_sauce")
+            
             steps.append(PlanStep(
                 action="type", 
                 target=self._get_element_id(password_el),
                 args={
                     "selector": self._get_element_selector(password_el), 
-                    "text": "secret_sauce",
+                    "text": password_value,
                     "element_type": "password_field"
                 },
                 description="Enter password",
                 confidence=0.9
             ))
+            logger.debug(f"🔑 Using password value: {password_value}")
         else:
             logger.debug("❌ No password field found - SKIPPING password step")
 
@@ -1470,7 +1640,7 @@ class EnterpriseAIService:
     
     def _build_enhanced_system_prompt(self) -> str:
         """Build enhanced system prompt for intelligent test generation"""
-        return """You are a QA automation engineer. Generate test steps in valid JSON format.
+        base_prompt = """You are a QA automation engineer. Generate test steps in valid JSON format.
 
 IMPORTANT RULES:
 1. Analyze the user's request AND page context to understand the SPECIFIC scope - adapt to ANY website type
@@ -1515,7 +1685,18 @@ IMPORTANT RULES:
 - Use ONLY the variable names that are explicitly defined in the data bindings context
 - Do NOT create new variable names beyond what is provided
 - Match variable names exactly as specified in the bindings configuration
-- Respect the distinction between extract-type and calculate-type variables
+- Respect the distinction between extract-type and calculate-type variables"""
+
+        # Add constant binding information if available
+        if hasattr(self, 'constant_bindings') and self.constant_bindings:
+            constant_info = "\n\n**PREDEFINED CONSTANT VALUES:**"
+            constant_info += "\n- CRITICAL: Use these exact values for login credentials, DO NOT use values from page content"
+            for var_name, value in self.constant_bindings.items():
+                constant_info += f"\n- {var_name}: '{value}'"
+            constant_info += "\n- These values override any credentials shown on the page"
+            base_prompt += constant_info
+
+        base_prompt += """
 
 **AVAILABLE ACTIONS:**
 - open_url: Navigate to start page
@@ -1573,40 +1754,39 @@ JSON FORMAT (respond with ONLY this JSON, no other text):
     },
     {
       "action": "extract_data",
-      "target": ".inventory_item_price",
+      "target": ".price-display",
       "args": {
-        "selector": ".inventory_item_price",
-        "variable": "backpackPrice",
-        "timeout": 5000
+        "selector": ".price-display",
+        "variable": "currentPrice"
       },
-      "description": "Extract backpack price from page",
+      "description": "Extract current price",
       "confidence": 0.9
     },
     {
-      "action": "calculate",
-      "target": "",
+      "action": "type",
+      "target": "#username",
       "args": {
-        "formula": "itemSubTotal = backpackPrice + onesiePrice",
-        "result_variable": "itemSubTotal"
+        "selector": "#username",
+        "text": "testuser"
       },
-      "description": "Calculate total from individual values",
-      "confidence": 0.9
-    },
-    {
-      "action": "assert_text",
-      "target": ".summary_total_label",
-      "args": {
-        "selector": ".summary_total_label",
-        "text": "Total: ${itemSubTotal}",
-        "timeout": 5000
-      },
-      "description": "Verify calculated total matches displayed total",
+      "description": "Enter username",
       "confidence": 0.9
     }
   ]
 }
 
-Generate comprehensive workflow with EXTENSIVE VERIFICATION of all relevant elements for any webpage."""
+CRITICAL: When generating login steps, use the predefined constant values above, not values visible on the page."""
+
+        # Add constant binding information if available
+        if hasattr(self, 'constant_bindings') and self.constant_bindings:
+            constant_info = "\n\n**PREDEFINED CONSTANT VALUES:**"
+            constant_info += "\n- CRITICAL: Use these exact values for login credentials, DO NOT use values from page content"
+            for var_name, value in self.constant_bindings.items():
+                constant_info += f"\n- {var_name}: '{value}'"
+            constant_info += "\n- These values override any credentials shown on the page"
+            base_prompt += constant_info
+
+        return base_prompt
     
     def _build_enhanced_user_prompt(self, prompt_envelope: PromptEnvelope, ranked_elements: List[Any]) -> str:
         """Build enhanced user prompt with rich context for AI"""
@@ -2381,8 +2561,31 @@ Return a JSON array of recommendation strings.
         retries: int,
         timeout_ms: int,
     ) -> str:
+        """Call AI provider with JSON response format - supports OpenAI and Anthropic"""
+        current_provider = self.config.get("current_provider", "openai")
+        logger.debug(f" Starting AI completion: provider={current_provider}, model={model}, max_tokens={max_tokens}")
+        
+        # Route to appropriate provider
+        if current_provider == "anthropic" and self.anthropic_client:
+            return await self._chat_json_anthropic(model, system, user, max_tokens, temperature, retries, timeout_ms)
+        elif current_provider == "openai" and self.client:
+            return await self._chat_json_openai(model, system, user, max_tokens, temperature, retries, timeout_ms)
+        else:
+            logger.error(f"❌ No available AI client for provider: {current_provider}")
+            raise RuntimeError(f"AI provider '{current_provider}' not available")
+
+    async def _chat_json_openai(
+        self,
+        model: str,
+        system: str,
+        user: str,
+        max_tokens: int,
+        temperature: float,
+        retries: int,
+        timeout_ms: int,
+    ) -> str:
         """Call OpenAI Chat Completions with JSON response format"""
-        logger.debug(f"🤖 Starting OpenAI chat completion: model={model}, max_tokens={max_tokens}")
+        logger.debug(f" Starting OpenAI chat completion: model={model}, max_tokens={max_tokens}")
         
         if not self.client:
             logger.error("❌ OpenAI client not initialized")
@@ -2446,6 +2649,93 @@ Return a JSON array of recommendation strings.
             raise RuntimeError(f"OpenAI API authentication failed: {last_err}. Check API key and billing status.")
         else:
             raise RuntimeError(f"OpenAI call failed after {retries+1} attempts: {last_err}")
+
+    async def _chat_json_anthropic(
+        self,
+        model: str,
+        system: str,
+        user: str,
+        max_tokens: int,
+        temperature: float,
+        retries: int,
+        timeout_ms: int,
+    ) -> str:
+        """Call Anthropic Claude with structured response"""
+        logger.debug(f" Starting Anthropic completion: model={model}, max_tokens={max_tokens}")
+        
+        if not self.anthropic_client:
+            logger.error("❌ Anthropic client not initialized")
+            raise RuntimeError("Anthropic client not initialized")
+
+        # Add JSON formatting instruction to the user prompt
+        json_instruction = "\\n\\nPlease respond with valid JSON only. Do not include any text outside the JSON structure."
+        user_with_json = user + json_instruction
+
+        def _call():
+            # Enforce rate limiting before making the call
+            self._enforce_rate_limit()
+            return self.anthropic_client.messages.create(
+                model=model,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                system=system,
+                messages=[
+                    {"role": "user", "content": user_with_json}
+                ],
+                timeout=timeout_ms / 1000.0 if timeout_ms else None,
+            )
+
+        attempt = 0
+        last_err: Optional[Exception] = None
+        
+        while attempt <= retries:
+            try:
+                attempt += 1
+                logger.debug(f"🔄 Anthropic API attempt {attempt}/{retries+1}")
+                
+                resp = await asyncio.to_thread(_call)
+                content = resp.content[0].text if resp and resp.content else ""
+                
+                # Clean up the response to extract JSON
+                if content:
+                    # Try to extract JSON from the response
+                    import re
+                    json_match = re.search(r'\\{.*\\}', content, re.DOTALL)
+                    if json_match:
+                        content = json_match.group(0)
+                
+                logger.info(f"✅ Anthropic API call successful on attempt {attempt}")
+                return content or ""
+                
+            except Exception as e:
+                last_err = e
+                error_msg = str(e).lower()
+                
+                # Enhanced error logging with specific handling for common issues
+                if "401" in error_msg or "unauthorized" in error_msg:
+                    logger.error(f"🔐 Anthropic API authentication failed (401): {str(e)}")
+                    logger.error("💡 Check Anthropic API key configuration")
+                elif "429" in error_msg or "rate limit" in error_msg:
+                    logger.warning(f"⚠️ Anthropic API rate limit hit: {str(e)}")
+                elif "timeout" in error_msg:
+                    logger.warning(f"⏱️ Anthropic API timeout: {str(e)}")
+                else:
+                    logger.error(f"❌ Anthropic API error: {str(e)}")
+                
+                if attempt > retries:
+                    logger.error(f"💥 All {retries+1} Anthropic API attempts exhausted")
+                    break
+                    
+                # Exponential backoff with jitter
+                sleep_time = min(2.0 * attempt, 5.0)
+                logger.debug(f"😴 Retrying in {sleep_time}s...")
+                await asyncio.sleep(sleep_time)
+        
+        # Final error handling with specific auth guidance        
+        if last_err and ("401" in str(last_err).lower() or "unauthorized" in str(last_err).lower()):
+            raise RuntimeError(f"Anthropic API authentication failed: {last_err}. Check API key configuration.")
+        else:
+            raise RuntimeError(f"Anthropic call failed after {retries+1} attempts: {last_err}")
 
     async def analyze_prompt_intent(self, prompt: str, available_elements: List[Any]) -> Dict[str, Any]:
         """Phase 1: Analyze prompt to identify required pages and elements"""
@@ -3171,6 +3461,126 @@ async def generate_minimal_reproduction_steps(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to generate minimal reproduction: {str(e)}")
+
+@router.get("/recent-failed-executions/{prompt_id}")
+async def get_recent_failed_executions_for_analysis(
+    prompt_id: str,
+    limit: int = 10,
+    db: DatabaseManager = Depends(get_database_manager)
+):
+    """
+    Get recent failed executions for a specific prompt that can be used for AI failure analysis.
+    This is specifically for generating minimal reproduction steps.
+    """
+    try:
+        # Query for recent failed executions with comprehensive step information
+        failed_executions_query = """
+        SELECT DISTINCT
+            r.id as execution_id,
+            r.test_case_id,
+            r.status,
+            r.started_at,
+            r.finished_at,
+            r.error_message,
+            r.runner_meta,
+            tc.title as test_name,
+            tc.prompt_text,
+            tc.plan_id,
+            -- Get step counts with explicit casting
+            COALESCE((SELECT COUNT(*)::integer FROM exec.step_results sr2 WHERE sr2.test_run_id = r.id AND sr2.status = 'failed'), 0) as failed_steps_count,
+            COALESCE((SELECT COUNT(*)::integer FROM exec.step_results sr3 WHERE sr3.test_run_id = r.id AND sr3.status = 'passed'), 0) as passed_steps_count,
+            COALESCE((SELECT COUNT(*)::integer FROM exec.step_results sr4 WHERE sr4.test_run_id = r.id), 0) as total_steps_count,
+            -- Get ALL steps with details (both failed and passed)
+            COALESCE((SELECT json_agg(
+                json_build_object(
+                    'step_order', sr5.step_order,
+                    'action', COALESCE(sr5.action_data->>'action', 'unknown'),
+                    'selector', COALESCE(sr5.action_data->>'locator', sr5.action_data->>'selector', ''),
+                    'locator', COALESCE(sr5.action_data->>'locator', ''),
+                    'value', COALESCE(sr5.action_data->>'value', ''),
+                    'error_message', COALESCE(sr5.error_message, ''),
+                    'status', COALESCE(sr5.status, 'unknown'),
+                    'execution_time_ms', sr5.execution_time_ms,
+                    'screenshot_path', sr5.screenshot_path,
+                    'created_at', sr5.created_at::text
+                ) ORDER BY sr5.step_order
+            ) FROM exec.step_results sr5 WHERE sr5.test_run_id = r.id), '[]'::json) as steps,
+            -- Get only failed steps for AI analysis
+            COALESCE((SELECT json_agg(
+                json_build_object(
+                    'step_order', sr6.step_order,
+                    'action', COALESCE(sr6.action_data->>'action', 'unknown'),
+                    'selector', COALESCE(sr6.action_data->>'locator', sr6.action_data->>'selector', ''),
+                    'error_message', COALESCE(sr6.error_message, ''),
+                    'status', sr6.status
+                ) ORDER BY sr6.step_order
+            ) FROM exec.step_results sr6 WHERE sr6.test_run_id = r.id AND sr6.status = 'failed'), '[]'::json) as failed_steps
+        FROM exec.runs r
+        LEFT JOIN tests.test_cases tc ON r.test_case_id = tc.id
+        WHERE (
+            r.status IN ('failed', 'completed_with_failures', 'error') 
+            OR (r.status = 'completed' AND EXISTS (
+                SELECT 1 FROM exec.step_results sr7 WHERE sr7.test_run_id = r.id AND sr7.status = 'failed'
+            ))
+        )
+        AND (tc.plan_id = $1 OR tc.title LIKE $2 OR r.test_case_id LIKE $1)
+        ORDER BY r.started_at DESC
+        LIMIT $3
+        """
+        
+        prompt_pattern = f"%{prompt_id[:8]}%"  # Use first 8 chars for matching
+        
+        executions = await db.fetch(failed_executions_query, prompt_id, prompt_pattern, limit)
+        
+        # Format for frontend/AI analysis
+        formatted_executions = []
+        for execution in executions:
+            # Calculate duration if available
+            duration = None
+            if execution["started_at"] and execution["finished_at"]:
+                duration = (execution["finished_at"] - execution["started_at"]).total_seconds()
+            
+            # Parse runner_meta if available
+            runner_meta = execution.get("runner_meta")
+            if isinstance(runner_meta, str):
+                try:
+                    import json
+                    runner_meta = json.loads(runner_meta)
+                except:
+                    runner_meta = {}
+            
+            execution_data = {
+                "execution_id": str(execution["execution_id"]),
+                "test_name": execution["test_name"] or f"Test Run {str(execution['execution_id'])[:8]}",
+                "status": execution["status"], 
+                "started_at": execution["started_at"].isoformat() if execution["started_at"] else None,
+                "finished_at": execution["finished_at"].isoformat() if execution["finished_at"] else None,
+                "duration_seconds": duration,
+                "error_message": execution["error_message"],
+                "plan_id": execution.get("plan_id"),
+                "failed_steps_count": execution["failed_steps_count"] or 0,
+                "passed_steps_count": execution["passed_steps_count"] or 0,
+                "total_steps_count": execution["total_steps_count"] or 0,
+                "steps": execution["steps"] or [],  # All steps for detailed analysis
+                "failed_steps": execution["failed_steps"] or [],  # Failed steps for AI
+                "prompt_text": execution["prompt_text"],
+                "runner_meta": runner_meta,
+                # Calculate success rate
+                "success_rate": round((execution["passed_steps_count"] or 0) / max(execution["total_steps_count"] or 1, 1) * 100, 1)
+            }
+            formatted_executions.append(execution_data)
+        
+        return {
+            "executions": formatted_executions,
+            "total": len(formatted_executions),
+            "prompt_id": prompt_id
+        }
+        
+    except Exception as e:
+        print(f"❌ Error getting recent failed executions: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to get recent failed executions: {str(e)}")
 
 @router.get("/analyze-element-failures/{element_id}")
 async def analyze_element_failure_patterns(
