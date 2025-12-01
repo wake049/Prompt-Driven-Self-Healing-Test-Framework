@@ -15,6 +15,8 @@ services:
       - DB_USER=prompt_qa_db
       - "DB_PASSWORD=St70698!2#4"
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
       - AI_SERVICE_URL=http://localhost:8000
     restart: unless-stopped
     healthcheck:

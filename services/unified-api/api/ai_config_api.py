@@ -122,6 +122,16 @@ def load_ai_configuration() -> Dict[str, Any]:
                 "max_retries": 2,
                 "temperature": 0.1,
                 "max_tokens": 4000
+            },
+            {
+                "provider": "google",
+                "model": "gemini-1.5-flash",
+                "api_key": os.getenv("GOOGLE_API_KEY", ""),
+                "enabled": False,
+                "timeout_ms": 30000,
+                "max_retries": 2,
+                "temperature": 0.1,
+                "max_tokens": 4000
             }
         ]
     }

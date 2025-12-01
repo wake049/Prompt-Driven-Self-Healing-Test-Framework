@@ -126,6 +126,22 @@ actual.json
 *_actual.json
 open_actual.json
 
+# M11 Validation and E2E Test Results
+M11_validation_results*/
+e2e_test_results*.json
+*test_results*.json
+validation_report*.json
+*_test_*.json
+*_validation_*.json
+
+# Performance Dashboard Files
+performance_dashboard_*.json
+
+# Debug and temporary scripts
+debug_*.py
+check_*.py
+test-*.py
+
 # AI/ML Models (if you want to exclude them)
 *.joblib
 *.pkl
@@ -281,9 +297,25 @@ deploy*.bat
 deploy*.sh
 *.deployment
 
+# Batch files for testing and environment setup
+run-*.bat
+test-*.bat
+start-*.bat
+
 # Analysis and Reports
 *.analysis
 *.report
 performance_reports/
 audit_reports/
 
+# Architecture diagrams and images
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.svg
+defense_*.png
+architecture_*.png
+
+# M11 Implementation Files (development artifacts)
+M11_*.py
