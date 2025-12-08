@@ -56,21 +56,19 @@ async def get_execution_stats(
     try:
         # DEBUG: Log the parameters being used
         print(f"DEBUG - get_execution_stats called with prompt_id={prompt_id}, test_case_id={test_case_id}")
-        print(f"DEBUG - current_user.tenant={current_user.tenant.id if current_user.tenant else None}")
         print(f"DEBUG - current_user.project={current_user.project.id if current_user.project else None}")
 
-        # Build WHERE clause for filtering - show user's project + example data
+        # Build WHERE clause for filtering - show ONLY user's current project
         where_conditions = ["r.started_at >= NOW() - INTERVAL '30 days'"]
         query_params = []
         
         if current_user.project and current_user.project.id:
-            # Show user's own project data + any projects in the same tenant (for examples)
-            where_conditions.append("EXISTS (SELECT 1 FROM tests.test_cases tc, core.projects p WHERE tc.id = r.test_case_id AND tc.project_id = p.id AND p.tenant_id = $" + str(len(query_params) + 1) + ")")
-            # Get user's tenant ID to show all projects in the same tenant
-            query_params.append(str(current_user.tenant.id) if current_user.tenant else str(current_user.project.id))
+            # Show ONLY user's specific project data - not the entire tenant
+            where_conditions.append("EXISTS (SELECT 1 FROM tests.test_cases tc WHERE tc.id = r.test_case_id AND tc.project_id = $" + str(len(query_params) + 1) + ")")
+            query_params.append(str(current_user.project.id))
         else:
-            # Fallback: show all data if user has no project assigned
-            where_conditions.append("1=1")
+            # If no project assigned, show nothing rather than everything
+            where_conditions.append("1=0")  # This ensures no results if no project
         
         if test_case_id:
             where_conditions.append("r.test_case_id = $" + str(len(query_params) + 1))
@@ -137,19 +135,6 @@ async def get_execution_stats(
                     LIMIT 5
                 """, test_case_ids)
                 print(f"DEBUG - Executions for matching test cases: {[dict(row) for row in executions]}")
-                
-                # Debug: Show all executions and their test_case_ids
-                all_executions = await db.fetch("SELECT id, test_case_id FROM exec.runs LIMIT 10")
-                print(f"DEBUG - All executions (first 10): {[dict(row) for row in all_executions]}")
-                print(f"DEBUG - Our test case ID: 0d12a44d-3527-5a4e-8ecb-0e1b59893f67")
-                print(f"DEBUG - Do any executions match our test case? {any(str(row['test_case_id']) == '0d12a44d-3527-5a4e-8ecb-0e1b59893f67' for row in all_executions)}")
-            
-            
-            # Check project filtering
-            tenant_projects = await db.fetch("""
-                SELECT id FROM core.projects WHERE tenant_id = $1
-            """, current_user.tenant.id)
-            print(f"DEBUG - Projects for tenant {current_user.tenant.id}: {[str(p['id']) for p in tenant_projects]}")
             
         # Execute the main query first
         stats_result = await db.execute_one(stats_query, *query_params)
@@ -259,21 +244,19 @@ async def get_recent_executions(
     try:
         # DEBUG: Log the parameters being used
         print(f"DEBUG - get_recent_executions called with limit={limit}, prompt_id={prompt_id}, test_case_id={test_case_id}")
-        print(f"DEBUG - current_user.tenant={current_user.tenant.id if current_user.tenant else None}")
         print(f"DEBUG - current_user.project={current_user.project.id if current_user.project else None}")
 
-        # Build WHERE clause for filtering - show user's project + example data
+        # Build WHERE clause for filtering - show ONLY user's current project
         where_conditions = ["1=1"]  # Base condition
         query_params = []
         
         if current_user.project and current_user.project.id:
-            # Show user's own project data + any projects in the same tenant (for examples)
-            where_conditions.append("EXISTS (SELECT 1 FROM tests.test_cases tc, core.projects p WHERE tc.id = r.test_case_id AND tc.project_id = p.id AND p.tenant_id = $" + str(len(query_params) + 1) + ")")
-            # Get user's tenant ID to show all projects in the same tenant
-            query_params.append(str(current_user.tenant.id) if current_user.tenant else str(current_user.project.id))
+            # Show ONLY user's specific project data - not the entire tenant
+            where_conditions.append("EXISTS (SELECT 1 FROM tests.test_cases tc WHERE tc.id = r.test_case_id AND tc.project_id = $" + str(len(query_params) + 1) + ")")
+            query_params.append(str(current_user.project.id))
         else:
-            # Fallback: show all data if user has no project assigned
-            where_conditions.append("1=1")
+            # If no project assigned, show nothing rather than everything
+            where_conditions.append("1=0")  # This ensures no results if no project
         
         if test_case_id:
             where_conditions.append("r.test_case_id = $" + str(len(query_params) + 1))
@@ -445,13 +428,13 @@ async def get_execution_details_for_ui(
         
         query_params = [execution_id]
         
-        # Add tenant filtering to show user's data + examples in same tenant
-        if current_user.tenant and current_user.tenant.id:
-            execution_query += " AND EXISTS (SELECT 1 FROM core.projects proj WHERE proj.id = tc.project_id AND proj.tenant_id = $2)"
-            query_params.append(str(current_user.tenant.id))
-        elif current_user.project and current_user.project.id:
+        # Add project filtering to show only user's current project data
+        if current_user.project and current_user.project.id:
             execution_query += " AND tc.project_id = $2"
             query_params.append(str(current_user.project.id))
+        else:
+            # If no project assigned, show nothing
+            execution_query += " AND 1=0"
         
         execution = await db.execute_one(execution_query, *query_params)
         
@@ -590,13 +573,13 @@ async def get_execution_steps(
         
         query_params = [execution_id]
         
-        # Add tenant filtering to show user's data + examples in same tenant
-        if current_user.tenant and current_user.tenant.id:
-            execution_query += " AND EXISTS (SELECT 1 FROM core.projects p WHERE p.id = tc.project_id AND p.tenant_id = $2)"
-            query_params.append(str(current_user.tenant.id))
-        elif current_user.project and current_user.project.id:
+        # Add project filtering to show only user's current project data
+        if current_user.project and current_user.project.id:
             execution_query += " AND tc.project_id = $2"
             query_params.append(str(current_user.project.id))
+        else:
+            # If no project assigned, show nothing
+            execution_query += " AND 1=0"
         
         execution = await db.execute_one(execution_query, *query_params)
         
@@ -1041,10 +1024,13 @@ async def delete_execution(
         
         query_params = [execution_id]
         
-        # Add tenant filtering using test_cases table
-        if current_user.tenant and current_user.tenant.id:
-            execution_check_query += " AND EXISTS (SELECT 1 FROM core.projects p WHERE p.id = tc.project_id AND p.tenant_id = $2)"
-            query_params.append(str(current_user.tenant.id))
+        # Add project filtering to show only user's current project data
+        if current_user.project and current_user.project.id:
+            execution_check_query += " AND tc.project_id = $2"
+            query_params.append(str(current_user.project.id))
+        else:
+            # If no project assigned, show nothing
+            execution_check_query += " AND 1=0"
         
         execution = await db.execute_one(execution_check_query, *query_params)
         if not execution:
@@ -1102,8 +1088,8 @@ async def cleanup_old_executions(
         WHERE r.started_at < {cutoff_date}
         """
         
-        if current_user.tenant and current_user.tenant.id:
-            count_query += f" AND EXISTS (SELECT 1 FROM core.projects p, tests.test_cases tc WHERE p.id = tc.project_id AND tc.id = r.test_case_id AND p.tenant_id = '{current_user.tenant.id}')"
+        if current_user.project and current_user.project.id:
+            count_query += f" AND EXISTS (SELECT 1 FROM tests.test_cases tc WHERE tc.id = r.test_case_id AND tc.project_id = '{current_user.project.id}')"
         
         counts = await db.execute_one(count_query)
         
@@ -1122,8 +1108,8 @@ async def cleanup_old_executions(
         
         # Perform actual cleanup
         where_clause = f"execution_id IN (SELECT id FROM exec.runs WHERE started_at < {cutoff_date}"
-        if current_user.tenant and current_user.tenant.id:
-            where_clause += f" AND EXISTS (SELECT 1 FROM core.projects p WHERE p.id = project_id AND p.tenant_id = '{current_user.tenant.id}')"
+        if current_user.project and current_user.project.id:
+            where_clause += f" AND EXISTS (SELECT 1 FROM tests.test_cases tc WHERE tc.id = test_case_id AND tc.project_id = '{current_user.project.id}')"
         where_clause += ")"
         
         # Delete in correct order
@@ -1132,8 +1118,8 @@ async def cleanup_old_executions(
         await db.execute(f"DELETE FROM exec.step_results WHERE test_run_id IN (SELECT id FROM exec.runs WHERE started_at < {cutoff_date})")
         
         final_delete_query = f"DELETE FROM exec.runs WHERE started_at < {cutoff_date}"
-        if current_user.tenant and current_user.tenant.id:
-            final_delete_query += f" AND EXISTS (SELECT 1 FROM core.projects p WHERE p.id = project_id AND p.tenant_id = '{current_user.tenant.id}')"
+        if current_user.project and current_user.project.id:
+            final_delete_query += f" AND EXISTS (SELECT 1 FROM tests.test_cases tc WHERE tc.id = test_case_id AND tc.project_id = '{current_user.project.id}')"
         
         await db.execute(final_delete_query)
         return {

@@ -69,9 +69,7 @@ AVAILABLE_MODELS = {
     ],
     "anthropic": [
         "claude-3-5-sonnet-20241022",
-        "claude-3-5-haiku-20241022",
         "claude-3-opus-20240229",
-        "claude-3-sonnet-20240229",
         "claude-3-haiku-20240307"
     ],
     "azure": [
@@ -79,6 +77,13 @@ AVAILABLE_MODELS = {
         "gpt-4-turbo", 
         "gpt-4",
         "gpt-35-turbo"
+    ],
+    "google": [
+        "gemini-1.5-flash",
+        "gemini-1.5-flash-001",
+        "gemini-1.5-pro",
+        "gemini-1.5-pro-001",
+        "gemini-2.0-flash-exp"
     ],
     "local": [
         "llama-3.1-8b",
@@ -115,9 +120,9 @@ def load_ai_configuration() -> Dict[str, Any]:
             },
             {
                 "provider": "anthropic", 
-                "model": "claude-3-5-sonnet-20241022",
+                "model": "claude-sonnet-4-5",
                 "api_key": os.getenv("ANTHROPIC_API_KEY", ""),
-                "enabled": False,
+                "enabled": bool(os.getenv("ANTHROPIC_API_KEY", "")),
                 "timeout_ms": 30000,
                 "max_retries": 2,
                 "temperature": 0.1,
@@ -125,9 +130,9 @@ def load_ai_configuration() -> Dict[str, Any]:
             },
             {
                 "provider": "google",
-                "model": "gemini-1.5-flash",
+                "model": "gemini-2.5-pro",
                 "api_key": os.getenv("GOOGLE_API_KEY", ""),
-                "enabled": False,
+                "enabled": bool(os.getenv("GOOGLE_API_KEY", "")),
                 "timeout_ms": 30000,
                 "max_retries": 2,
                 "temperature": 0.1,
@@ -216,7 +221,13 @@ async def test_anthropic_provider(config: AIProviderConfig, test_prompt: str) ->
     import time
     
     try:
-        import anthropic
+        try:
+            import anthropic
+        except ImportError:
+            return ProviderTestResponse(
+                success=False,
+                error_message="Anthropic library not installed. Run: pip install anthropic"
+            )
         
         if not config.api_key:
             return ProviderTestResponse(
@@ -227,24 +238,89 @@ async def test_anthropic_provider(config: AIProviderConfig, test_prompt: str) ->
         client = anthropic.Anthropic(api_key=config.api_key)
         start_time = time.time()
         
-        message = client.messages.create(
-            model=config.model,
-            max_tokens=50,
-            temperature=0.1,
-            messages=[{"role": "user", "content": test_prompt}],
-            timeout=config.timeout_ms / 1000
-        )
+        # Try different API approaches for compatibility
+        try:
+            # Try the new messages API first
+            message = client.messages.create(
+                model=config.model,
+                max_tokens=50,
+                messages=[{"role": "user", "content": test_prompt}]
+            )
+            response_text = message.content[0].text
+            token_usage = {
+                "prompt_tokens": message.usage.input_tokens if hasattr(message, 'usage') else 0,
+                "completion_tokens": message.usage.output_tokens if hasattr(message, 'usage') else 0,
+                "total_tokens": (message.usage.input_tokens + message.usage.output_tokens) if hasattr(message, 'usage') else 0
+            }
+        except Exception as api_error:
+            # Fallback to legacy completions API
+            try:
+                response = client.completions.create(
+                    model=config.model,
+                    prompt=f"Human: {test_prompt}\n\nAssistant:",
+                    max_tokens_to_sample=50
+                )
+                response_text = response.completion
+                token_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+            except Exception:
+                # If both fail, return the original error
+                raise api_error
         
         latency_ms = int((time.time() - start_time) * 1000)
         
         return ProviderTestResponse(
             success=True,
-            response_text=message.content[0].text,
+            response_text=response_text,
+            latency_ms=latency_ms,
+            token_usage=token_usage
+        )
+        
+    except Exception as e:
+        return ProviderTestResponse(
+            success=False,
+            error_message=str(e)
+        )
+
+async def test_google_provider(config: AIProviderConfig, test_prompt: str) -> ProviderTestResponse:
+    """Test Google provider connectivity"""
+    import time
+    
+    try:
+        try:
+            import google.generativeai as genai
+        except ImportError:
+            return ProviderTestResponse(
+                success=False,
+                error_message="Google Generative AI library not installed. Run: pip install google-generativeai"
+            )
+        
+        if not config.api_key:
+            return ProviderTestResponse(
+                success=False,
+                error_message="API key is required for Google"
+            )
+        
+        # Configure the API key
+        genai.configure(api_key=config.api_key)
+        
+        # Create the model - use model name without prefix
+        model = genai.GenerativeModel(config.model)
+        
+        start_time = time.time()
+        
+        # Generate content with simpler configuration
+        response = model.generate_content(test_prompt)
+        
+        latency_ms = int((time.time() - start_time) * 1000)
+        
+        return ProviderTestResponse(
+            success=True,
+            response_text=response.text,
             latency_ms=latency_ms,
             token_usage={
-                "prompt_tokens": message.usage.input_tokens,
-                "completion_tokens": message.usage.output_tokens,
-                "total_tokens": message.usage.input_tokens + message.usage.output_tokens
+                "prompt_tokens": 0,  # Google API doesn't always provide token counts
+                "completion_tokens": 0,
+                "total_tokens": 0
             }
         )
         
@@ -333,6 +409,8 @@ async def test_ai_provider(request: ProviderTestRequest):
             return await test_openai_provider(request.provider_config, request.test_prompt)
         elif request.provider_config.provider == "anthropic":
             return await test_anthropic_provider(request.provider_config, request.test_prompt)
+        elif request.provider_config.provider == "google":
+            return await test_google_provider(request.provider_config, request.test_prompt)
         else:
             return ProviderTestResponse(
                 success=False,
