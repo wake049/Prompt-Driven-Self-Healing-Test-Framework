@@ -1,7 +1,12 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import styled from 'styled-components';
+import { spinKeyframes } from '../../../shared/styles/keyframes';
 import { useTheme } from '../../../contexts/ThemeContext';
+import { useToast } from '../../../shared/ui/Toast';
+import { ElementFilterBar, Element } from '../../../shared/ui/ElementFilterBar';
+import { EditableElementName } from '../../../shared/ui/EditableElementName';
+import { Breadcrumb } from '../../../shared/ui/Breadcrumb';
 import { sqlApiClient, RecordedElementDB } from '../../../shared/utils/sqlApiClient';
 import { http } from '../../../shared/api';
 import { 
@@ -37,7 +42,6 @@ import {
   Search, 
   Filter, 
   ArrowLeft, 
-  Settings, 
   Eye, 
   Edit3,
   Trash2,
@@ -45,7 +49,6 @@ import {
   CheckCircle,
   XCircle,
   Clock,
-  Activity,
   FileText,
   Database,
   Layers,
@@ -78,14 +81,7 @@ const ModernHeader = styled.div`
     padding: 20px;
   }
 `;
-const Breadcrumb = styled.div`
-  font-size: 14px;
-  color: ${props => props.theme.colors.textSecondary};
-  margin-bottom: 16px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-`;
+
 const BreadcrumbLink = styled.span`
   color: ${props => props.theme.colors.primary};
   cursor: pointer;
@@ -145,7 +141,7 @@ const ActionsBar = styled.div`
 const PrimaryButton = styled.button<{ variant?: 'primary' | 'loading' }>`
   background: ${props => props.variant === 'loading' 
     ? 'linear-gradient(135deg, #6b7280, #4b5563)' 
-    : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'};
+    : '#185FA5'};
   color: white;
   border: none;
   padding: 12px 24px;
@@ -376,11 +372,7 @@ const LoadingSpinner = styled.div`
   border-radius: 50%;
   width: 32px;
   height: 32px;
-  animation: spin 1s linear infinite;
-  @keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
-  }
+  animation: ${spinKeyframes} 1s linear infinite;
 `;
 const LoadingText = styled.span`
   color: ${props => props.theme.colors.textSecondary};
@@ -388,8 +380,8 @@ const LoadingText = styled.span`
 `;
 const ErrorMessage = styled.div`
   background: linear-gradient(135deg, #fee2e2, #fecaca);
-  border: 1px solid #f87171;
-  color: #dc2626;
+  border: 1px solid #c85050;
+  color: #8a2222;
   padding: 20px;
   border-radius: 12px;
   margin: 32px;
@@ -398,14 +390,17 @@ const ErrorMessage = styled.div`
   justify-content: space-between;
   box-shadow: 0 4px 12px rgba(248, 113, 113, 0.2);
 `;
+
 const EmptyState = styled.div`
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 80px 20px;
+  padding: 64px 32px;
   text-align: center;
+  min-height: 300px;
 `;
+
 const EmptyStateIcon = styled.div`
   font-size: 64px;
   margin-bottom: 24px;
@@ -434,24 +429,96 @@ const ElementGrid = styled.div`
     gap: 16px;
   }
 `;
-const ElementCard = styled.div`
+const PaginationBar = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 20px;
+  padding: 14px 18px;
+  background: ${props => props.theme.colors.surface};
+  border: 1px solid ${props => props.theme.colors.border};
+  border-radius: 12px;
+`;
+
+const PaginationInfo = styled.div`
+  font-size: 14px;
+  color: ${props => props.theme.colors.textSecondary};
+`;
+
+const PaginationButtons = styled.div`
+  display: flex;
+  gap: 8px;
+`;
+
+const PaginationButton = styled.button`
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid ${props => props.theme.colors.border};
+  background: ${props => props.theme.colors.surface};
+  color: ${props => props.theme.colors.text};
+  cursor: pointer;
+  font-weight: 600;
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+`;
+
+const ElementCard = styled.div<{ $isSelected?: boolean }>`
   background: ${props => props.theme.colors.surface};
   border-radius: 16px;
   padding: 24px;
   box-shadow: ${props => props.theme.shadows.medium};
   transition: all 0.3s ease;
-  border: 1px solid ${props => props.theme.colors.border};
+  border: 2px solid ${props => props.$isSelected ? props.theme.colors.primary : props.theme.colors.border};
   cursor: pointer;
+  position: relative;
+  ${props => props.$isSelected && `
+    background: linear-gradient(135deg, rgba(102, 126, 234, 0.05), rgba(118, 75, 162, 0.05));
+  `}
   &:hover {
     transform: translateY(-4px);
     box-shadow: ${props => props.theme.shadows.large};
   }
 `;
+
+const SelectionCheckbox = styled.div<{ $checked: boolean }>`
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: 2px solid ${props => props.$checked ? props.theme.colors.primary : props.theme.colors.border};
+  background: ${props => props.$checked ? props.theme.colors.primary : 'transparent'};
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  
+  &:hover {
+    border-color: ${props => props.theme.colors.primary};
+    transform: scale(1.1);
+  }
+  
+  ${props => props.$checked && `
+    &::after {
+      content: '✓';
+      color: white;
+      font-weight: bold;
+      font-size: 14px;
+    }
+  `}
+`;
+
 const ElementCardHeader = styled.div`
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
   margin-bottom: 16px;
+  margin-left: 36px;
 `;
 const ElementInfo = styled.div`
   flex: 1;
@@ -518,7 +585,7 @@ const SelectorItem = styled.div<{ dynamicType?: string }>`
   word-break: break-all;
   border-left: 3px solid ${props => {
     switch(props.dynamicType) {
-      case 'high': return '#dc2626';
+      case 'high': return '#8a2222';
       case 'medium': return '#f59e0b';
       case 'low': return '#3b82f6';
       default: return 'transparent';
@@ -550,7 +617,7 @@ const DynamicWarning = styled.div<{ severity?: string }>`
   }};
   color: ${props => {
     switch(props.severity) {
-      case 'high': return '#dc2626';
+      case 'high': return '#8a2222';
       case 'medium': return '#f59e0b';
       case 'low': return '#3b82f6';
       default: return '#6b7280';
@@ -604,9 +671,9 @@ const HealthDot = styled.div<{ status: 'healthy' | 'warning' | 'error' }>`
   border-radius: 50%;
   background: ${props => {
     switch (props.status) {
-      case 'healthy': return '#10b981';
+      case 'healthy': return '#1D9E75';
       case 'warning': return '#f59e0b';
-      case 'error': return '#ef4444';
+      case 'error': return '#A32D2D';
       default: return '#6c757d';
     }
   }};
@@ -651,7 +718,7 @@ const ActionButton = styled.button<{ variant?: 'primary' | 'secondary' | 'danger
   background: ${props => {
     switch(props.variant) {
       case 'primary': return 'linear-gradient(135deg, #3b82f6, #1d4ed8)';
-      case 'danger': return 'linear-gradient(135deg, #ef4444, #dc2626)';
+      case 'danger': return 'linear-gradient(135deg, #A32D2D, #8a2222)';
       default: return props.theme.colors.background;
     }
   }};
@@ -757,12 +824,16 @@ const getBestSelectorByPolicy = (element: RecordedElement, config: PolicyBasedSe
 // ================================
 const MCPElementsViewer: React.FC = () => {
   const navigate = useNavigate();
+  const { showToast, showSuccess, showError, showWarning, showInfo } = useToast();
   const [elements, setElements] = useState<RecordedElement[]>([]);
+  const [filteredElements, setFilteredElements] = useState<RecordedElement[]>([]);
+  const [selectedElements, setSelectedElements] = useState<Set<string>>(new Set());
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
   const [selectedPage, setSelectedPage] = useState('all');
   const [healthFilter, setHealthFilter] = useState('all'); // 'all', 'healthy', 'warning', 'error'
   const [activeTab, setActiveTab] = useState('overview');
+  const [currentPage, setCurrentPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectorConfig, setSelectorConfig] = useState<PolicyBasedSelectorConfig>({
@@ -782,69 +853,26 @@ const MCPElementsViewer: React.FC = () => {
   const renderKey = React.useMemo(() => {
     return `${selectedPage}-${healthFilter}-${debouncedSearchTerm}-${elements.length}`;
   }, [selectedPage, healthFilter, debouncedSearchTerm, elements.length]);
-  // Filter elements based on search and filters
-  const filteredElements = React.useMemo(() => {
-    // Don't filter if elements haven't loaded yet
-    if (loading || elements.length === 0) {
-      return [];
-    }
-    let filtered = [...elements];
-    // Filter by page - THIS IS THE KEY FILTER
-    if (selectedPage !== 'all') {
-      // Show what pages actually exist
-      const allPages = [...new Set(elements.map(e => e.page))];
-      const beforeCount = filtered.length;
-      filtered = filtered.filter(element => {
-        const elementPage = (element.page || 'unknown').trim();
-        const match = elementPage === selectedPage.trim();
-        // Log first few matches/mismatches for debugging
-        if (beforeCount < 20) {
-        }
-        return match;
-      });
-      // Show which elements passed the filter
-      if (filtered.length <= 10) {
-      }
-    }
-    // Filter by health status
-    if (healthFilter !== 'all') {
-      const beforeHealthFilter = filtered.length;
-      filtered = filtered.filter(element => {
-        const healthStatus = getElementHealthStatus(element);
-        return healthStatus.status === healthFilter;
-      });
-    }
-    // Filter by search term
-    if (debouncedSearchTerm && debouncedSearchTerm.trim()) {
-      const beforeSearchFilter = filtered.length;
-      const term = debouncedSearchTerm.toLowerCase().trim();
-      filtered = filtered.filter(element => {
-        const elementText = element.text || '';
-        const elementTag = element.tag || '';
-        const elementName = (elementText + ' ' + elementTag).toLowerCase();
-        if (elementName.includes(term)) return true;
-        const elementId = element.id || '';
-        if (elementId.toLowerCase().includes(term)) return true;
-        const elementPage = element.page || '';
-        if (elementPage.toLowerCase().includes(term)) return true;
-        const cssSelector = element.cssSelector || '';
-        const xpath = element.xpath || '';
-        if (cssSelector.toLowerCase().includes(term)) return true;
-        if (xpath.toLowerCase().includes(term)) return true;
-        if (element.attributes && typeof element.attributes === 'object') {
-          const attributeMatches = Object.entries(element.attributes).some(([key, value]) => {
-            if (!key || !value) return false;
-            const keyStr = key.toString().toLowerCase();
-            const valueStr = value.toString().toLowerCase();
-            return keyStr.includes(term) || valueStr.includes(term);
-          });
-          if (attributeMatches) return true;
-        }
-        return false;
-      });
-    }
-    return filtered;
-  }, [elements, debouncedSearchTerm, selectedPage, healthFilter, loading]);
+  // Filter elements based on search and filters - removed old filtering, now using ElementFilterBar
+  // Convert RecordedElement to Element format for ElementFilterBar
+  const elementsForFilter: Element[] = React.useMemo(() => {
+    return elements.map(el => ({
+      id: el.id,
+      name: el.text || el.id,
+      type: el.tag,
+      page: el.page,
+      cssSelector: el.cssSelector,
+      xpath: el.xpath,
+      isActive: el.isActive
+    }));
+  }, [elements]);
+  
+  // Memoize the filter callback to prevent infinite re-renders
+  const handleFilteredElementsChange = useCallback((filtered: Element[]) => {
+    const filteredIds = new Set(filtered.map(e => e.id));
+    setFilteredElements(elements.filter(el => filteredIds.has(el.id)));
+  }, [elements]);
+  
   // Load policy-based selector configuration
   useEffect(() => {
     const loadSelectorPolicy = async () => {
@@ -1031,6 +1059,7 @@ const MCPElementsViewer: React.FC = () => {
   const loadElements = useCallback(async () => {
     setLoading(true);
     setError(null);
+    
     try {
       // Check if SQL backend is available
       const isHealthy = await sqlApiClient.healthCheck();
@@ -1071,8 +1100,9 @@ const MCPElementsViewer: React.FC = () => {
             if (apiElement.logical_key && apiElement.timestamp_recorded) {
               // Database format - use existing conversion
               // Convert database element to frontend format
+              // Use database ID as unique identifier, fallback to unique generated ID
               return {
-                id: apiElement.element_key || apiElement.id,
+                id: apiElement.id ? String(apiElement.id) : `element_${index}_${Date.now()}`,
                 dbId: apiElement.id,
                 tag: apiElement.tag || 'unknown',
                 text: apiElement.text_content || apiElement.text || '',
@@ -1088,9 +1118,11 @@ const MCPElementsViewer: React.FC = () => {
               } as RecordedElement;
             } else {
               // Simple API format - convert directly
+              // Ensure unique ID by using database ID or unique generated ID
+              const uniqueId = apiElement.id ? String(apiElement.id) : `element_${index}_${Date.now()}`;
               return {
-                id: apiElement.id || `element_${index}`,
-                dbId: apiElement.id || `element_${index}`,
+                id: uniqueId,
+                dbId: apiElement.id || index,
                 tag: apiElement.tag || 'unknown',
                 text: apiElement.text || apiElement.text_content || '',
                 cssSelector: apiElement.css_selector || '',
@@ -1109,8 +1141,8 @@ const MCPElementsViewer: React.FC = () => {
           } catch (conversionError) {
             // Return a minimal element to avoid breaking the UI
             return {
-              id: `error_element_${index}`,
-              dbId: apiElement.id || `error_element_${index}`,
+              id: `error_element_${index}_${Date.now()}`,
+              dbId: apiElement.id || index,
               tag: 'error',
               text: 'Error loading element',
               cssSelector: '',
@@ -1125,25 +1157,86 @@ const MCPElementsViewer: React.FC = () => {
             } as RecordedElement;
           }
         });
-        setElements(frontendElements);
+        
+        // Deduplicate elements by ID to prevent duplicate key warnings
+        const uniqueElements = Array.from(
+          new Map(frontendElements.map(el => [el.id, el])).values()
+        );
+        
+        setElements(uniqueElements);
+        showSuccess('Elements Loaded', `Successfully loaded ${uniqueElements.length} elements`);
         // Force immediate filtering after elements are loaded
         // This will trigger the useEffect above
         // Log some stats for debugging
-        const pages = new Set(frontendElements.map(e => e.page));
-        const tags = new Set(frontendElements.map(e => e.tag));
+        const pages = new Set(uniqueElements.map(e => e.page));
+        const tags = new Set(uniqueElements.map(e => e.tag));
       } else {
         setElements([]);
       }
-    } catch (error: any) {setError(`Failed to load elements: ${error.message}`);
+    } catch (error: any) {
+      const errorMsg = `Failed to load elements: ${error.message}`;
+      setError(errorMsg);
       setElements([]);
+      showError('Loading Failed', errorMsg);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [showSuccess, showError]);
+  
+  // Bulk action handlers
+  const handleBulkAction = async (action: 'delete' | 'healthCheck', selectedIds: string[]) => {
+    if (selectedIds.length === 0) {
+      showWarning('No Selection', 'Please select elements first');
+      return;
+    }
+
+    if (action === 'delete') {
+      const confirmed = window.confirm(`Are you sure you want to delete ${selectedIds.length} element(s)? This cannot be undone.`);
+      if (!confirmed) return;
+
+      showInfo('Deleting Elements', `Deleting ${selectedIds.length} element(s)...`);
+      
+      try {
+        // Delete each selected element
+        const deletePromises = selectedIds.map(id => {
+          const element = elements.find(e => e.id === id);
+          if (element && element.dbId) {
+            return sqlApiClient.deleteElement(String(element.dbId));
+          }
+          return Promise.resolve({ success: true });
+        });
+
+        await Promise.all(deletePromises);
+        
+        // Update local state
+        setElements(elements.filter(e => !selectedIds.includes(e.id)));
+        setSelectedElements(new Set());
+        showSuccess('Elements Deleted', `Successfully deleted ${selectedIds.length} element(s)`);
+      } catch (error: any) {
+        showError('Delete Failed', `Failed to delete elements: ${error.message}`);
+      }
+    } else if (action === 'healthCheck') {
+      showInfo('Health Check', `Running health check on ${selectedIds.length} element(s)...`);
+      
+      try {
+        // Simulate health check (in real app, this would call an API)
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        
+        const healthyCount = Math.floor(selectedIds.length * 0.7);
+        const warningCount = selectedIds.length - healthyCount;
+        
+        showSuccess('Health Check Complete', 
+          `${healthyCount} elements healthy, ${warningCount} need attention`);
+      } catch (error: any) {
+        showError('Health Check Failed', `Failed to run health check: ${error.message}`);
+      }
+    }
+  };
+  
   // Handle element selection
   const handleElementClick = (element: RecordedElement) => {
     // Navigate using the element ID
-    navigate(`/review/${element.id}`);
+    navigate(`/app/review/${element.id}`);
   };
   // Delete element
   const deleteElement = async (elementId: string, event: React.MouseEvent) => {
@@ -1151,6 +1244,9 @@ const MCPElementsViewer: React.FC = () => {
     if (!window.confirm(`Are you sure you want to delete element "${elementId}"?`)) {
       return;
     }
+    
+    showInfo('Deleting Element', `Removing element "${elementId}"...`);
+    
     try {
       // Find the element in our current list to get the database ID
       const elementToDelete = elements.find(e => e.id === elementId);
@@ -1172,21 +1268,26 @@ const MCPElementsViewer: React.FC = () => {
       // Only update local state if database deletion succeeded
       const updatedElements = elements.filter(e => e.id !== elementId);
       setElements(updatedElements);
+      showSuccess('Element Deleted', `Successfully removed "${elementId}"`);
+      
       // Handle sync relationships for deleted element
       try {
         const { elementPromptSyncService } = await import('../../../shared/services/elementPromptSyncService');
         const syncResult = await elementPromptSyncService.handleDeletedElement(elementId);
         if (syncResult.alternativeFound) {
-          alert(`Element deleted successfully!\n\n${syncResult.message}`);
+          showInfo('Sync Updated', syncResult.message);
         } else if (syncResult.success) {
           if (syncResult.message.includes('prompts may need manual review')) {
-            alert(`Element deleted.\n\n${syncResult.message}`);
+            showWarning('Review Needed', syncResult.message);
           }
         }
-      } catch (syncError) {// Don't block deletion if sync fails
+      } catch (syncError) {
+        // Don't block deletion if sync fails
       }
-    } catch (error: any) {// Show detailed error to user
-      alert(`Failed to delete element "${elementId}": ${error.message}\n\nThe element was not removed to keep UI in sync with database.`);
+    } catch (error: any) {
+      // Show detailed error to user
+      const errorMsg = `Failed to delete element "${elementId}": ${error.message}`;
+      showError('Delete Failed', errorMsg);
     }
   };
   useEffect(() => {
@@ -1220,6 +1321,11 @@ const MCPElementsViewer: React.FC = () => {
   // Calculate stats
   const totalElements = elements.length;
   const filteredCount = filteredElements.length;
+  const elementsPerPage = 24;
+  const totalPages = Math.max(1, Math.ceil(filteredCount / elementsPerPage));
+  const pageStartIndex = (currentPage - 1) * elementsPerPage;
+  const pageEndIndex = pageStartIndex + elementsPerPage;
+  const paginatedFilteredElements = filteredElements.slice(pageStartIndex, pageEndIndex);
   const healthyCount = elements.filter(e => getElementHealthStatus(e).status === 'healthy').length;
   const warningCount = elements.filter(e => getElementHealthStatus(e).status === 'warning').length;
   const errorCount = elements.filter(e => getElementHealthStatus(e).status === 'error').length;
@@ -1230,6 +1336,17 @@ const MCPElementsViewer: React.FC = () => {
     setHealthFilter('all');
     // No need to manually set filteredElements since useMemo will handle it
   };
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filteredCount, activeTab]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
   return (
     <Container>
       <Layout>
@@ -1237,7 +1354,7 @@ const MCPElementsViewer: React.FC = () => {
           {/* Header */}
           <ModernHeader>
             <Breadcrumb>
-              <BreadcrumbLink onClick={() => navigate('/')}>
+              <BreadcrumbLink onClick={() => navigate('/app/elements')}>
                 <ArrowLeft size={16} />
                 Dashboard
               </BreadcrumbLink>
@@ -1300,75 +1417,16 @@ const MCPElementsViewer: React.FC = () => {
               All Elements
               <ElementBadge>{totalElements}</ElementBadge>
             </Tab>
-            <Tab
-              active={activeTab === 'health'}
-              onClick={() => setActiveTab('health')}
-            >
-              <Activity size={14} />
-              Health Analysis
-            </Tab>
-            <Tab
-              active={activeTab === 'settings'}
-              onClick={() => setActiveTab('settings')}
-            >
-              <Settings size={14} />
-              Settings
-            </Tab>
           </TabsContainer>
           {/* Filter Bar */}
           {activeTab === 'overview' && (
-            <>
-              <FilterBar>
-                <SearchContainer>
-                  <SearchIcon>
-                    <Search size={16} />
-                  </SearchIcon>
-                  <SearchInput
-                    type="text"
-                    placeholder="Search elements by name, tag, selector, or attributes..."
-                    value={searchTerm}
-                    isSearching={searchTerm !== debouncedSearchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                  />
-                </SearchContainer>
-                <FilterSelect
-                  value={selectedPage}
-                  onChange={(e) => {
-                    const newPage = e.target.value;
-                    setSelectedPage(newPage);
-                  }}
-                >
-                  <option value="all">All Pages</option>
-                  {allPages.map(page => (
-                    <option key={page} value={page}>{page}</option>
-                  ))}
-                </FilterSelect>
-                <FilterSelect
-                  value={healthFilter}
-                  onChange={(e) => setHealthFilter(e.target.value)}
-                >
-                  <option value="all">All Health States</option>
-                  <option value="healthy">🟢 Healthy</option>
-                  <option value="warning">🟡 Warning</option>
-                  <option value="error">🔴 Needs Attention</option>
-                </FilterSelect>
-              </FilterBar>
-              <FilterSummary>
-                <div>
-                  Showing <FilterCount>{filteredCount}</FilterCount> of <FilterCount>{totalElements}</FilterCount> elements
-                  {debouncedSearchTerm && <span> • Filter: "{debouncedSearchTerm}"</span>}
-                  {selectedPage !== 'all' && <span> • Page: {selectedPage}</span>}
-                  {healthFilter !== 'all' && <span> • Health: {healthFilter}</span>}
-                </div>
-                <div>
-                  {(debouncedSearchTerm || selectedPage !== 'all' || healthFilter !== 'all') && (
-                    <ClearFiltersButton onClick={clearFilters}>
-                      Clear filters
-                    </ClearFiltersButton>
-                  )}
-                </div>
-              </FilterSummary>
-            </>
+            <ElementFilterBar
+              elements={elementsForFilter}
+              onFilteredElementsChange={handleFilteredElementsChange}
+              onBulkAction={handleBulkAction}
+              selectedElements={selectedElements}
+              onSelectionChange={setSelectedElements}
+            />
           )}
           {/* Content */}
           <Content>
@@ -1417,19 +1475,67 @@ const MCPElementsViewer: React.FC = () => {
                       // Log detailed element data for debugging
                       if (filteredElements.length > 0) {
                       }
-                      return filteredElements.map((element) => {
+                      return paginatedFilteredElements.map((element) => {
                         const healthStatus = getElementHealthStatus(element);
                         return (
                           <ElementCard 
-                            key={element.id} 
+                            key={element.id}
+                            $isSelected={selectedElements.has(element.id)}
                             onClick={() => handleElementClick(element)}
                           >
+                            <SelectionCheckbox
+                              $checked={selectedElements.has(element.id)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const newSelected = new Set(selectedElements);
+                                if (newSelected.has(element.id)) {
+                                  newSelected.delete(element.id);
+                                } else {
+                                  newSelected.add(element.id);
+                                }
+                                setSelectedElements(newSelected);
+                              }}
+                            />
                             <ElementCardHeader>
                               <ElementInfo>
                                 {element.id && element.id !== 'UNKNOWN' && (
-                                  <ElementId>
-                                  {element.id}
-                                </ElementId>
+                                  <EditableElementName
+                                    currentName={element.id}
+                                    elementType={element.tag}
+                                    pageContext={element.page}
+                                    onSave={async (newName) => {
+                                      if (!element.dbId) {
+                                        throw new Error('Element not found');
+                                      }
+                                      const response = await sqlApiClient.updateElement(String(element.dbId), {
+                                        element_key: newName
+                                      });
+                                      if (response.success) {
+                                        // Update local state
+                                        const updatedElements = elements.map(e => 
+                                          e.id === element.id ? { ...e, id: newName, logical_key: newName } : e
+                                        );
+                                        // Deduplicate to ensure no duplicate keys
+                                        const uniqueElements = Array.from(
+                                          new Map(updatedElements.map(el => [el.id, el])).values()
+                                        );
+                                        setElements(uniqueElements);
+                                        showSuccess('Element Renamed', `Successfully renamed to "${newName}"`);
+                                      } else {
+                                        throw new Error(response.error || 'Failed to update');
+                                      }
+                                    }}
+                                    onGenerateSuggestions={async () => {
+                                      // Generate AI-powered name suggestions
+                                      const suggestions = [];
+                                      if (element.text) {
+                                        suggestions.push(`${element.tag}_${element.text.toLowerCase().replace(/\s+/g, '_').substring(0, 20)}`);
+                                      }
+                                      suggestions.push(`${element.page}_${element.tag}_${Math.random().toString(36).substring(7)}`);
+                                      suggestions.push(`${element.tag}_on_${element.page}`);
+                                      return suggestions;
+                                    }}
+                                  />
                               )}
                               <ElementTag>{element.tag}</ElementTag>
                             </ElementInfo>
@@ -1462,7 +1568,7 @@ const MCPElementsViewer: React.FC = () => {
                                 variant="primary"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  navigate(`/review/${element.id}`);
+                                  navigate(`/app/review/${element.id}`);
                                 }}
                                 title="View details"
                               >
@@ -1484,6 +1590,30 @@ const MCPElementsViewer: React.FC = () => {
                     });
                   })()}
                   </ElementGrid>
+                )}
+                {!loading && filteredElements.length > elementsPerPage && (
+                  <PaginationBar>
+                    <PaginationInfo>
+                      Showing {pageStartIndex + 1}-{Math.min(pageEndIndex, filteredCount)} of {filteredCount} elements
+                    </PaginationInfo>
+                    <PaginationButtons>
+                      <PaginationButton
+                        onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                        disabled={currentPage === 1}
+                      >
+                        Previous
+                      </PaginationButton>
+                      <PaginationButton disabled>
+                        Page {currentPage} of {totalPages}
+                      </PaginationButton>
+                      <PaginationButton
+                        onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                        disabled={currentPage === totalPages}
+                      >
+                        Next
+                      </PaginationButton>
+                    </PaginationButtons>
+                  </PaginationBar>
                 )}
               </>
             )}

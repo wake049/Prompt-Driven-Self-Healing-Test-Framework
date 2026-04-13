@@ -1,4 +1,5 @@
 import { useAuth } from '../../contexts/AuthContext';
+import { config } from '../../app/config';
 
 export interface PromptData {
   id: string;
@@ -42,7 +43,7 @@ class AuthenticatedPromptsApiService {
   }
 
   private async fetchWithAuth<T>(endpoint: string, options?: RequestInit): Promise<T> {
-    const response = await fetch(`https://testhelix.com${endpoint}`, {
+    const response = await fetch(`${config.apiBaseUrl}${endpoint}`, {
       headers: this.getAuthHeaders(),
       ...options,
     });
@@ -60,7 +61,7 @@ class AuthenticatedPromptsApiService {
   }
 
   private async fetchWithoutAuth<T>(endpoint: string, options?: RequestInit): Promise<T> {
-    const response = await fetch(`https://testhelix.com${endpoint}`, {
+    const response = await fetch(`${config.apiBaseUrl}${endpoint}`, {
       headers: {
         'Content-Type': 'application/json',
       },

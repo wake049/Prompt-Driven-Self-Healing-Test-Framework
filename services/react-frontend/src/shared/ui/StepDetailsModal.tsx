@@ -1,7 +1,21 @@
-import React, { useState } from 'react';
-import styled from 'styled-components';
-import { X, Image, Terminal, Network, Zap } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import styled, { keyframes } from 'styled-components';
+import { X, Image, Terminal, Zap, Loader } from 'lucide-react';
 import { useTheme } from '../../contexts/ThemeContext';
+import { config } from '../../app/config';
+
+const spin = keyframes`
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+`;
+
+const LoadingSpinner = styled(Loader)`
+  animation: ${spin} 1s linear infinite;
+`;
 interface NetworkRequest {
   url: string;
   method: string;
@@ -15,6 +29,14 @@ interface HealingAttempt {
   description: string;
   success: boolean;
 }
+
+interface AIRecommendation {
+  icon: string;
+  title: string;
+  description: string;
+  confidence: number;
+}
+
 interface ExecutionStep {
   step_number: number;
   step_description: string;
@@ -25,6 +47,10 @@ interface ExecutionStep {
   console_logs?: string[];
   network_requests?: NetworkRequest[];
   healing_attempts?: HealingAttempt[];
+  action?: string;
+  locator?: string;
+  error?: string;
+  step_id?: string;
 }
 interface StepDetailsModalProps {
   step: ExecutionStep;
@@ -90,7 +116,7 @@ const TabContainer = styled.div`
   background: ${props => props.theme.colors.surface};
   overflow-x: auto;
 `;
-const Tab = styled.button<{ active: boolean }>`
+const Tab = styled.button<{ $active: boolean }>`
   background: none;
   border: none;
   padding: 16px 24px;
@@ -101,8 +127,8 @@ const Tab = styled.button<{ active: boolean }>`
   display: flex;
   align-items: center;
   gap: 8px;
-  color: ${props => props.active ? props.theme.colors.primary : props.theme.colors.textSecondary};
-  border-bottom: 3px solid ${props => props.active ? props.theme.colors.primary : 'transparent'};
+  color: ${props => props.$active ? props.theme.colors.primary : props.theme.colors.textSecondary};
+  border-bottom: 3px solid ${props => props.$active ? props.theme.colors.primary : 'transparent'};
   white-space: nowrap;
   &:hover {
     background: rgba(102, 126, 234, 0.1);
@@ -220,14 +246,14 @@ const StatusCode = styled.span<{ status: number }>`
   font-weight: 700;
   color: white;
   background: ${props => {
-    if (props.status >= 200 && props.status < 300) return '#38a169';
+    if (props.status >= 200 && props.status < 300) return '#1D9E75';
     if (props.status >= 300 && props.status < 400) return '#ed8936';
-    return '#e53e3e';
+    return '#A32D2D';
   }};
 `;
 const HealingAttemptCard = styled.div<{ success: boolean }>`
   background: ${props => props.success ? 'rgba(56, 161, 105, 0.1)' : 'rgba(229, 62, 62, 0.1)'};
-  border-left: 4px solid ${props => props.success ? '#38a169' : '#e53e3e'};
+  border-left: 4px solid ${props => props.success ? '#1D9E75' : '#A32D2D'};
   padding: 20px;
   margin-bottom: 16px;
   border-radius: 8px;
@@ -255,7 +281,7 @@ const HealingAttemptCard = styled.div<{ success: boolean }>`
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.5px;
-    background: ${props => props.success ? '#38a169' : '#e53e3e'};
+    background: ${props => props.success ? '#1D9E75' : '#A32D2D'};
     color: white;
     margin-bottom: 8px;
   }
@@ -277,6 +303,80 @@ const EmptyState = styled.div`
     font-size: 14px;
   }
 `;
+
+const InfoGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 24px;
+  margin-bottom: 24px;
+`;
+
+const InfoItem = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+`;
+
+const InfoLabel = styled.div`
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: ${props => props.theme.colors.textSecondary};
+`;
+
+const InfoValue = styled.div`
+  font-size: 16px;
+  font-weight: 600;
+  color: ${props => props.theme.colors.text};
+  word-break: break-word;
+`;
+
+const RecommendationsList = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 16px;
+`;
+
+const RecommendationCard = styled.div`
+  display: flex;
+  gap: 16px;
+  padding: 20px;
+  background: ${props => props.theme.colors.surface};
+  border: 1px solid ${props => props.theme.colors.border};
+  border-radius: 12px;
+  transition: all 0.2s ease;
+  
+  &:hover {
+    border-color: ${props => props.theme.colors.primary};
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    transform: translateY(-2px);
+  }
+  
+  .recommendation-icon {
+    font-size: 32px;
+    line-height: 1;
+  }
+  
+  .recommendation-content {
+    flex: 1;
+  }
+  
+  .recommendation-title {
+    font-weight: 700;
+    font-size: 16px;
+    color: ${props => props.theme.colors.text};
+    margin-bottom: 8px;
+  }
+  
+  .recommendation-text {
+    font-size: 14px;
+    color: ${props => props.theme.colors.textSecondary};
+    line-height: 1.6;
+  }
+`;
+
 const formatBytes = (bytes: number): string => {
   if (bytes === 0) return '0 B';
   const k = 1024;
@@ -289,15 +389,105 @@ const formatDuration = (ms: number): string => {
   return `${(ms / 1000).toFixed(2)}s`;
 };
 const StepDetailsModal: React.FC<StepDetailsModalProps> = ({ step, isOpen, onClose }) => {
-  const [activeTab, setActiveTab] = useState('failure');
+  const [activeTab, setActiveTab] = useState('details');
   const { theme } = useTheme();
+  const [recommendations, setRecommendations] = useState<AIRecommendation[]>([]);
+  const [recommendationsLoading, setRecommendationsLoading] = useState(false);
+  const [analysisText, setAnalysisText] = useState('');
+  const [recommendationsFetched, setRecommendationsFetched] = useState(false);
+
+  // Fetch AI recommendations when recommendations tab is viewed for failed steps
+  useEffect(() => {
+    if (isOpen && activeTab === 'recommendations' && step.result === 'FAIL' && !recommendationsFetched) {
+      console.log('Fetching AI recommendations for step:', step.step_id);
+      fetchAIRecommendations();
+    }
+  }, [isOpen, activeTab, step.step_id, step.result, recommendationsFetched]);
+
+  const fetchAIRecommendations = async () => {
+    try {
+      setRecommendationsLoading(true);
+      setRecommendationsFetched(true);
+      
+      const token = localStorage.getItem('auth_token');
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        ...(token && { 'Authorization': `Bearer ${token}` }),
+      };
+
+      console.log('Calling recommendations API with:', {
+        step_id: step.step_id,
+        action: step.action || step.step_description,
+        locator: step.locator,
+        has_screenshot: !!step.screenshot
+      });
+
+      const response = await fetch(
+        `${config.apiBaseUrl}/api/v1/recommendations`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            step_id: step.step_id,
+            action: step.action || step.step_description,
+            locator: step.locator,
+            error_message: step.error || step.details,
+            screenshot_path: step.screenshot,
+            healing_attempts: step.healing_attempts?.map(ha => ({
+              originalLocator: step.locator,
+              attemptedAlternatives: [ha.description],
+              result: ha.success ? 'success' : 'failed'
+            }))
+          })
+        }
+      );
+
+      console.log('Recommendations API response status:', response.status);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Recommendations API error:', errorText);
+        throw new Error(`API Error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log('Recommendations received:', data);
+      setRecommendations(data.recommendations || []);
+      setAnalysisText(data.analysis || '');
+    } catch (error) {
+      console.error('Error fetching AI recommendations:', error);
+      // Set fallback recommendations
+      setRecommendations([
+        {
+          icon: '💡',
+          title: 'Verify Element Selector',
+          description: 'The selector may have changed. Try using a more stable selector like data-testid or aria-label.',
+          confidence: 0.7
+        },
+        {
+          icon: '⏱️',
+          title: 'Add Wait Condition',
+          description: 'Element might not be ready. Consider adding an explicit wait for the element to be visible or clickable.',
+          confidence: 0.65
+        },
+        {
+          icon: '🔄',
+          title: 'Check Page State',
+          description: 'Ensure the page is fully loaded and any animations or transitions have completed before interacting.',
+          confidence: 0.6
+        }
+      ]);
+      setAnalysisText('Unable to perform AI analysis. Showing generic recommendations.');
+    } finally {
+      setRecommendationsLoading(false);
+    }
+  };
   if (!isOpen) return null;
   const tabs = [
-    { id: 'failure', label: 'Failure Details', icon: X },
+    { id: 'details', label: 'Step Details', icon: X },
     { id: 'screenshot', label: 'Screenshot', icon: Image },
-    { id: 'console', label: 'Console Logs', icon: Terminal },
-    { id: 'network', label: 'Network', icon: Network },
-    { id: 'healing', label: 'AI Healing', icon: Zap }
+    { id: 'healing', label: 'AI Healing', icon: Zap },
+    { id: 'recommendations', label: 'AI Recommendations', icon: Terminal }
   ];
   const handleOverlayClick = (e: React.MouseEvent) => {
     if (e.target === e.currentTarget) {
@@ -317,7 +507,7 @@ const StepDetailsModal: React.FC<StepDetailsModalProps> = ({ step, isOpen, onClo
           {tabs.map(tab => (
             <Tab
               key={tab.id}
-              active={activeTab === tab.id}
+              $active={activeTab === tab.id}
               onClick={() => setActiveTab(tab.id)}
             >
               <tab.icon size={16} />
@@ -327,20 +517,47 @@ const StepDetailsModal: React.FC<StepDetailsModalProps> = ({ step, isOpen, onClo
         </TabContainer>
         <ModalBody>
           <TabContent>
-            {activeTab === 'failure' && (
+            {activeTab === 'details' && (
               <div>
-                <h4 style={{ color: theme.colors.error, marginTop: 0 }}>Failure Information</h4>
+                <h4 style={{ color: step.result === 'FAIL' ? theme.colors.error : theme.colors.success, marginTop: 0 }}>
+                  {step.result === 'FAIL' ? 'Failure Information' : 'Step Details'}
+                </h4>
+                <InfoGrid>
+                  <InfoItem>
+                    <InfoLabel>Step Number</InfoLabel>
+                    <InfoValue>#{step.step_number}</InfoValue>
+                  </InfoItem>
+                  <InfoItem>
+                    <InfoLabel>Action</InfoLabel>
+                    <InfoValue>{step.step_description}</InfoValue>
+                  </InfoItem>
+                  <InfoItem>
+                    <InfoLabel>Status</InfoLabel>
+                    <InfoValue style={{ color: step.result === 'PASS' ? theme.colors.success : theme.colors.error }}>
+                      {step.result}
+                    </InfoValue>
+                  </InfoItem>
+                  {step.duration_ms && (
+                    <InfoItem>
+                      <InfoLabel>Duration</InfoLabel>
+                      <InfoValue>{formatDuration(step.duration_ms)}</InfoValue>
+                    </InfoItem>
+                  )}
+                </InfoGrid>
                 {step.details ? (
-                  <LogContainer>
-                    <div className="log-entry error">{step.details}</div>
-                  </LogContainer>
-                ) : (
+                  <div style={{ marginTop: '24px' }}>
+                    <InfoLabel style={{ marginBottom: '8px', display: 'block' }}>Error Details</InfoLabel>
+                    <LogContainer>
+                      <div className="log-entry error">{step.details}</div>
+                    </LogContainer>
+                  </div>
+                ) : step.result === 'FAIL' ? (
                   <EmptyState>
                     <X size={48} />
-                    <h4>No failure details available</h4>
-                    <p>This step completed successfully</p>
+                    <h4>No error details captured</h4>
+                    <p>The step failed but no error message was recorded</p>
                   </EmptyState>
-                )}
+                ) : null}
               </div>
             )}
             {activeTab === 'screenshot' && (
@@ -358,60 +575,63 @@ const StepDetailsModal: React.FC<StepDetailsModalProps> = ({ step, isOpen, onClo
                 )}
               </ScreenshotContainer>
             )}
-            {activeTab === 'console' && (
+            {activeTab === 'recommendations' && (
               <div>
-                <h4 style={{ marginTop: 0 }}>Console Output</h4>
-                <LogContainer>
-                  {step.console_logs && step.console_logs.length > 0 ? (
-                    step.console_logs.map((log: string, index: number) => (
-                      <div 
-                        key={index} 
-                        className={`log-entry ${
-                          log.includes('ERROR') ? 'error' : 
-                          log.includes('WARN') ? 'warn' : 
-                          log.includes('INFO') ? 'info' : 'debug'
-                        }`}
-                      >
-                        {log}
+                <h4 style={{ marginTop: 0 }}>AI Recommendations</h4>
+                {step.result === 'FAIL' ? (
+                  <>
+                    {analysisText && (
+                      <div style={{ 
+                        background: 'rgba(102, 126, 234, 0.1)',
+                        padding: '16px',
+                        borderRadius: '8px',
+                        marginBottom: '24px',
+                        borderLeft: '4px solid #185FA5'
+                      }}>
+                        <strong style={{ display: 'block', marginBottom: '8px' }}>AI Analysis:</strong>
+                        <p style={{ margin: 0, lineHeight: '1.6' }}>{analysisText}</p>
                       </div>
-                    ))
-                  ) : (
-                    <div className="no-logs">No console logs captured</div>
-                  )}
-                </LogContainer>
-              </div>
-            )}
-            {activeTab === 'network' && (
-              <div>
-                <h4 style={{ marginTop: 0 }}>Network Requests</h4>
-                {step.network_requests && step.network_requests.length > 0 ? (
-                  <NetworkTable>
-                    <thead>
-                      <tr>
-                        <th>Method</th>
-                        <th>URL</th>
-                        <th>Status</th>
-                        <th>Duration</th>
-                        <th>Size</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {step.network_requests.map((req: any, index: number) => (
-                        <tr key={index}>
-                          <td className="method">{req.method}</td>
-                          <td className="url" title={req.url}>{req.url}</td>
-                          <td><StatusCode status={req.status}>{req.status}</StatusCode></td>
-                          <td className="duration">{formatDuration(req.duration_ms)}</td>
-                          <td className="size">{req.size_bytes ? formatBytes(req.size_bytes) : '-'}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </NetworkTable>
+                    )}
+                    {recommendationsLoading ? (
+                      <div style={{ textAlign: 'center', padding: '60px' }}>
+                        <LoadingSpinner size={48} />
+                        <p style={{ marginTop: '16px', color: theme.colors.textSecondary }}>
+                          Analyzing failure with AI...
+                        </p>
+                      </div>
+                    ) : (
+                      <RecommendationsList>
+                        {recommendations.map((rec, idx) => (
+                          <RecommendationCard key={idx}>
+                            <div className="recommendation-icon">{rec.icon}</div>
+                            <div className="recommendation-content">
+                              <div className="recommendation-title">
+                                {rec.title}
+                                {rec.confidence && (
+                                  <span style={{
+                                    marginLeft: '12px',
+                                    fontSize: '12px',
+                                    color: theme.colors.textSecondary,
+                                    fontWeight: 'normal'
+                                  }}>
+                                    {Math.round(rec.confidence * 100)}% confidence
+                                  </span>
+                                )}
+                              </div>
+                              <div className="recommendation-text">
+                                {rec.description}
+                              </div>
+                            </div>
+                          </RecommendationCard>
+                        ))}
+                      </RecommendationsList>
+                    )}
+                  </>
                 ) : (
                   <EmptyState>
-                    <Network size={48} />
-                    <h4>No network requests captured</h4>
-                    <p>No HTTP requests were made during this step</p>
+                    <Terminal size={48} />
+                    <h4>No recommendations needed</h4>
+                    <p>This step executed successfully</p>
                   </EmptyState>
                 )}
               </div>
@@ -422,9 +642,48 @@ const StepDetailsModal: React.FC<StepDetailsModalProps> = ({ step, isOpen, onClo
                 {step.healing_attempts && step.healing_attempts.length > 0 ? (
                   step.healing_attempts.map((attempt: any, index: number) => (
                     <HealingAttemptCard key={index} success={attempt.success}>
-                      <div className="success-badge">{attempt.success ? 'Success' : 'Failed'}</div>
-                      <div className="strategy">{attempt.strategy}</div>
+                      <div className="success-badge">
+                        {attempt.success ? '✓ Success' : '✗ Failed'}
+                      </div>
+                      <div className="strategy">
+                        {attempt.strategy}
+                        {attempt.candidate_score && (
+                          <span style={{ marginLeft: '12px', fontSize: '14px', opacity: 0.8 }}>
+                            (Score: {(attempt.candidate_score * 100).toFixed(1)}%)
+                          </span>
+                        )}
+                      </div>
                       <div className="description">{attempt.description}</div>
+                      {attempt.decision_type && (
+                        <div style={{ marginTop: '8px', fontSize: '13px', opacity: 0.8 }}>
+                          Decision Type: {attempt.decision_type}
+                        </div>
+                      )}
+                      {attempt.original_selector && (
+                        <div style={{ marginTop: '12px' }}>
+                          <InfoLabel>Original Selector</InfoLabel>
+                          <LogContainer style={{ marginTop: '8px', padding: '12px', fontSize: '12px' }}>
+                            <code>{JSON.stringify(attempt.original_selector, null, 2)}</code>
+                          </LogContainer>
+                        </div>
+                      )}
+                      {attempt.healed_selector ? (
+                        <div style={{ marginTop: '12px' }}>
+                          <InfoLabel style={{ color: attempt.success ? '#1D9E75' : '#A32D2D' }}>
+                            {attempt.success ? 'Healed Selector' : 'Attempted Selector (Failed)'}
+                          </InfoLabel>
+                          <LogContainer style={{ marginTop: '8px', padding: '12px', fontSize: '12px' }}>
+                            <code>{JSON.stringify(attempt.healed_selector, null, 2)}</code>
+                          </LogContainer>
+                        </div>
+                      ) : (
+                        <div style={{ marginTop: '12px', padding: '12px', background: 'rgba(229, 62, 62, 0.1)', borderRadius: '8px' }}>
+                          <InfoLabel style={{ color: '#A32D2D', marginBottom: '4px' }}>No Candidate Found</InfoLabel>
+                          <div style={{ fontSize: '13px', color: '#666' }}>
+                            The healing system could not find a suitable replacement selector
+                          </div>
+                        </div>
+                      )}
                       <div className="timestamp">{new Date(attempt.timestamp).toLocaleString()}</div>
                     </HealingAttemptCard>
                   ))

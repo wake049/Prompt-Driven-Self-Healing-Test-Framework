@@ -1,5 +1,6 @@
 import React from 'react';
 import styled from 'styled-components';
+import { pulseOrangeKeyframes, attentionKeyframes } from '../styles/keyframes';
 import { CheckCircle, XCircle, Clock, AlertTriangle, Wrench } from 'lucide-react';
 
 interface StatusBadgeProps {
@@ -47,12 +48,12 @@ const StatusBadgeContainer = styled.span<{
   
   background: ${props => {
     switch (props.$status) {
-      case 'pass': return 'linear-gradient(135deg, #68d391, #38a169)';
-      case 'completed': return 'linear-gradient(135deg, #68d391, #38a169)';
+      case 'pass': return 'linear-gradient(135deg, #68d391, #1D9E75)';
+      case 'completed': return 'linear-gradient(135deg, #68d391, #1D9E75)';
       case 'pending_review': return 'linear-gradient(135deg, #ffd93d, #ff8c00)';
       case 'running': return 'linear-gradient(135deg, #63b3ed, #3182ce)';
-      case 'failed': return 'linear-gradient(135deg, #fc8181, #e53e3e)';
-      case 'error': return 'linear-gradient(135deg, #fc8181, #e53e3e)';
+      case 'failed': return 'linear-gradient(135deg, #d47070, #A32D2D)';
+      case 'error': return 'linear-gradient(135deg, #d47070, #A32D2D)';
       default: return 'linear-gradient(135deg, #cbd5e0, #a0aec0)';
     }
   }};
@@ -64,18 +65,8 @@ const StatusBadgeContainer = styled.span<{
   
   /* Special animation for pending_review status */
   ${props => props.$status === 'pending_review' && `
-    animation: pulse-orange 2s ease-in-out infinite;
+    animation: ${pulseOrangeKeyframes} 2s ease-in-out infinite;
     border-color: rgba(255, 255, 255, 0.4);
-    
-    @keyframes pulse-orange {
-      0%, 100% { 
-        box-shadow: 0 2px 12px rgba(255, 140, 0, 0.3); 
-      }
-      50% { 
-        box-shadow: 0 4px 20px rgba(255, 140, 0, 0.6); 
-        transform: translateY(-1px);
-      }
-    }
   `}
   
   /* Attention-grabbing effect for needs review */
@@ -85,7 +76,7 @@ const StatusBadgeContainer = styled.span<{
       position: absolute;
       top: -4px;
       right: -4px;
-      background: #e53e3e;
+      background: #A32D2D;
       color: white;
       font-size: 10px;
       font-weight: 900;
@@ -95,12 +86,7 @@ const StatusBadgeContainer = styled.span<{
       display: flex;
       align-items: center;
       justify-content: center;
-      animation: attention 1.5s ease-in-out infinite;
-    }
-    
-    @keyframes attention {
-      0%, 100% { transform: scale(1); }
-      50% { transform: scale(1.2); }
+      animation: ${attentionKeyframes} 1.5s ease-in-out infinite;
     }
   `}
   

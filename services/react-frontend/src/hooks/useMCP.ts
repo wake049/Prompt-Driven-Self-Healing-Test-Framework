@@ -61,8 +61,11 @@ export function useMCPConnection() {
   }, [isConnected, isConnecting, connect]);
 
   useEffect(() => {
-    // Initialize connection on mount
-    connect();
+    // Lazy by default: no automatic MCP connection attempts.
+    const autoConnect = false;
+    if (autoConnect) {
+      connect();
+    }
 
     // Set up connection listener if client exists
     const currentClient = MCPFrontendManager.getCurrentInstance();

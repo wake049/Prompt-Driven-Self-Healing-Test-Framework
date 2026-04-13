@@ -5,7 +5,6 @@ import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpPut;
 import org.apache.http.entity.StringEntity;
 import org.apache.http.impl.client.CloseableHttpClient;
-import org.apache.http.impl.client.HttpClients;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -13,7 +12,7 @@ import java.util.Map;
 public class TestSelfHealing {
     private static final String SQL_BACKEND_URL = System.getenv("UNIFIED_API_URL") != null ? 
         System.getenv("UNIFIED_API_URL") : 
-        "https://testhelix.com";
+        "https://fluxtest.io";
     private static final ObjectMapper objectMapper = new ObjectMapper();
 
     public static void main(String[] args) {
@@ -47,7 +46,7 @@ public class TestSelfHealing {
         Map<String, Object> updateData = new HashMap<>();
         updateData.put("css_selector", "#BROKEN-LOCATOR-FOR-TESTING");
         
-        try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
+        try (CloseableHttpClient httpClient = HttpClientFactory.create()) {
             HttpPut httpPut = new HttpPut(SQL_BACKEND_URL + "/api/elements/" + elementId);
             httpPut.setHeader("Content-Type", "application/json");
             

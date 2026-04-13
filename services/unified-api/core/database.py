@@ -12,6 +12,18 @@ from contextlib import asynccontextmanager
 
 logger = logging.getLogger(__name__)
 
+
+def _resolve_db_password() -> str:
+    db_password = os.getenv("DB_PASSWORD")
+
+    if db_password:
+        return db_password
+
+    raise RuntimeError(
+        "DB_PASSWORD environment variable must be set. "
+        "For local development, add it to your .env file."
+    )
+
 class DatabaseManager:
     """Unified database connection manager"""
     def __init__(self):
@@ -21,19 +33,19 @@ class DatabaseManager:
             "port": int(os.getenv("DB_PORT", "5432")),
             "database": os.getenv("DB_NAME", "testframework_db"),
             "user": os.getenv("DB_USER", "testframework"),
-            "password": os.getenv("DB_PASSWORD", "securepassword"),
+            "password": _resolve_db_password(),
             "min_size": int(os.getenv("DB_POOL_MIN", "2")),  # Reduced from 5
             "max_size": int(os.getenv("DB_POOL_MAX", "10")), # Reduced from 20
             "command_timeout": int(os.getenv("DB_TIMEOUT", "60"))
         }
         
-        # Debug logging to see what configuration is being used
+        # Debug logging to see what configuration is being used (redact sensitive fields)
         logger.info(f"Database configuration:")
         logger.info(f"  Host: {self._connection_config['host']}")
         logger.info(f"  Port: {self._connection_config['port']}")
         logger.info(f"  Database: {self._connection_config['database']}")
-        logger.info(f"  User: {self._connection_config['user']}")
-        logger.info(f"  Password: {'*' * len(str(self._connection_config['password']))}")
+        logger.info(f"  User: ***")
+        logger.info(f"  Password: ***")
     
     async def initialize(self) -> None:
         """Initialize database connection pool"""
@@ -41,12 +53,17 @@ class DatabaseManager:
             # AWS RDS requires SSL connections
             ssl_context = None
             if self._connection_config["host"] != "localhost":
-                # Use SSL for remote connections (like AWS RDS)
                 import ssl
-                ssl_context = ssl.create_default_context()
-                ssl_context.check_hostname = False
-                ssl_context.verify_mode = ssl.CERT_NONE
-                logger.info("Using SSL connection for remote database")
+                rds_ca_path = os.getenv("RDS_CA_BUNDLE_PATH")
+                if rds_ca_path:
+                    ssl_context = ssl.create_default_context()
+                    ssl_context.load_verify_locations(rds_ca_path)
+                    logger.info("Using SSL connection with CA bundle verification")
+                else:
+                    ssl_context = ssl.create_default_context()
+                    ssl_context.check_hostname = False
+                    ssl_context.verify_mode = ssl.CERT_NONE
+                    logger.info("Using SSL connection without cert verification")
             
             self.pool = await asyncpg.create_pool(
                 host=self._connection_config["host"],
@@ -163,24 +180,26 @@ class DatabaseManager:
 
 # Global database manager instance
 _db_manager: Optional[DatabaseManager] = None
+_db_lock = asyncio.Lock()
 
 async def get_database_manager() -> DatabaseManager:
     """Get the global database manager instance"""
     global _db_manager
     
-    if _db_manager is None or _db_manager.pool is None:
-        _db_manager = DatabaseManager()
-        await _db_manager.initialize()
-    else:
-        # Test if the pool is still working
-        try:
-            async with _db_manager.pool.acquire() as conn:
-                await conn.execute("SELECT 1")
-        except Exception as e:
-            logger.warning(f"Database pool error: {e}, reinitializing...")
-            await _db_manager.close()  # Close the old pool first
+    async with _db_lock:
+        if _db_manager is None or _db_manager.pool is None:
             _db_manager = DatabaseManager()
             await _db_manager.initialize()
+        else:
+            # Test if the pool is still working
+            try:
+                async with _db_manager.pool.acquire() as conn:
+                    await conn.execute("SELECT 1")
+            except Exception as e:
+                logger.warning(f"Database pool error: {e}, reinitializing...")
+                await _db_manager.close()  # Close the old pool first
+                _db_manager = DatabaseManager()
+                await _db_manager.initialize()
             
     return _db_manager
 

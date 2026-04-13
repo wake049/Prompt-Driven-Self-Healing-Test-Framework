@@ -13,22 +13,22 @@ export default defineConfig({
         secure: false
       },
       '/api': {
-        target: 'https://testhelix.com',
+        target: 'https://fluxtest.io',
         changeOrigin: true,
         secure: false
       },
       '/plan': {
-        target: 'https://testhelix.com',
+        target: 'https://fluxtest.io',
         changeOrigin: true,
         secure: false
       },
       '/catalog': {
-        target: 'https://testhelix.com',
+        target: 'https://fluxtest.io',
         changeOrigin: true,
         secure: false
       },
       '/health': {
-        target: 'https://testhelix.com',
+        target: 'https://fluxtest.io',
         changeOrigin: true,
         secure: false
       }

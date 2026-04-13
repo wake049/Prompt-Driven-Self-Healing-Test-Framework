@@ -1,0 +1,201 @@
+name: phase2-quality-gates
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  # -----------------------------------------------------------
+  # Job 1: Offline checks (no Docker, fast)
+  # -----------------------------------------------------------
+  offline-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install jsonschema
+
+      - name: Migration offline syntax checks
+        run: |
+          python tests/test_migrations.py --offline
+
+      - name: Contract schema validation (golden examples)
+        run: |
+          python tests/test_contracts.py --offline
+
+  # -----------------------------------------------------------
+  # Job 2: Online integration (boots full stack)
+  # -----------------------------------------------------------
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: offline-checks
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests websockets jsonschema psycopg2-binary
+
+      - name: Start local stack
+        run: |
+          docker compose -f docker-compose.local.yml up -d --build
+
+      - name: Wait for PostgreSQL
+        run: |
+          for i in {1..30}; do
+            if pg_isready -h localhost -p 5432 -U local_user -d promptqa_local 2>/dev/null; then
+              echo "PostgreSQL is ready"
+              exit 0
+            fi
+            echo "Waiting for PostgreSQL... ($i/30)"
+            sleep 5
+          done
+          echo "PostgreSQL failed to become ready"
+          exit 1
+
+      - name: Wait for unified API health
+        run: |
+          for i in {1..60}; do
+            if curl -fsS http://localhost:8000/health > /dev/null; then
+              echo "Unified API is healthy"
+              exit 0
+            fi
+            echo "Waiting for unified API... ($i/60)"
+            sleep 5
+          done
+          echo "Unified API failed to become healthy"
+          docker compose -f docker-compose.local.yml logs unified-api --tail=100
+          exit 1
+
+      - name: Wait for MCP server health
+        run: |
+          for i in {1..60}; do
+            if curl -fsS http://localhost:8001/mcp/health > /dev/null; then
+              echo "MCP server is healthy"
+              exit 0
+            fi
+            echo "Waiting for MCP server... ($i/60)"
+            sleep 5
+          done
+          echo "MCP server failed to become healthy"
+          docker compose -f docker-compose.local.yml logs mcp-server --tail=100
+          exit 1
+
+      # --- Phase 1 smoke (must still pass) ---
+      - name: Run Phase 1 smoke test
+        env:
+          SMOKE_BASE_URL: http://localhost:8000
+          SMOKE_MCP_URL: ws://localhost:8001/mcp/ws
+        run: |
+          python tests/smoke_release_phase1.py
+
+      # --- Phase 2: DB migration validation ---
+      - name: Validate database migrations (online)
+        run: |
+          python tests/test_migrations.py \
+            --db-url "postgresql://local_user:local_pass@localhost:5432/promptqa_local"
+
+      # --- Phase 2: Contract tests (online) ---
+      - name: Run contract validation tests
+        env:
+          CONTRACT_BASE_URL: http://localhost:8000
+          CONTRACT_MCP_URL: ws://localhost:8001/mcp/ws
+          CONTRACT_RUNNER_URL: http://localhost:8080
+        run: |
+          python tests/test_contracts.py \
+            --base-url "$CONTRACT_BASE_URL" \
+            --mcp-url "$CONTRACT_MCP_URL" \
+            --runner-url "$CONTRACT_RUNNER_URL"
+
+      # --- Phase 2: Integration tests ---
+      - name: Run integration tests
+        run: |
+          python tests/test_phase2_integration.py \
+            --base-url http://localhost:8000 \
+            --runner-url http://localhost:8080
+
+      # --- Artifact upload ---
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-test-reports
+          path: tests/phase2_integration_report.json
+          retention-days: 30
+
+      - name: Dump logs on failure
+        if: failure()
+        run: |
+          docker compose -f docker-compose.local.yml logs --tail=500
+
+      - name: Tear down stack
+        if: always()
+        run: |
+          docker compose -f docker-compose.local.yml down -v
+
+  # -----------------------------------------------------------
+  # Job 3: Docker build reproducibility
+  # -----------------------------------------------------------
+  build-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: offline-checks
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify docker-compose.local.yml builds
+        run: |
+          docker compose -f docker-compose.local.yml build --no-cache 2>&1 | tail -30
+          echo "Local build: OK"
+
+      - name: Verify docker-compose.yml builds
+        run: |
+          docker compose -f docker-compose.yml build --no-cache 2>&1 | tail -30
+          echo "Production build: OK"
+
+      - name: Verify docker-compose.selfhost.yml builds
+        run: |
+          docker compose -f docker-compose.selfhost.yml build --no-cache 2>&1 | tail -30
+          echo "Selfhost build: OK"
+
+      - name: Verify all Dockerfiles present
+        run: |
+          echo "Checking service Dockerfiles..."
+          for svc in unified-api mcp-server java-runner react-frontend; do
+            if [ -f "services/$svc/Dockerfile" ]; then
+              echo "  ✅ services/$svc/Dockerfile"
+            else
+              echo "  ❌ services/$svc/Dockerfile missing"
+              exit 1
+            fi
+          done
+
+      - name: Tear down any started containers
+        if: always()
+        run: |
+          docker compose -f docker-compose.local.yml down -v 2>/dev/null || true
+          docker compose -f docker-compose.yml down -v 2>/dev/null || true
+          docker compose -f docker-compose.selfhost.yml down -v 2>/dev/null || true

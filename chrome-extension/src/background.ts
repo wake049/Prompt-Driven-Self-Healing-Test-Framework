@@ -27,7 +27,7 @@ class MCPClient {
   private serverUrl: string;
   private authToken: string;
 
-  constructor(serverUrl: string = "wss://mcp.testhelix.com/mcp/ws", authToken: string = "devtoken") {
+  constructor(serverUrl: string = "wss://mcp.fluxtest.io/mcp/ws", authToken: string = "") {
     this.serverUrl = serverUrl;
     this.authToken = authToken;
   }

@@ -3,7 +3,8 @@ import styled from 'styled-components';
 import { useParams, useNavigate } from 'react-router-dom';
 import { CheckCircle, XCircle, ArrowLeft, Clock, Calendar } from 'lucide-react';
 import { useTheme } from '../../../contexts/ThemeContext';
-import { executionApiService } from '../../../services/executionApiService';
+import { config } from '../../../app/config';
+import { executionApiService } from '../api';
 import StepDetailsModal from '../../../shared/ui/StepDetailsModal';
 interface ExecutionStep {
   step_number: number;
@@ -23,6 +24,8 @@ interface ExecutionDetails {
   execution_date: string;
   duration_ms: number;
   status: 'PASS' | 'FAIL';
+  runner_name?: string;
+  dispatch_mode?: string;
   steps: ExecutionStep[];
 }
 const Container = styled.div`
@@ -242,28 +245,97 @@ const RunDetails: React.FC = () => {
       }
       try {
         setLoading(true);
-        const response = await executionApiService.getExecutionDetails(executionId);
+        console.log('Fetching execution steps for:', executionId);
+        const response = await executionApiService.getExecutionSteps(executionId);
+        console.log('API Response:', response);
         
-        // Transform response to match ExecutionDetails interface
-        const executionDetails: ExecutionDetails = {
-          execution_id: response.execution.id || executionId,
-          test_case_id: response.execution.test_case_id || '',
-          prompt_description: response.execution.test_case_id || 'Test execution details',
-          execution_date: response.execution.started_at || new Date().toISOString(),
-          duration_ms: (response.execution.duration_seconds || 0) * 1000,
-          status: response.execution.status === 'completed' ? 'PASS' : (response.execution.status === 'failed' ? 'FAIL' : 'PASS'),
-          steps: response.steps.map((step: any, index: number) => ({
-            step_number: step.step_order || index + 1,
-            step_description: `${step.action} ${step.target}`,
+        // Transform the response from /steps endpoint
+        if (!response || !response.execution) {
+          throw new Error('Invalid response format from API');
+        }
+        
+        // Map the steps data to the expected format with all available fields
+        const steps: ExecutionStep[] = response.steps.map((step, index) => {
+          const actionText = step.action || 'unknown';
+          const targetText = step.target ? ` on ${step.target}` : '';
+          const descText = step.description ? ` - ${step.description}` : '';
+          
+          // Build screenshot URL if path exists
+          // Handle both local paths (screenshots/xyz.png) and full URLs (https://s3...)
+          let screenshotUrl: string | undefined;
+          if (step.screenshot_path) {
+            console.log('Raw screenshot_path:', step.screenshot_path);
+            
+            if (step.screenshot_path.startsWith('http://') || step.screenshot_path.startsWith('https://')) {
+              // Already a full URL (cloud storage)
+              screenshotUrl = step.screenshot_path;
+            } else {
+              // Local file path - normalize and construct URL through API
+              const cleanPath = step.screenshot_path.replace(/\\/g, '/');
+              
+              // Remove 'screenshots/' prefix if it exists (path might be "screenshots/file.png" or just "file.png")
+              const filename = cleanPath.replace(/^screenshots\//, '');
+              
+              screenshotUrl = `${config.apiBaseUrl}/screenshots/${filename}`;
+              console.log('Constructed screenshot URL:', screenshotUrl);
+            }
+          }
+          
+          // Map healing attempts - include ALL attempts (successful and failed)
+          const healingAttempts = step.healing_attempts?.map((h: any) => {
+            const strategy = h.event_type === 'element_not_found' ? 'Selector Healing' : 
+                           h.event_type === 'stale_element' ? 'Stale Element Recovery' : 
+                           h.event_type || 'Healing Attempt';
+            
+            const description = h.rationale || 
+                              h.failure_reason || 
+                              (h.success ? 'Locator was successfully healed' : 'Healing attempt failed');
+            
+            return {
+              timestamp: h.timestamp || step.created_at,
+              strategy: strategy,
+              description: description,
+              success: h.success === true,
+              original_selector: h.original_selector,
+              healed_selector: h.healed_selector,
+              decision_type: h.decision_type,
+              candidate_score: h.candidate_score
+            };
+          }) || [];
+          
+          return {
+            step_number: step.step_order,
+            step_description: `${actionText}${targetText}${descText}`,
             result: step.status === 'passed' ? 'PASS' : 'FAIL',
             details: step.error_message || undefined,
-            duration_ms: undefined // API doesn't provide this yet
-          }))
+            duration_ms: undefined,
+            screenshot: screenshotUrl,
+            console_logs: undefined,
+            network_requests: undefined,
+            healing_attempts: healingAttempts,
+            step_id: step.id,
+            action: step.action,
+            locator: step.selector || step.target,
+            error: step.error_message
+          };
+        });
+        
+        // Build ExecutionDetails from the response
+        const executionDetails: ExecutionDetails = {
+          execution_id: response.execution.id,
+          test_case_id: response.execution.test_case_id,
+          prompt_description: response.execution.test_description || response.execution.test_name || 'Test execution',
+          execution_date: response.execution.started_at,
+          duration_ms: response.execution.duration_seconds * 1000,
+          status: response.summary.failed_steps > 0 ? 'FAIL' : 'PASS',
+          steps: steps
         };
         
+        console.log('Transformed executionDetails:', executionDetails);
         setExecutionDetails(executionDetails);
       } catch (err) {
-        setError('Failed to load execution details');
+        console.error('Error fetching execution details:', err);
+        setError(`Failed to load execution details: ${err instanceof Error ? err.message : 'Unknown error'}`);
       } finally {
         setLoading(false);
       }
@@ -337,6 +409,12 @@ const RunDetails: React.FC = () => {
               {executionDetails.status}
             </DetailValue>
           </DetailItem>
+          {executionDetails.dispatch_mode === 'agent' && (
+            <DetailItem>
+              <DetailLabel>Runner</DetailLabel>
+              <DetailValue>{executionDetails.runner_name || 'Unassigned'}</DetailValue>
+            </DetailItem>
+          )}
         </DetailsGrid>
         <PromptDescription>
           <DetailLabel style={{ marginBottom: '8px', display: 'block' }}>

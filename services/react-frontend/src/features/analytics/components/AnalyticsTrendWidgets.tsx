@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import styled from 'styled-components';
 import { useTheme } from '../../../contexts/ThemeContext';
-import { MCPFrontendManager } from '../../../services/mcpFrontendClient';
+import { config } from '../../../app/config';
 import SimpleLineChart from '../../../components/charts/SimpleLineChart';
 import { 
   TrendingUp, 
@@ -60,8 +60,6 @@ const Container = styled.div<{ theme: any }>`
   padding: 32px;
   background: ${props => props.theme.colors.background};
   min-height: 100vh;
-  max-width: 1600px;
-  margin: 0 auto;
   
   @media (max-width: 768px) {
     padding: 20px;
@@ -87,7 +85,7 @@ const Title = styled.h1<{ theme: any }>`
   font-size: 2.2rem;
   font-weight: 700;
   margin: 0;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #185FA5;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -104,17 +102,17 @@ const ControlButton = styled.button<{ theme: any; $active?: boolean }>`
   align-items: center;
   gap: 8px;
   padding: 10px 16px;
-  border: 1px solid ${props => props.$active ? '#667eea' : props.theme.colors.border};
+  border: 1px solid ${props => props.$active ? '#185FA5' : props.theme.colors.border};
   border-radius: 8px;
   background: ${props => props.$active ? 'rgba(102, 126, 234, 0.1)' : props.theme.colors.surface};
-  color: ${props => props.$active ? '#667eea' : props.theme.colors.text};
+  color: ${props => props.$active ? '#185FA5' : props.theme.colors.text};
   cursor: pointer;
   transition: all 0.3s ease;
   font-size: 14px;
   font-weight: 500;
   
   &:hover {
-    border-color: #667eea;
+    border-color: #185FA5;
     background: rgba(102, 126, 234, 0.05);
   }
 `;
@@ -229,7 +227,7 @@ const TrendIndicator = styled.div<{ $trend: string; theme: any }>`
     switch (props.$trend) {
       case 'up': return '#2f855a';
       case 'down': return '#c53030';
-      default: return '#667eea';
+      default: return '#185FA5';
     }
   }};
 `;
@@ -333,7 +331,7 @@ const InsightIcon = styled.div<{ $severity?: string }>`
     switch (props.$severity) {
       case 'critical': return '#c53030';
       case 'high': return '#dd6b20';
-      case 'medium': return '#667eea';
+      case 'medium': return '#185FA5';
       default: return '#68d391';
     }
   }};
@@ -455,27 +453,48 @@ const AnalyticsTrendWidgets: React.FC = () => {
   const refreshData = async () => {
     setLoading(true);
     setError(null);
-    
+
     try {
-      // Fetch real analytics trend data and failure patterns from MCP server
-      const mcpClient = await MCPFrontendManager.getInstance();
-      const [trendsData, failuresData] = await Promise.all([
-        mcpClient.getAnalyticsTrends(timeRange),
-        mcpClient.getFailurePatterns(timeRange)
-      ]);
-      
-      if (trendsData.success && trendsData.performance_trends) {
-        setPerformanceTrends(trendsData.performance_trends);
-      } else {
-        setPerformanceTrends([]);
-      }
-      
-      if (failuresData.success && failuresData.failure_patterns) {
-        setFailurePatterns(failuresData.failure_patterns);
-      } else {
-        setFailurePatterns([]);
-      }
-      
+      const token = localStorage.getItem(config.authTokenKey);
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      const response = await fetch(
+        `${config.apiBaseUrl}/api/analytics/trends?timeRange=${encodeURIComponent(timeRange)}`,
+        { headers }
+      );
+
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+      const data = await response.json();
+
+      // Normalize REST response to PerformanceTrend interface
+      const rawTrends: any[] = Array.isArray(data.performance_trends) ? data.performance_trends : [];
+      const temporalData: any[] = Array.isArray(data.temporal_data) ? data.temporal_data : [];
+
+      const normalized: PerformanceTrend[] = rawTrends.map((t: any) => ({
+        metric_name: t.metric_name ?? t.metric ?? 'Metric',
+        data_points: temporalData.map((pt: any) => ({
+          timestamp: pt.timestamp,
+          value: t.metric_name === 'Success Rate' || t.metric === 'Success Rate'
+            ? (pt.success_rate ?? 0)
+            : t.metric_name === 'Avg Execution Time' || t.metric === 'Avg Execution Time'
+              ? (pt.avg_duration ?? 0)
+              : (pt.total_runs ?? 0),
+        })),
+        analysis: {
+          trend: (t.trend === 'up' ? 'up' : t.trend === 'down' ? 'down' : 'stable') as 'up' | 'down' | 'stable',
+          percentage_change: t.change ?? 0,
+          significance: 'medium' as const,
+          insights: [],
+        },
+        threshold_breaches: 0,
+        recommendations: [],
+      }));
+
+      setPerformanceTrends(normalized);
+      setFailurePatterns([]);
+
     } catch (err) {
       setError('Failed to load analytics data');
       setPerformanceTrends([]);
@@ -525,11 +544,12 @@ const AnalyticsTrendWidgets: React.FC = () => {
     }
   };
 
-  const formatTrendValue = (value: number, metricName: string) => {
-    if (metricName.includes('Rate') || metricName.includes('Percentage')) {
+  const formatTrendValue = (value: number, metricName: string | undefined) => {
+    const name = metricName ?? '';
+    if (name.includes('Rate') || name.includes('Percentage')) {
       return `${value.toFixed(1)}%`;
     }
-    if (metricName.includes('Time')) {
+    if (name.includes('Time')) {
       return `${value.toFixed(0)}ms`;
     }
     return value.toFixed(1);
@@ -676,7 +696,7 @@ const AnalyticsTrendWidgets: React.FC = () => {
                   <SimpleLineChart
                     data={trend.data_points || []}
                     height={200}
-                    color="#667eea"
+                    color="#185FA5"
                     title={`${trend.metric_name} Trend`}
                   />
                 )}
@@ -765,7 +785,7 @@ const AnalyticsTrendWidgets: React.FC = () => {
                           fontSize: '12px', 
                           fontWeight: '600',
                           background: pattern.severity === 'high' ? 'rgba(237, 137, 54, 0.1)' : 'rgba(102, 126, 234, 0.1)',
-                          color: pattern.severity === 'high' ? '#dd6b20' : '#667eea'
+                          color: pattern.severity === 'high' ? '#dd6b20' : '#185FA5'
                         }}>
                           {pattern.severity.toUpperCase()} SEVERITY
                         </span>
@@ -775,7 +795,7 @@ const AnalyticsTrendWidgets: React.FC = () => {
                     <SimpleLineChart
                       data={pattern.trend || []}
                       height={120}
-                      color={pattern.severity === 'high' ? '#dd6b20' : '#667eea'}
+                      color={pattern.severity === 'high' ? '#dd6b20' : '#185FA5'}
                       title={`${pattern.error_type} Trend`}
                     />
                   </div>
@@ -801,11 +821,11 @@ const AnalyticsTrendWidgets: React.FC = () => {
           <WidgetContent>
             <MetricGrid>
               <MetricCard theme={theme}>
-                <MetricValue theme={theme} style={{ color: '#48bb78' }}>92.5</MetricValue>
+                <MetricValue theme={theme} style={{ color: '#1D9E75' }}>92.5</MetricValue>
                 <MetricLabel theme={theme}>Health Score</MetricLabel>
               </MetricCard>
               <MetricCard theme={theme}>
-                <MetricValue theme={theme} style={{ color: '#667eea' }}>+2.3</MetricValue>
+                <MetricValue theme={theme} style={{ color: '#185FA5' }}>+2.3</MetricValue>
                 <MetricLabel theme={theme}>Improvement</MetricLabel>
               </MetricCard>
             </MetricGrid>
@@ -824,7 +844,7 @@ const AnalyticsTrendWidgets: React.FC = () => {
                   { timestamp: '2025-11-03T14:00:00Z', value: 92.5, label: 'Current' }
                 ]}
                 height={150}
-                color="#48bb78"
+                color="#1D9E75"
                 title="Health Score Trend"
               />
             </div>

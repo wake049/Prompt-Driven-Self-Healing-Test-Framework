@@ -12,7 +12,8 @@ import json
 import os
 from datetime import datetime
 from core.database import get_database
-from core.auth import get_current_active_user
+from core.auth import get_current_active_user, get_optional_current_user
+from models.auth_models import CurrentUser
 from models.auth_models import CurrentUser
 
 router = APIRouter()
@@ -346,7 +347,8 @@ async def get_review_queue(
     sort_by: str = "created_at", 
     sort_order: str = "desc",
     limit: int = 20,
-    offset: int = 0
+    offset: int = 0,
+    current_user: Optional[CurrentUser] = Depends(get_optional_current_user),
 ):
     """
     Get review queue items with filtering, sorting and pagination
@@ -367,49 +369,72 @@ async def get_review_queue(
             # Get review items with filtering
             query = f"""
             SELECT 
-                id,
-                project_id,
-                element_id,
-                status,
-                suggestion,
-                rationale,
-                created_at
-            FROM healing.review_items
-            WHERE status = $1
+                ri.id,
+                ri.project_id,
+                ri.element_id,
+                ri.status,
+                ri.suggestion,
+                ri.rationale,
+                ri.created_at
+            FROM healing.review_items ri
+            LEFT JOIN core.projects p ON ri.project_id = p.id
+            WHERE ri.status = $1
             ORDER BY {sort_by} {sort_order}
             LIMIT $2 OFFSET $3
             """
-            
-            items = await db.execute(query, status, limit, offset)
-            
+
+            count_query = """
+            SELECT COUNT(*) as total
+            FROM healing.review_items ri
+            LEFT JOIN core.projects p ON ri.project_id = p.id
+            WHERE ri.status = $1
+            """
+
+            params = [status, limit, offset]
+            count_params = [status]
+
+            tenant_id = None
+            if current_user and current_user.tenant and current_user.tenant.id:
+                tenant_id = str(current_user.tenant.id)
+
+            if tenant_id:
+                query = query.replace("ORDER BY", "AND p.tenant_id = $4 ORDER BY")
+                count_query += " AND p.tenant_id = $2"
+                params.append(tenant_id)
+                count_params.append(tenant_id)
+
+            items = await db.fetch(query, *params)
+
             # Get total count for pagination
-            count_query = "SELECT COUNT(*) as total FROM healing.review_items WHERE status = $1"
-            total_result = await db.execute_one(count_query, status)
+            total_result = await db.execute_one(count_query, *count_params)
             total = total_result["total"] if total_result else 0
             
-        except Exception as e:items = []
-        total = 0
+        except Exception:
+            items = []
+            total = 0
         
         # Format items for response
         formatted_items = []
         for item in items:
+            row = dict(item) if not isinstance(item, dict) else item
             # Handle suggestion field which might be a JSON string or already parsed
-            suggestion = item["suggestion"] if item["suggestion"] else {}
+            suggestion = row.get("suggestion") if row.get("suggestion") else {}
             if isinstance(suggestion, str):
                 try:
                     suggestion = json.loads(suggestion)
-                except json.JSONDecodeError:suggestion = {}
+                except json.JSONDecodeError:
+                    suggestion = {}
             elif suggestion is None:
                 suggestion = {}
             
             formatted_items.append({
-                "id": str(item["id"]),
-                "project_id": str(item["project_id"]) if item["project_id"] else None,
-                "element_id": str(item["element_id"]) if item["element_id"] else None,
-                "status": item["status"],
+                "id": str(row.get("id")),
+                "project_id": str(row.get("project_id")) if row.get("project_id") else None,
+                "element_id": str(row.get("element_id")) if row.get("element_id") else None,
+                "status": row.get("status"),
                 "suggestion": suggestion,
-                "rationale": item["rationale"],
-                "created_at": item["created_at"].isoformat(),
+                "rationale": row.get("rationale"),
+                "created_at": row.get("created_at").isoformat() if row.get("created_at") else None,
                 # Additional fields for compatibility
                 "elementId": suggestion.get("elementId") if isinstance(suggestion, dict) else None,
                 "page": suggestion.get("page") if isinstance(suggestion, dict) else None,
@@ -430,13 +455,15 @@ async def get_review_queue(
         raise HTTPException(status_code=500, detail=f"Failed to get review queue: {str(e)}")
 
 @router.get("/review/pending") 
-async def get_pending_reviews():
+async def get_pending_reviews(
+    current_user: Optional[CurrentUser] = Depends(get_optional_current_user),
+):
     """
     Get pending review items (compatibility endpoint)
     """
     try:
         # Delegate to main review queue endpoint
-        result = await get_review_queue(status="open", limit=100)
+        result = await get_review_queue(status="open", limit=100, current_user=current_user)
         return result["items"]  # Return just the items array for compatibility
         
     except Exception as e:

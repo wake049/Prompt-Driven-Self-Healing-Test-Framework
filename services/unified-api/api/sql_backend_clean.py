@@ -4,11 +4,12 @@ Migrated from Node.js Express to FastAPI
 Handles database operations for test sessions, elements, and review queue
 """
 
-from fastapi import APIRouter, HTTPException, Query, Body, Depends
+from fastapi import APIRouter, HTTPException, Query, Body, Depends, Header
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 import json
+import logging
 
 from core.auth import get_current_active_user
 from core.analytics_cache import cache_analytics_response, analytics_cache, get_cache_performance_report
@@ -16,6 +17,7 @@ from core.ai_insights import get_ai_insights
 from models.auth_models import CurrentUser
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 # SQL Backend Models
 class ElementData(BaseModel):
@@ -68,39 +70,190 @@ class HealingSubmission(BaseModel):
     healing_attempts: List[HealingAttempt]
 
 @router.post("/record-element")
-async def record_element(element_data: ElementData, session_info: Optional[SessionInfo] = None):
+async def record_element(
+    element_data: ElementData, 
+    session_info: Optional[SessionInfo] = None,
+    project_id: Optional[str] = Header(None, alias="X-Project-ID"),
+    current_user: Optional[CurrentUser] = Depends(lambda: None)  # Make auth optional
+):
     """
     Record element data from Chrome Extension
     """
     try:
         from core.database import get_database
-        db = await get_database()# First, ensure the page exists in repo.pages
+        db = await get_database()
+
+        logger.debug("Received record-element request")
+        
+        # Try to get authenticated user's project first
+        target_project_id = None
+        if current_user and current_user.project and current_user.project.id:
+            target_project_id = current_user.project.id
+            logger.debug("Using authenticated user project_id=%s", target_project_id)
+        elif project_id:
+            # Use project_id from header if provided
+            target_project_id = project_id
+            logger.debug("Using project_id from header")
+        else:
+            # Fallback to first available project
+            project_result = await db.fetchrow("SELECT id, name FROM core.projects ORDER BY created_at LIMIT 1")
+            if project_result:
+                target_project_id = project_result["id"]
+                logger.debug("Using fallback project_id=%s", target_project_id)
+            else:
+                raise HTTPException(status_code=400, detail="No project available for element recording")
+        
+        # First, ensure the page exists in repo.pages
+        logger.debug("Ensuring page exists for page=%s", element_data.page)
         page_result = await db.fetchrow(
             """
             INSERT INTO repo.pages (project_id, name, route_hint, tags)
-            VALUES (
-                (SELECT id FROM core.projects LIMIT 1),  -- Use first project for now
-                $1, $2, $3
-            )
+            VALUES ($1, $2, $3, $4::jsonb)
             ON CONFLICT (project_id, name) DO UPDATE SET updated_at = NOW()
             RETURNING id
             """,
+            target_project_id,
             element_data.page,
             element_data.page,  # Use page name as route hint
-            []  # Empty tags array for now
+            json.dumps([])  # Empty tags array as JSON string
         )
         
         page_id = page_result["id"]
         
-        # Clean selectors
-        css_selector = clean_extension_artifacts(element_data.cssSelector or element_data.css_selector)
+        # Generate HIGH-QUALITY selectors instead of using raw extension data
+        tag = element_data.tag.lower()
+        attributes = element_data.attributes
+        text = (element_data.text_content or element_data.text or "").strip()
+        
+        # Helper to check if an ID is auto-generated/unstable
+        def is_stable_id(id_value: str) -> bool:
+            if not id_value or len(id_value) < 3:
+                return False
+            # Reject IDs with many numbers (like APjFqb, tabs-068045)
+            if sum(c.isdigit() for c in id_value) > len(id_value) * 0.4:
+                return False
+            # Reject single-letter or very short IDs
+            if len(id_value) <= 2:
+                return False
+            # Reject common React/Vue patterns
+            if id_value.startswith('__') or ('-' in id_value and any(c.isdigit() for c in id_value)):
+                return False
+            return True
+        
+        # Generate element_key (semantic name)
+        element_key = None
+        
+        # Priority for element_key: stable attributes first
+        if attributes.get("data-testid"):
+            element_key = attributes["data-testid"].replace('-', '_').replace(' ', '_')
+        elif attributes.get("name") and len(attributes["name"]) > 2:
+            element_key = attributes["name"].replace('-', '_').replace(' ', '_')
+        elif attributes.get("id") and is_stable_id(attributes["id"]):
+            element_key = attributes["id"].replace('-', '_').replace(' ', '_')
+        elif attributes.get("title") and len(attributes["title"]) > 2:
+            # Clean title for use as key
+            clean_title = "".join(c if c.isalnum() else '_' for c in attributes["title"])
+            element_key = clean_title[:30]  # Limit length
+        elif text and len(text) > 2 and len(text) < 30:
+            # Use text content for buttons/links
+            clean_text = "".join(c if c.isalnum() else '_' for c in text)
+            element_key = clean_text[:30]
+        else:
+            # Fallback to element_data id or generate one
+            element_key = element_data.id or element_data.element_id or f"element_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        
+        # Clean up element_key
+        element_key = element_key.strip('_').lower()
+        if not element_key:
+            element_key = f"element_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        
+        # Generate CSS selector based on priority (most stable first)
+        css_selector = ""
+        
+        # Priority 1: Stable data attributes
+        if attributes.get("data-testid"):
+            css_selector = f"[data-testid='{attributes['data-testid']}']"
+        elif attributes.get("data-test"):
+            css_selector = f"[data-test='{attributes['data-test']}']"
+        elif attributes.get("data-cy"):
+            css_selector = f"[data-cy='{attributes['data-cy']}']"
+        
+        # Priority 2: Semantic attributes (title, aria-label, name)
+        elif attributes.get("title") and len(attributes["title"]) > 2:
+            title = attributes["title"].replace("'", "\\'")
+            css_selector = f"{tag}[title='{title}']"
+        elif attributes.get("aria-label") and len(attributes["aria-label"]) > 2:
+            aria_label = attributes["aria-label"].replace("'", "\\'")
+            css_selector = f"{tag}[aria-label='{aria_label}']"
+        elif attributes.get("name") and len(attributes["name"]) > 2:
+            css_selector = f"{tag}[name='{attributes['name']}']"
+        elif attributes.get("placeholder") and len(attributes["placeholder"]) > 2:
+            placeholder = attributes["placeholder"].replace("'", "\\'")
+            css_selector = f"{tag}[placeholder='{placeholder}']"
+        
+        # Priority 3: Stable ID (only if it passes quality check)
+        elif attributes.get("id") and is_stable_id(attributes["id"]):
+            css_selector = f"#{attributes['id']}"
+        
+        # Priority 4: Role + aria attributes
+        elif attributes.get("role"):
+            if attributes.get("aria-label"):
+                aria_label = attributes["aria-label"].replace("'", "\\'")
+                css_selector = f"{tag}[role='{attributes['role']}'][aria-label='{aria_label}']"
+            else:
+                css_selector = f"{tag}[role='{attributes['role']}']"
+        
+        # Priority 5: Type attribute for inputs
+        elif tag == "input" and attributes.get("type"):
+            input_type = attributes["type"]
+            if attributes.get("id") and is_stable_id(attributes["id"]):
+                css_selector = f"input[type='{input_type}']#{attributes['id']}"
+            else:
+                css_selector = f"input[type='{input_type}']"
+        
+        # Priority 6: Semantic class names (avoid minified ones)
+        elif attributes.get("class"):
+            classes = attributes["class"].split()
+            # Find meaningful classes (longer names, semantic prefixes)
+            semantic_classes = [c for c in classes if len(c) > 4 and not c.startswith('_')]
+            if semantic_classes:
+                css_selector = f"{tag}.{semantic_classes[0]}"
+        
+        # Last resort: Use extension's cssSelector but clean it
+        if not css_selector:
+            raw_css = element_data.cssSelector or element_data.css_selector
+            if raw_css:
+                css_selector = clean_extension_artifacts(raw_css)
+                logger.warning("Using potentially unstable selector for element_key=%s", element_key)
+        
+        # Generate XPath
+        xpath_selector = element_data.xpath or ""
+        if not xpath_selector and css_selector:
+            # Generate XPath from CSS
+            if css_selector.startswith("#"):
+                id_val = css_selector[1:]
+                xpath_selector = f"//*[@id='{id_val}']"
+            elif "[title=" in css_selector:
+                parts = css_selector.split("[title='")
+                if len(parts) == 2:
+                    tag_part = parts[0]
+                    title_part = parts[1].rstrip("']")
+                    xpath_selector = f"//{tag_part}[@title='{title_part}']"
+            elif "[aria-label=" in css_selector:
+                parts = css_selector.split("[aria-label='")
+                if len(parts) == 2:
+                    tag_part = parts[0]
+                    label_part = parts[1].rstrip("']")
+                    xpath_selector = f"//{tag_part}[@aria-label='{label_part}']"
+        
+        logger.debug("Generated selectors for element_key=%s", element_key)
         
         # Create primary selector JSON
-        primary_selector = {}
-        if css_selector:
-            primary_selector["css"] = css_selector
-        if element_data.xpath:
-            primary_selector["xpath"] = element_data.xpath
+        primary_selector = {
+            "css": css_selector,
+            "xpath": xpath_selector,
+            "tag": tag
+        }
         
         # Create alternative selectors array
         alt_selectors = []
@@ -110,9 +263,9 @@ async def record_element(element_data: ElementData, session_info: Optional[Sessi
                 alt_selectors.append({"css": cleaned})
         
         # Create attributes JSON
-        attributes = element_data.attributes.copy()
+        attributes_json = element_data.attributes.copy()
         if element_data.text_content or element_data.text:
-            attributes["text"] = element_data.text_content or element_data.text
+            attributes_json["text"] = element_data.text_content or element_data.text
         
         # Record the element in repo.elements
         result = await db.fetchrow(
@@ -130,10 +283,10 @@ async def record_element(element_data: ElementData, session_info: Optional[Sessi
             RETURNING *
             """,
             page_id,
-            element_data.id or element_data.element_id or f"element_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+            element_key,
             json.dumps(primary_selector),
             json.dumps(alt_selectors),
-            json.dumps(attributes),
+            json.dumps(attributes_json),
             True
         )
         return {
@@ -487,7 +640,7 @@ async def get_pending_reviews():
                 try:
                     suggestion = row["suggestion"] if isinstance(row["suggestion"], dict) else json.loads(row["suggestion"])
                     suggested_locator = suggestion.get("suggestedSelector", "")
-                except:
+                except Exception:
                     suggested_locator = str(row["suggestion"])
             
             # Handle current selector
@@ -495,7 +648,7 @@ async def get_pending_reviews():
                 try:
                     current_sel = row["current_selectors"] if isinstance(row["current_selectors"], dict) else json.loads(row["current_selectors"])
                     old_locator = current_sel.get("css", "") or current_sel.get("xpath", "")
-                except:
+                except Exception:
                     old_locator = str(row["current_selectors"])
             
             review_items.append({
@@ -704,7 +857,7 @@ async def get_all_elements(
             if isinstance(primary_selector, str):
                 try:
                     primary_selector = json.loads(primary_selector)
-                except:
+                except Exception:
                     primary_selector = {}
             elif not primary_selector:
                 primary_selector = {}
@@ -713,7 +866,7 @@ async def get_all_elements(
             if isinstance(alt_selectors, str):
                 try:
                     alt_selectors = json.loads(alt_selectors)
-                except:
+                except Exception:
                     alt_selectors = []
             elif not alt_selectors:
                 alt_selectors = []
@@ -722,7 +875,7 @@ async def get_all_elements(
             if isinstance(attributes, str):
                 try:
                     attributes = json.loads(attributes)
-                except:
+                except Exception:
                     attributes = {}
             elif not attributes:
                 attributes = {}
@@ -752,7 +905,7 @@ async def get_all_elements(
             if timestamp_recorded:
                 try:
                     timestamp_iso = timestamp_recorded.isoformat() if hasattr(timestamp_recorded, 'isoformat') else str(timestamp_recorded)
-                except:
+                except Exception:
                     timestamp_iso = None
             else:
                 timestamp_iso = None

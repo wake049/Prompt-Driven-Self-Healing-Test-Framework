@@ -684,7 +684,7 @@ const HealingSuccessVisualization: React.FC = () => {
           
           <Legend>
             <LegendItem>
-              <LegendColor color="#10b981" />
+              <LegendColor color="#1D9E75" />
               <span>Successful ({metrics.successfulHealing})</span>
             </LegendItem>
             <LegendItem>
@@ -692,7 +692,7 @@ const HealingSuccessVisualization: React.FC = () => {
               <span>Partial ({metrics.partialHealing})</span>
             </LegendItem>
             <LegendItem>
-              <LegendColor color="#ef4444" />
+              <LegendColor color="#A32D2D" />
               <span>Failed ({metrics.failedHealing})</span>
             </LegendItem>
           </Legend>

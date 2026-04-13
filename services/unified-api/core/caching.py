@@ -301,6 +301,7 @@ class CacheService:
         
         # Default actions for demo purposes
         default_actions = [
+            # === BASIC NAVIGATION ===
             {
                 "action_id": "open_url",
                 "name": "open_url",
@@ -309,10 +310,11 @@ class CacheService:
                 "category": "navigation",
                 "cost_weight": 1.0
             },
+            # === INTERACTION ===
             {
-                "action_id": "click_css",
-                "name": "click_css",
-                "description": "Click an element using CSS selector",
+                "action_id": "click",
+                "name": "click",
+                "description": "Click an element using CSS/XPath selector",
                 "parameters": {
                     "selector": {"type": "string", "required": True},
                     "elementName": {"type": "string", "required": False}
@@ -321,8 +323,8 @@ class CacheService:
                 "cost_weight": 1.2
             },
             {
-                "action_id": "type_css",
-                "name": "type_css", 
+                "action_id": "type",
+                "name": "type", 
                 "description": "Type text into an element using CSS selector",
                 "parameters": {
                     "selector": {"type": "string", "required": True},
@@ -333,8 +335,32 @@ class CacheService:
                 "cost_weight": 1.1
             },
             {
-                "action_id": "assert_text_css",
-                "name": "assert_text_css",
+                "action_id": "clear_and_type",
+                "name": "clear_and_type",
+                "description": "Clear existing text then type new text",
+                "parameters": {
+                    "selector": {"type": "string", "required": True},
+                    "text": {"type": "string", "required": True}
+                },
+                "category": "interaction",
+                "cost_weight": 1.2
+            },
+            {
+                "action_id": "type_slowly",
+                "name": "type_slowly",
+                "description": "Type text character by character with delay (for autocomplete)",
+                "parameters": {
+                    "selector": {"type": "string", "required": True},
+                    "text": {"type": "string", "required": True},
+                    "delay": {"type": "number", "required": False, "default": 100}
+                },
+                "category": "interaction",
+                "cost_weight": 1.5
+            },
+            # === VERIFICATION ===
+            {
+                "action_id": "assert_text",
+                "name": "assert_text",
                 "description": "Assert that an element contains specific text",
                 "parameters": {
                     "selector": {"type": "string", "required": True},
@@ -344,8 +370,145 @@ class CacheService:
                 "cost_weight": 0.8
             },
             {
-                "action_id": "wait_for_css",
-                "name": "wait_for_css",
+                "action_id": "assert_text_exact",
+                "name": "assert_text_exact",
+                "description": "Assert exact text match on element",
+                "parameters": {
+                    "selector": {"type": "string", "required": True},
+                    "text": {"type": "string", "required": True}
+                },
+                "category": "verification",
+                "cost_weight": 0.8
+            },
+            {
+                "action_id": "assert_text_contains",
+                "name": "assert_text_contains",
+                "description": "Assert element text contains substring",
+                "parameters": {
+                    "selector": {"type": "string", "required": True},
+                    "text": {"type": "string", "required": True}
+                },
+                "category": "verification",
+                "cost_weight": 0.8
+            },
+            {
+                "action_id": "assert_visible",
+                "name": "assert_visible",
+                "description": "Assert that an element is visible",
+                "parameters": {
+                    "selector": {"type": "string", "required": True}
+                },
+                "category": "verification",
+                "cost_weight": 0.7
+            },
+            {
+                "action_id": "assert_element_count",
+                "name": "assert_element_count",
+                "description": "Assert number of elements matching selector",
+                "parameters": {
+                    "selector": {"type": "string", "required": True},
+                    "count": {"type": "number", "required": True}
+                },
+                "category": "verification",
+                "cost_weight": 0.8
+            },
+            {
+                "action_id": "assert_attribute",
+                "name": "assert_attribute",
+                "description": "Assert element attribute value",
+                "parameters": {
+                    "selector": {"type": "string", "required": True},
+                    "attribute": {"type": "string", "required": True},
+                    "value": {"type": "string", "required": True}
+                },
+                "category": "verification",
+                "cost_weight": 0.8
+            },
+            {
+                "action_id": "assert_page_title",
+                "name": "assert_page_title",
+                "description": "Assert page title matches expected value",
+                "parameters": {
+                    "title": {"type": "string", "required": True}
+                },
+                "category": "verification",
+                "cost_weight": 0.5
+            },
+            {
+                "action_id": "assert_url",
+                "name": "assert_url",
+                "description": "Assert current URL matches exactly",
+                "parameters": {
+                    "url": {"type": "string", "required": True}
+                },
+                "category": "verification",
+                "cost_weight": 0.5
+            },
+            {
+                "action_id": "assert_url_contains",
+                "name": "assert_url_contains",
+                "description": "Assert current URL contains substring",
+                "parameters": {
+                    "substring": {"type": "string", "required": True}
+                },
+                "category": "verification",
+                "cost_weight": 0.5
+            },
+            {
+                "action_id": "assert_element_enabled",
+                "name": "assert_element_enabled",
+                "description": "Assert element is enabled",
+                "parameters": {
+                    "selector": {"type": "string", "required": True}
+                },
+                "category": "verification",
+                "cost_weight": 0.7
+            },
+            {
+                "action_id": "assert_element_disabled",
+                "name": "assert_element_disabled",
+                "description": "Assert element is disabled",
+                "parameters": {
+                    "selector": {"type": "string", "required": True}
+                },
+                "category": "verification",
+                "cost_weight": 0.7
+            },
+            {
+                "action_id": "assert_checkbox_checked",
+                "name": "assert_checkbox_checked",
+                "description": "Assert checkbox is checked",
+                "parameters": {
+                    "selector": {"type": "string", "required": True}
+                },
+                "category": "verification",
+                "cost_weight": 0.7
+            },
+            {
+                "action_id": "assert_checkbox_unchecked",
+                "name": "assert_checkbox_unchecked",
+                "description": "Assert checkbox is unchecked",
+                "parameters": {
+                    "selector": {"type": "string", "required": True}
+                },
+                "category": "verification",
+                "cost_weight": 0.7
+            },
+            {
+                "action_id": "assert_toast_message",
+                "name": "assert_toast_message",
+                "description": "Assert toast/notification message appears",
+                "parameters": {
+                    "text": {"type": "string", "required": True},
+                    "selector": {"type": "string", "required": False}
+                },
+                "category": "verification",
+                "cost_weight": 0.9
+            },
+            # === SYNCHRONIZATION ===
+            {
+                "action_id": "wait_for",
+                "name": "wait_for",
                 "description": "Wait for an element to be present/visible",
                 "parameters": {
                     "selector": {"type": "string", "required": True},
@@ -355,6 +518,440 @@ class CacheService:
                 "cost_weight": 0.5
             },
             {
+                "action_id": "wait_for_page_load",
+                "name": "wait_for_page_load",
+                "description": "Wait for page to fully load (network idle)",
+                "parameters": {
+                    "timeout": {"type": "number", "required": False, "default": 30}
+                },
+                "category": "synchronization",
+                "cost_weight": 0.6
+            },
+            {
+                "action_id": "wait_for_api_response",
+                "name": "wait_for_api_response",
+                "description": "Wait for specific API request to complete",
+                "parameters": {
+                    "url_pattern": {"type": "string", "required": False},
+                    "timeout": {"type": "number", "required": False, "default": 30}
+                },
+                "category": "synchronization",
+                "cost_weight": 0.7
+            },
+            {
+                "action_id": "wait_for_modal_visible",
+                "name": "wait_for_modal_visible",
+                "description": "Wait for modal dialog to appear",
+                "parameters": {
+                    "selector": {"type": "string", "required": False},
+                    "timeout": {"type": "number", "required": False, "default": 10}
+                },
+                "category": "synchronization",
+                "cost_weight": 0.6
+            },
+            {
+                "action_id": "wait_for_modal_dismissed",
+                "name": "wait_for_modal_dismissed",
+                "description": "Wait for modal dialog to close",
+                "parameters": {
+                    "selector": {"type": "string", "required": False},
+                    "timeout": {"type": "number", "required": False, "default": 10}
+                },
+                "category": "synchronization",
+                "cost_weight": 0.6
+            },
+            {
+                "action_id": "wait_for_table_to_load",
+                "name": "wait_for_table_to_load",
+                "description": "Wait for table to load with data",
+                "parameters": {
+                    "selector": {"type": "string", "required": True},
+                    "timeout": {"type": "number", "required": False, "default": 30}
+                },
+                "category": "synchronization",
+                "cost_weight": 0.6
+            },
+            # === DATA EXTRACTION ===
+            {
+                "action_id": "extract_data",
+                "name": "extract_data",
+                "description": "Extract text from single element into variable",
+                "parameters": {
+                    "selector": {"type": "string", "required": True},
+                    "variable": {"type": "string", "required": True}
+                },
+                "category": "data",
+                "cost_weight": 0.9
+            },
+            {
+                "action_id": "extract_list",
+                "name": "extract_list",
+                "description": "Extract text from all matching elements into list variable",
+                "parameters": {
+                    "selector": {"type": "string", "required": True},
+                    "variable": {"type": "string", "required": True}
+                },
+                "category": "data",
+                "cost_weight": 1.1
+            },
+            {
+                "action_id": "count_elements",
+                "name": "count_elements",
+                "description": "Count elements matching selector and store in variable",
+                "parameters": {
+                    "selector": {"type": "string", "required": True},
+                    "variable": {"type": "string", "required": True}
+                },
+                "category": "data",
+                "cost_weight": 0.7
+            },
+            {
+                "action_id": "calculate",
+                "name": "calculate",
+                "description": "Perform simple arithmetic calculation",
+                "parameters": {
+                    "formula": {"type": "string", "required": True},
+                    "variable": {"type": "string", "required": True}
+                },
+                "category": "data",
+                "cost_weight": 0.8
+            },
+            {
+                "action_id": "get_table_cell_value",
+                "name": "get_table_cell_value",
+                "description": "Extract table cell value by row/column",
+                "parameters": {
+                    "selector": {"type": "string", "required": True},
+                    "row": {"type": "number", "required": True},
+                    "col": {"type": "string", "required": True},
+                    "variable": {"type": "string", "required": True}
+                },
+                "category": "data",
+                "cost_weight": 1.0
+            },
+            # === NAVIGATION & PAGE CONTROL ===
+            {
+                "action_id": "scroll_to_element",
+                "name": "scroll_to_element",
+                "description": "Scroll to bring element into view",
+                "parameters": {
+                    "selector": {"type": "string", "required": True}
+                },
+                "category": "navigation",
+                "cost_weight": 0.6
+            },
+            {
+                "action_id": "scroll_to_position",
+                "name": "scroll_to_position",
+                "description": "Scroll to specific position (top, bottom, percentage, pixels)",
+                "parameters": {
+                    "position": {"type": "string", "required": True}
+                },
+                "category": "navigation",
+                "cost_weight": 0.5
+            },
+            {
+                "action_id": "switch_to_frame",
+                "name": "switch_to_frame",
+                "description": "Switch context to iframe",
+                "parameters": {
+                    "frame": {"type": "string", "required": True}
+                },
+                "category": "navigation",
+                "cost_weight": 0.7
+            },
+            {
+                "action_id": "switch_to_parent_frame",
+                "name": "switch_to_parent_frame",
+                "description": "Switch back to parent frame",
+                "parameters": {},
+                "category": "navigation",
+                "cost_weight": 0.5
+            },
+            {
+                "action_id": "switch_to_window",
+                "name": "switch_to_window",
+                "description": "Switch to browser window/tab",
+                "parameters": {
+                    "window": {"type": "string", "required": False, "default": "new"}
+                },
+                "category": "navigation",
+                "cost_weight": 0.7
+            },
+            {
+                "action_id": "close_window",
+                "name": "close_window",
+                "description": "Close current window",
+                "parameters": {},
+                "category": "navigation",
+                "cost_weight": 0.5
+            },
+            {
+                "action_id": "navigate_back",
+                "name": "navigate_back",
+                "description": "Navigate browser back",
+                "parameters": {},
+                "category": "navigation",
+                "cost_weight": 0.5
+            },
+            {
+                "action_id": "navigate_forward",
+                "name": "navigate_forward",
+                "description": "Navigate browser forward",
+                "parameters": {},
+                "category": "navigation",
+                "cost_weight": 0.5
+            },
+            {
+                "action_id": "refresh_page",
+                "name": "refresh_page",
+                "description": "Refresh current page",
+                "parameters": {},
+                "category": "navigation",
+                "cost_weight": 0.5
+            },
+            # === FORM CONTROLS ===
+            {
+                "action_id": "upload_file",
+                "name": "upload_file",
+                "description": "Upload file to file input",
+                "parameters": {
+                    "selector": {"type": "string", "required": True},
+                    "file_path": {"type": "string", "required": True}
+                },
+                "category": "form",
+                "cost_weight": 1.2
+            },
+            {
+                "action_id": "select_by_index",
+                "name": "select_by_index",
+                "description": "Select dropdown option by index",
+                "parameters": {
+                    "selector": {"type": "string", "required": True},
+                    "index": {"type": "number", "required": True}
+                },
+                "category": "form",
+                "cost_weight": 0.9
+            },
+            {
+                "action_id": "select_by_value",
+                "name": "select_by_value",
+                "description": "Select dropdown option by value attribute",
+                "parameters": {
+                    "selector": {"type": "string", "required": True},
+                    "value": {"type": "string", "required": True}
+                },
+                "category": "form",
+                "cost_weight": 0.9
+            },
+            {
+                "action_id": "select_by_text",
+                "name": "select_by_text",
+                "description": "Select dropdown option by visible text",
+                "parameters": {
+                    "selector": {"type": "string", "required": True},
+                    "text": {"type": "string", "required": True}
+                },
+                "category": "form",
+                "cost_weight": 0.9
+            },
+            {
+                "action_id": "check_checkbox",
+                "name": "check_checkbox",
+                "description": "Check a checkbox (idempotent)",
+                "parameters": {
+                    "selector": {"type": "string", "required": True}
+                },
+                "category": "form",
+                "cost_weight": 0.8
+            },
+            {
+                "action_id": "uncheck_checkbox",
+                "name": "uncheck_checkbox",
+                "description": "Uncheck a checkbox (idempotent)",
+                "parameters": {
+                    "selector": {"type": "string", "required": True}
+                },
+                "category": "form",
+                "cost_weight": 0.8
+            },
+            {
+                "action_id": "set_slider",
+                "name": "set_slider",
+                "description": "Set range slider value",
+                "parameters": {
+                    "selector": {"type": "string", "required": True},
+                    "value": {"type": "number", "required": True}
+                },
+                "category": "form",
+                "cost_weight": 0.9
+            },
+            {
+                "action_id": "set_date_picker",
+                "name": "set_date_picker",
+                "description": "Set date picker field value",
+                "parameters": {
+                    "selector": {"type": "string", "required": True},
+                    "date": {"type": "string", "required": True}
+                },
+                "category": "form",
+                "cost_weight": 1.0
+            },
+            # === KEYBOARD & MOUSE ===
+            {
+                "action_id": "hover",
+                "name": "hover",
+                "description": "Hover over element",
+                "parameters": {
+                    "selector": {"type": "string", "required": True}
+                },
+                "category": "mouse",
+                "cost_weight": 0.8
+            },
+            {
+                "action_id": "right_click",
+                "name": "right_click",
+                "description": "Right-click (context click) on element",
+                "parameters": {
+                    "selector": {"type": "string", "required": True}
+                },
+                "category": "mouse",
+                "cost_weight": 0.9
+            },
+            {
+                "action_id": "double_click",
+                "name": "double_click",
+                "description": "Double-click on element",
+                "parameters": {
+                    "selector": {"type": "string", "required": True}
+                },
+                "category": "mouse",
+                "cost_weight": 0.9
+            },
+            {
+                "action_id": "drag_and_drop",
+                "name": "drag_and_drop",
+                "description": "Drag element to another element",
+                "parameters": {
+                    "selector": {"type": "string", "required": True},
+                    "drop_target": {"type": "string", "required": True}
+                },
+                "category": "mouse",
+                "cost_weight": 1.2
+            },
+            {
+                "action_id": "press_key",
+                "name": "press_key",
+                "description": "Press keyboard key (Enter, Tab, Escape, etc.)",
+                "parameters": {
+                    "key": {"type": "string", "required": True},
+                    "selector": {"type": "string", "required": False}
+                },
+                "category": "keyboard",
+                "cost_weight": 0.7
+            },
+            {
+                "action_id": "keyboard_shortcut",
+                "name": "keyboard_shortcut",
+                "description": "Execute keyboard shortcut (Ctrl+S, etc.)",
+                "parameters": {
+                    "keys": {"type": "string", "required": True}
+                },
+                "category": "keyboard",
+                "cost_weight": 0.8
+            },
+            # === TABLES ===
+            {
+                "action_id": "assert_table_row_count",
+                "name": "assert_table_row_count",
+                "description": "Assert number of rows in table",
+                "parameters": {
+                    "selector": {"type": "string", "required": True},
+                    "count": {"type": "number", "required": True}
+                },
+                "category": "table",
+                "cost_weight": 0.8
+            },
+            {
+                "action_id": "click_table_row_by_value",
+                "name": "click_table_row_by_value",
+                "description": "Find and click table row containing value",
+                "parameters": {
+                    "selector": {"type": "string", "required": True},
+                    "value": {"type": "string", "required": True},
+                    "col": {"type": "string", "required": False}
+                },
+                "category": "table",
+                "cost_weight": 1.1
+            },
+            # === LIST & ITERATION ===
+            {
+                "action_id": "verify_all",
+                "name": "verify_all",
+                "description": "Verify all elements match condition",
+                "parameters": {
+                    "selector": {"type": "string", "required": True},
+                    "condition": {"type": "string", "required": True}
+                },
+                "category": "verification",
+                "cost_weight": 1.0
+            },
+            {
+                "action_id": "for_each",
+                "name": "for_each",
+                "description": "Iterate through list storing each item",
+                "parameters": {
+                    "source": {"type": "string", "required": True},
+                    "variable_prefix": {"type": "string", "required": False}
+                },
+                "category": "iteration",
+                "cost_weight": 1.0
+            },
+            # === DATE VERIFICATION ===
+            {
+                "action_id": "verify_date_format",
+                "name": "verify_date_format",
+                "description": "Verify element text matches date format",
+                "parameters": {
+                    "selector": {"type": "string", "required": True},
+                    "format": {"type": "string", "required": False}
+                },
+                "category": "verification",
+                "cost_weight": 0.9
+            },
+            # === ALERTS ===
+            {
+                "action_id": "accept_alert",
+                "name": "accept_alert",
+                "description": "Accept JavaScript alert dialog",
+                "parameters": {
+                    "timeout": {"type": "number", "required": False, "default": 5}
+                },
+                "category": "alert",
+                "cost_weight": 0.7
+            },
+            {
+                "action_id": "dismiss_alert",
+                "name": "dismiss_alert",
+                "description": "Dismiss JavaScript alert dialog",
+                "parameters": {
+                    "timeout": {"type": "number", "required": False, "default": 5}
+                },
+                "category": "alert",
+                "cost_weight": 0.7
+            },
+            {
+                "action_id": "get_alert_text",
+                "name": "get_alert_text",
+                "description": "Extract alert text into variable",
+                "parameters": {
+                    "variable": {"type": "string", "required": True}
+                },
+                "category": "alert",
+                "cost_weight": 0.8
+            },
+            # === DOCUMENTATION ===
+            {
                 "action_id": "screenshot",
                 "name": "screenshot",
                 "description": "Take a screenshot",
@@ -363,6 +960,17 @@ class CacheService:
                 },
                 "category": "documentation",
                 "cost_weight": 0.3
+            },
+            # === API ===
+            {
+                "action_id": "api_setup",
+                "name": "api_setup",
+                "description": "Execute API call to setup test data",
+                "parameters": {
+                    "setup_id": {"type": "string", "required": True}
+                },
+                "category": "api",
+                "cost_weight": 1.5
             }
         ]
         
@@ -371,7 +979,7 @@ class CacheService:
             "catalog_id": catalog_id,
             "version": version,
             "name": f"Standard Actions v{version}",
-            "description": "Standard set of test automation actions",
+            "description": "Comprehensive set of test automation actions",
             "actions": default_actions
         }
         

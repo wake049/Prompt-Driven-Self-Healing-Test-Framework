@@ -2,7 +2,7 @@
 Test Execution API - Clean version with proper database integration
 """
 
-from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Header
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Header, Query
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 import logging
@@ -14,11 +14,13 @@ import os
 import shlex
 import contextlib
 import tempfile
+import time
 import uuid
 import random
+from collections import deque
 
 # Authentication imports
-from core.auth import get_current_active_user
+from core.auth import get_current_active_user, get_optional_current_user
 from models.auth_models import CurrentUser
 import psycopg2
 import uuid
@@ -29,6 +31,7 @@ from core.database import get_database, DatabaseManager
 from core.binding_processor import BindingProcessor
 from schemas.enterprise import TestBindings, DataBinding
 from services.selector_conversion import convert_steps_to_dual_selector_format, SelectorConverter
+from services.subscription_limits import enforce_monthly_test_runs_limit, require_active_subscription
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -37,10 +40,15 @@ router = APIRouter()
 
 # Initialize ECS client
 try:
-    ecs_client = boto3.client('ecs', region_name='us-east-2')
+    ecs_client = boto3.client('ecs', region_name=os.getenv('AWS_REGION', 'us-east-2'))
 except Exception as e:
     logger.warning(f"Could not initialize ECS client: {e}")
     ecs_client = None
+
+# ECS task rate limiting
+_ecs_task_window_seconds = 60
+_ecs_max_tasks_per_minute = int(os.getenv("ECS_MAX_TASKS_PER_MINUTE", "10"))
+_ecs_task_timestamps: deque = deque()
 
 async def launch_ecs_task_for_test_execution(prompt_id: str, test_steps: List[Dict], execution_id: str, auth_token: str) -> str:
     """
@@ -49,6 +57,14 @@ async def launch_ecs_task_for_test_execution(prompt_id: str, test_steps: List[Di
     """
     if not ecs_client:
         raise HTTPException(status_code=500, detail="ECS client not available")
+    
+    # Rate limit ECS task launches
+    now = time.time()
+    while _ecs_task_timestamps and now - _ecs_task_timestamps[0] > _ecs_task_window_seconds:
+        _ecs_task_timestamps.popleft()
+    if len(_ecs_task_timestamps) >= _ecs_max_tasks_per_minute:
+        raise HTTPException(status_code=429, detail="Too many test executions. Please wait before launching more.")
+    _ecs_task_timestamps.append(now)
     
     try:
         # Create the task definition overrides with environment variables
@@ -59,7 +75,7 @@ async def launch_ecs_task_for_test_execution(prompt_id: str, test_steps: List[Di
                     'environment': [
                         {
                             'name': 'UNIFIED_API_URL',
-                            'value': 'https://testhelix.com'
+                            'value': os.getenv('UNIFIED_API_URL', 'http://localhost:8000')
                         },
                         {
                             'name': 'API_AUTH_TOKEN',
@@ -89,23 +105,50 @@ async def launch_ecs_task_for_test_execution(prompt_id: str, test_steps: List[Di
                 'value': steps_json
             })
         else:
-            # TODO: Upload to S3 and pass S3 URL
-            raise HTTPException(status_code=413, detail="Test steps too large - S3 upload needed")
+            # Upload to S3 for large payloads and pass the S3 key to the runner
+            s3_bucket = os.getenv("TEST_STEPS_S3_BUCKET")
+            if not s3_bucket:
+                raise HTTPException(
+                    status_code=413,
+                    detail="Test steps too large for inline transfer. Set TEST_STEPS_S3_BUCKET to enable S3 upload.",
+                )
+            s3_key = f"test-steps/{execution_id}.json"
+            try:
+                s3_client = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-2"))
+                s3_client.put_object(Bucket=s3_bucket, Key=s3_key, Body=steps_json, ContentType="application/json")
+            except ClientError as s3_err:
+                logger.error("Failed to upload test steps to S3: %s", s3_err)
+                raise HTTPException(status_code=500, detail="Failed to upload test steps to S3") from s3_err
+            task_overrides['containerOverrides'][0]['environment'].append({
+                'name': 'TEST_STEPS_S3_BUCKET',
+                'value': s3_bucket
+            })
+            task_overrides['containerOverrides'][0]['environment'].append({
+                'name': 'TEST_STEPS_S3_KEY',
+                'value': s3_key
+            })
         
         # Launch the ECS task
+        ecs_cluster = os.getenv("ECS_CLUSTER_NAME")
+        ecs_task_def = os.getenv("ECS_TASK_DEFINITION", "java-runner-task")
+        ecs_subnets = os.getenv("ECS_SUBNETS", "").split(",")
+        ecs_security_groups = [sg for sg in os.getenv("ECS_SECURITY_GROUPS", "").split(",") if sg]
+
+        if not ecs_cluster or not ecs_subnets[0]:
+            raise HTTPException(
+                status_code=500,
+                detail="ECS_CLUSTER_NAME and ECS_SUBNETS environment variables must be configured"
+            )
+
         response = ecs_client.run_task(
-            cluster='testhelix-cluster-v2',
-            taskDefinition='java-runner-task',
+            cluster=ecs_cluster,
+            taskDefinition=ecs_task_def,
             launchType='FARGATE',
             networkConfiguration={
                 'awsvpcConfiguration': {
-                    'subnets': [
-                        'subnet-0e4d1e38fab9a2eac'  # testhelix-v2-subnet-public1-us-east-2a
-                    ],
+                    'subnets': [s.strip() for s in ecs_subnets if s.strip()],
                     'assignPublicIp': 'ENABLED',
-                    'securityGroups': [
-                        # Add your security group ID here if needed
-                    ]
+                    'securityGroups': ecs_security_groups
                 }
             },
             overrides=task_overrides
@@ -118,10 +161,10 @@ async def launch_ecs_task_for_test_execution(prompt_id: str, test_steps: List[Di
         
     except ClientError as e:
         logger.error(f"Failed to launch ECS task: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to launch test execution: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to launch test execution")
     except Exception as e:
         logger.error(f"Unexpected error launching ECS task: {e}")
-        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Unexpected error launching test execution")
 
 def determine_test_execution_status(results: Dict, return_code: int) -> str:
     """
@@ -144,16 +187,19 @@ def determine_test_execution_status(results: Dict, return_code: int) -> str:
         status = step_result.get("status", "UNKNOWN")
         healed = step_result.get("healed", False)
         
+        # Check for healing attempts regardless of pass/fail
+        if healed:
+            has_healing = True
+        
+        # Check if step ultimately failed (even after healing attempt)
         if status == "FAIL":
             has_failures = True
-            break  # Any failure means the test failed
-        elif healed:
-            has_healing = True
     
-    if has_failures:
-        return "failed"
-    elif has_healing:
-        return "pending_review"  # No failures but healing occurred
+    # If healing was attempted, always mark for review (even if execution failed)
+    if has_healing:
+        return "pending_review"  # Healing occurred - needs review
+    elif has_failures:
+        return "failed"  # Failed without healing
     else:
         return "pass"  # All steps passed without healing
 
@@ -161,16 +207,17 @@ def determine_step_status(step_result: Dict) -> str:
     """
     Determine individual step status:
     - "passed": Step passed without healing
-    - "failed": Step failed
-    - "pending_review": Step passed but required healing
+    - "failed": Step failed without healing attempt
+    - "pending_review": Healing was attempted (whether step passed or failed)
     """
     status = step_result.get("status", "UNKNOWN")
     healed = step_result.get("healed", False)
     
-    if status == "FAIL":
-        return "failed"
-    elif status == "PASS" and healed:
+    # If healing was attempted, always mark as pending_review for human verification
+    if healed:
         return "pending_review"
+    elif status == "FAIL":
+        return "failed"
     elif status == "PASS":
         return "passed"
     else:
@@ -263,9 +310,14 @@ async def get_policy_based_selector(
     step_data: Dict[str, Any],
     db: DatabaseManager
 ) -> str:
+    """Apply selector policy to choose between CSS and XPath selectors for a step.
+
+    Always returns a non-None string (may be empty), falling back to the
+    selector/locator present on the step when no DB-mapped selectors exist.
     """
-    Apply selector policy to choose between CSS and XPath selectors for a step
-    """
+    # Default policy
+    prefer_css = True
+
     try:
         # Get current policy configuration
         policy_query = """
@@ -275,109 +327,129 @@ async def get_policy_based_selector(
         LIMIT 1
         """
         policy_result = await db.execute_one(policy_query)
-        
-        # Default policy
-        prefer_css = True
-        
+
         if policy_result and policy_result.get("context"):
             config_data = json.loads(policy_result["context"])
             locator_healing = config_data.get("configurations", {}).get("locatorHealing", {})
             prefer_css = locator_healing.get("preferCssOverXpath", True)
-        
-        # Get selectors from step data
-        css_selector = None
-        xpath_selector = None
-        fallback_selector = None
-        
-        # Try to get dual selectors from database
-        try:
-            step_query = """
-            SELECT ts.css_selector, ts.xpath_selector, ts.parameters
-            FROM tests.test_cases tc
-            JOIN tests.test_steps ts ON tc.id = ts.test_case_id
-            WHERE tc.source_ref_id = $1::uuid
-            ORDER BY ts.step_order
-            LIMIT 1 OFFSET $2
-            """
-            step_result = await db.execute_one(step_query, prompt_id, step_index)
-            
-            if step_result:
-                css_selector = step_result.get("css_selector")
-                xpath_selector = step_result.get("xpath_selector")
-                
-                # If dual selectors not available, try to extract from parameters
-                if not css_selector and not xpath_selector:
-                    params = step_result.get("parameters", {})
-                    if isinstance(params, str):
-                        params = json.loads(params)
-                    fallback_selector = params.get("selector")
-        except Exception as e:
-            # Fallback to step data if database lookup failed
-            if not css_selector and not xpath_selector and not fallback_selector:
-                dual_selectors = step_data.get('dual_selectors', {})
-            if dual_selectors:
-                css_selector = dual_selectors.get('css_selector', '')
-                xpath_selector = dual_selectors.get('xpath_selector', '')# If no dual selectors, fall back to single selector
+    except Exception:
+        # If policy lookup fails, keep default prefer_css=True
+        pass
+
+    css_selector: Optional[str] = None
+    xpath_selector: Optional[str] = None
+    fallback_selector: Optional[str] = None
+
+    # First try to get dual selectors from tests.test_steps
+    try:
+        step_query = """
+        SELECT ts.css_selector, ts.xpath_selector, ts.parameters
+        FROM tests.test_cases tc
+        JOIN tests.test_steps ts ON tc.id = ts.test_case_id
+        WHERE tc.source_ref_id = $1::uuid
+        ORDER BY ts.step_order
+        LIMIT 1 OFFSET $2
+        """
+        step_result = await db.execute_one(step_query, prompt_id, step_index)
+
+        if step_result:
+            css_selector = step_result.get("css_selector")
+            xpath_selector = step_result.get("xpath_selector")
+
             if not css_selector and not xpath_selector:
-                fallback_selector = (
-                    step_data.get('selector') or 
-                    step_data.get('locator') or 
-                    step_data.get('target', '')
-                )# Debug logging# Apply policy to select the best selector
-        selected_selector = None
-        selector_type = None
-        
+                params = step_result.get("parameters", {})
+                if isinstance(params, str):
+                    params = json.loads(params)
+                if isinstance(params, dict):
+                    fallback_selector = params.get("selector")
+    except Exception:
+        # Ignore DB lookup issues; we'll fall back to step data below
+        pass
+
+    # If DB did not provide selectors, fall back to dual_selectors or single selector on the step
+    if not css_selector and not xpath_selector and not fallback_selector:
+        dual_selectors = step_data.get("dual_selectors") or {}
+        if isinstance(dual_selectors, dict):
+            css_selector = dual_selectors.get("css_selector") or css_selector
+            xpath_selector = dual_selectors.get("xpath_selector") or xpath_selector
+
+    if not css_selector and not xpath_selector and not fallback_selector:
+        fallback_selector = (
+            step_data.get("selector")
+            or step_data.get("locator")
+            or step_data.get("target", "")
+        )
+
+    # Apply policy to choose selector
+    selected_selector: Optional[str] = None
+    selector_type: Optional[str] = None
+
+    try:
         if prefer_css:
             if css_selector:
                 selected_selector = css_selector
-                selector_type = 'css'
+                selector_type = "css"
             elif xpath_selector:
                 selected_selector = xpath_selector
-                selector_type = 'xpath'
+                selector_type = "xpath"
             elif fallback_selector:
-                # Determine type based on heuristics
-                if (fallback_selector.startswith('//') or 
-                    '[@' in fallback_selector or 
-                    '/html' in fallback_selector):
+                if (
+                    fallback_selector.startswith("//")
+                    or "[@" in fallback_selector
+                    or "/html" in fallback_selector
+                ):
                     selected_selector = fallback_selector
-                    selector_type = 'xpath'
+                    selector_type = "xpath"
                 else:
                     selected_selector = fallback_selector
-                    selector_type = 'css'
+                    selector_type = "css"
         else:
-            # Prefer XPath
             if xpath_selector:
                 selected_selector = xpath_selector
-                selector_type = 'xpath'
+                selector_type = "xpath"
             elif css_selector:
                 selected_selector = css_selector
-                selector_type = 'css'
+                selector_type = "css"
             elif fallback_selector:
-                # Use fallback as determined above
-                if (fallback_selector.startswith('//') or 
-                    '[@' in fallback_selector or 
-                    '/html' in fallback_selector):
+                if (
+                    fallback_selector.startswith("//")
+                    or "[@" in fallback_selector
+                    or "/html" in fallback_selector
+                ):
                     selected_selector = fallback_selector
-                    selector_type = 'xpath'
+                    selector_type = "xpath"
                 else:
                     selected_selector = fallback_selector
-                    selector_type = 'css'
-        
-        # Log the policy decision
+                    selector_type = "css"
+
         if selected_selector:
             try:
                 await log_selector_policy_decision(
-                    prompt_id, step_index, css_selector, xpath_selector,
-                    selected_selector, selector_type, prefer_css, db
+                    prompt_id,
+                    step_index,
+                    css_selector,
+                    xpath_selector,
+                    selected_selector,
+                    selector_type or ("css" if prefer_css else "xpath"),
+                    prefer_css,
+                    db,
                 )
-            except Exception as e:return selected_selector or ''
-        
-    except Exception as e:# Fallback to original behavior
-        return (
-            step_data.get('selector') or 
-            step_data.get('locator') or 
-            step_data.get('target', '')
-        )
+            except Exception:
+                # Logging should not break execution
+                pass
+    except Exception:
+        # If anything goes wrong in policy application, fall back to raw step selector
+        selected_selector = None
+
+    if selected_selector:
+        return selected_selector
+
+    # Final fallback: original selector/locator/target on the step
+    return (
+        step_data.get("selector")
+        or step_data.get("locator")
+        or step_data.get("target", "")
+    )
 
 async def log_selector_policy_decision(
     prompt_id: str,
@@ -422,11 +494,65 @@ async def get_db() -> DatabaseManager:
     """Get database dependency"""
     return await get_database()
 
+@router.post("/rerun-execution/{execution_id}")
+async def rerun_execution(
+    execution_id: str,
+    background_tasks: BackgroundTasks,
+    authorization: Optional[str] = Header(None),
+    browser: Optional[str] = Query(default=None, description="Specific browser to rerun: chrome, firefox, edge, safari"),
+    db: DatabaseManager = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_active_user)
+):
+    """Rerun a specific execution on a specific browser"""
+    logger.info(f"=== RERUN EXECUTION REQUEST ===")
+    logger.info(f"Execution ID: {execution_id}")
+    logger.info(f"Browser: {browser}")
+    
+    try:
+        # Get the original execution details
+        exec_query = """
+        SELECT r.id, r.test_case_id, tc.plan_id, p.prompt_id
+        FROM exec.runs r
+        LEFT JOIN tests.test_cases tc ON r.test_case_id = tc.id
+        LEFT JOIN planner.plans p ON tc.plan_id = p.id
+        WHERE r.id = $1
+        """
+        exec_result = await db.execute_one(exec_query, execution_id)
+        
+        if not exec_result:
+            raise HTTPException(status_code=404, detail="Execution not found")
+        
+        prompt_id = exec_result['prompt_id']
+        if not prompt_id:
+            raise HTTPException(status_code=400, detail="Cannot rerun: original prompt not found")
+        
+        # Use the same execute logic but with browser override
+        logger.info(f"Rerunning prompt {prompt_id} on browser {browser}")
+        
+        # Call the main execute_prompt function with browser parameter
+        return await execute_prompt(
+            prompt_id=prompt_id,
+            background_tasks=background_tasks,
+            authorization=authorization,
+            browser=browser,
+            db=db,
+            current_user=current_user
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error rerunning execution: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/execute-prompt/{prompt_id}")
 async def execute_prompt(
     prompt_id: str,
     background_tasks: BackgroundTasks,
     authorization: Optional[str] = Header(None),
+    browser: Optional[str] = Query(default=None, description="Browser type: chrome, firefox, edge, safari"),
+    runner_id: Optional[str] = Query(default=None, description="Target runner agent ID. When set, forces agent dispatch mode and assigns work to this specific runner."),
     db: DatabaseManager = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_active_user)
 ):
@@ -434,6 +560,7 @@ async def execute_prompt(
     logger.info(f"=== EXECUTE PROMPT REQUEST ===")
     logger.info(f"Prompt ID: {prompt_id}")
     logger.info(f"Authorization header present: {bool(authorization)}")
+    logger.info(f"Current user: {current_user.user.email}")
     
     try:
         # Get the plan details from database (using existing planner.plans table)
@@ -618,15 +745,21 @@ async def execute_prompt(
             action = processed_step.get('action', processed_step.get('name', ''))
             
             # Map actions to Java runner expected format
-            if action == "open_url":
+            if action in ("open_url", "navigate"):
                 action = "open"
-            elif action == "assert_visible":
+            elif action in ("assert_visible", "assert_element"):
                 action = "verify_element"
             elif action == "assert_text":
                 action = "verify_text"
-            elif action == "screenshot":
-                action = "screenshot"
-            # Keep extract_data and calculate as-is since Java runner supports them
+            elif action in ("enter_text",):
+                action = "type"
+            elif action in ("wait_for", "wait_for_page_load"):
+                action = "wait"
+            elif action in ("scroll_to",):
+                action = "scroll"
+            elif action in ("hover_over",):
+                action = "hover"
+            # screenshot, extract_data, calculate kept as-is
             
             # Special handling for extract_data steps
             if action == 'extract_data':
@@ -720,23 +853,230 @@ async def execute_prompt(
                     "description": processed_step.get('description', '')
                 })
         
-        # ENFORCE DATABASE MODE: Create execution record FIRST
-        execution_id, step_ids = await create_execution_record(db, prompt_id, test_steps, current_user)
-        
         # Extract auth token from Authorization header
         auth_token = None
         if authorization and authorization.startswith("Bearer "):
             auth_token = authorization[7:]  # Remove "Bearer " prefix
         
         logger.info(f"Starting test execution for prompt {prompt_id} with {len(test_steps)} steps")
+
+        # Fetch policy configuration before mapping steps so selector policy is always defined
+        policy_config: Dict[str, Any] = {}
+        preferred_browsers: List[str] = []
+        try:
+            policy_query = """
+            SELECT context FROM policy.policy_decisions 
+            WHERE context->>'config_type' = 'dashboard_config'
+            ORDER BY created_at DESC
+            LIMIT 1
+            """
+            policy_result = await db.execute_one(policy_query)
+
+            if policy_result and policy_result.get("context"):
+                config_data = json.loads(policy_result["context"])
+                configurations = config_data.get("configurations", {})
+                locator_healing = configurations.get("locatorHealing", {})
+                execution_safety = configurations.get("executionSafety", {})
+                multi_outcome = configurations.get("multiOutcomeHandling", {})
+
+                # Convert confidence threshold from 0-1 to 0-100 if needed
+                confidence_raw = locator_healing.get("confidenceThreshold", 0.85)
+                confidence_value = int(confidence_raw * 100) if confidence_raw <= 1.0 else int(confidence_raw)
+
+                # Get preferred browsers from policy
+                preferred_browsers = execution_safety.get("preferredBrowsers", ["chrome"])
+                if not preferred_browsers:
+                    preferred_browsers = ["chrome"]
+
+                policy_config = {
+                    "confidenceThreshold": confidence_value,
+                    "maxRetries": int(locator_healing.get("maxRetries", 2)),
+                    "maxCandidates": int(multi_outcome.get("maxCandidates", 5)),
+                    "useRepositoryFallback": bool(locator_healing.get("useRepositoryFallback", True)),
+                    "preferCssOverXpath": bool(locator_healing.get("preferCssOverXpath", True)),
+                    "blockDestructiveActions": bool(execution_safety.get("blockDestructiveActions", True)),
+                    "allowTestModeOverride": bool(execution_safety.get("allowTestModeOverride", True)),
+                    "destructiveKeywords": execution_safety.get("requireConfirmationKeywords", ["delete", "remove", "submit payment"])
+                }
+                logger.info(f"Loaded policy config: {policy_config}")
+                logger.info(f"Preferred browsers from policy: {preferred_browsers}")
+            else:
+                # Use default policy config
+                preferred_browsers = ["chrome"]
+                policy_config = {
+                    "confidenceThreshold": 85,
+                    "maxRetries": 2,
+                    "maxCandidates": 5,
+                    "useRepositoryFallback": True,
+                    "preferCssOverXpath": True,
+                    "blockDestructiveActions": True,
+                    "allowTestModeOverride": True,
+                    "destructiveKeywords": ["delete", "remove", "submit payment"]
+                }
+                logger.info("Using default policy config (no dashboard_config found)")
+        except Exception as e:
+            logger.error(f"Failed to load policy config, using safe defaults: {e}")
+            preferred_browsers = ["chrome"]
+            policy_config = {
+                "confidenceThreshold": 85,
+                "maxRetries": 2,
+                "maxCandidates": 5,
+                "useRepositoryFallback": True,
+                "preferCssOverXpath": True,
+                "blockDestructiveActions": True,
+                "allowTestModeOverride": True,
+                "destructiveKeywords": ["delete", "remove", "submit payment"]
+            }
         
+        # Determine which browsers to run (priority: query param > test case config > suite config > policy config)
+        if browser:
+            # Query parameter override (for reruns or manual selection)
+            browsers_to_run = [browser]
+            logger.info(f"Using query param browser override: {browser}")
+        else:
+            # Check if this prompt has an associated test case with browser config
+            test_case_browser_config = None
+            suite_browser_config = None
+            
+            try:
+                # Look up test case and suite browser configurations
+                tc_query = """
+                SELECT 
+                    tc.browser_config as test_case_config,
+                    ts.browser_config as suite_config
+                FROM planner.plans p
+                LEFT JOIN tests.test_cases tc ON tc.plan_id = p.id
+                LEFT JOIN tests.test_suites ts ON tc.suite_id = ts.id
+                WHERE p.prompt_id = $1
+                ORDER BY tc.created_at DESC
+                LIMIT 1
+                """
+                tc_result = await db.execute_one(tc_query, prompt_id)
+                
+                if tc_result:
+                    if tc_result.get('test_case_config'):
+                        test_case_browser_config = json.loads(tc_result['test_case_config']) if isinstance(tc_result['test_case_config'], str) else tc_result['test_case_config']
+                    if tc_result.get('suite_config'):
+                        suite_browser_config = json.loads(tc_result['suite_config']) if isinstance(tc_result['suite_config'], str) else tc_result['suite_config']
+            except Exception as e:
+                logger.warning(f"Could not fetch test case/suite browser config: {e}")
+            
+            # Apply priority order
+            if test_case_browser_config and test_case_browser_config.get('browsers'):
+                browsers_to_run = test_case_browser_config['browsers']
+                logger.info(f"Using test case browser config: {browsers_to_run}")
+            elif suite_browser_config and suite_browser_config.get('browsers'):
+                browsers_to_run = suite_browser_config['browsers']
+                logger.info(f"Using suite browser config: {browsers_to_run}")
+            else:
+                browsers_to_run = preferred_browsers
+                logger.info(f"Using policy-configured browsers: {browsers_to_run}")
+
+        # Enforce monthly execution quota before starting browser runs.
+        if current_user and current_user.tenant and current_user.tenant.id:
+            tenant_id_str = str(current_user.tenant.id)
+            # Hard-block if subscription is canceled/expired
+            await require_active_subscription(db, tenant_id_str)
+            await enforce_monthly_test_runs_limit(
+                db,
+                tenant_id_str,
+                additional_runs=len(browsers_to_run),
+            )
+
         # Call Java runner service directly (much faster than ECS tasks)
+        dispatch_mode = os.getenv("DISPATCH_MODE", "push")  # "push" or "agent"
+
+        # If a specific runner_id is provided, force agent mode
+        if runner_id:
+            dispatch_mode = "agent"
+            # Validate runner exists and belongs to this org
+            runner_row = await db.execute_one(
+                "SELECT id, status FROM exec.runners WHERE id = $1 AND organization_id = $2",
+                runner_id, str(current_user.tenant.id),
+            )
+            if not runner_row:
+                raise HTTPException(status_code=404, detail=f"Runner {runner_id} not found in your organization")
+            logger.info(f"Targeting specific runner: {runner_id}")
+
+        # Agent mode: queue executions for remote runner agents to pick up via polling
+        if dispatch_mode == "agent":
+            logger.info("Dispatch mode: agent — queueing executions for runner poll")
+            all_executions = []
+
+            for browser_type in browsers_to_run:
+                browser_execution_id, browser_step_ids = await create_execution_record(
+                    db, prompt_id, test_steps, current_user, browser_type=browser_type
+                )
+
+                # Store mapped steps into step_results so the runner can fetch them
+                for i, step in enumerate(test_steps):
+                    if i < len(browser_step_ids):
+                        await db.execute_one(
+                            """
+                            UPDATE exec.step_results
+                            SET action_data = $2
+                            WHERE id = $1
+                            """,
+                            browser_step_ids[i],
+                            json.dumps({
+                                "action": step.get("action", ""),
+                                "locator": step.get("locator", ""),
+                                "value": step.get("value", ""),
+                                "description": step.get("description", ""),
+                            }),
+                        )
+
+                # Mark the run as queued for agent pickup
+                await db.execute_one(
+                    """
+                    UPDATE exec.runs
+                    SET status = 'queued',
+                        dispatch_mode = 'agent',
+                        assigned_runner_id = $3,
+                        runner_meta = $2
+                    WHERE id = $1
+                    """,
+                    browser_execution_id,
+                    json.dumps({
+                        "prompt_id": prompt_id,
+                        "policy_config": policy_config,
+                        "steps_count": len(test_steps),
+                        "execution_type": "agent_queued",
+                        "browser": browser_type,
+                        "target_runner_id": runner_id,
+                    }),
+                    runner_id,  # NULL if not targeting a specific runner
+                )
+
+                all_executions.append({
+                    "browser": browser_type,
+                    "execution_id": browser_execution_id,
+                    "status": "queued",
+                    "dispatch_mode": "agent",
+                    "success": True,
+                })
+                logger.info(f"Queued execution {browser_execution_id} for {browser_type} (agent pickup)")
+
+            return {
+                "success": True,
+                "message": f"Test execution queued on {len(all_executions)}/{len(browsers_to_run)} browsers (agent mode)",
+                "executions": all_executions,
+                "successful_count": len(all_executions),
+                "failed_count": 0,
+                "steps_count": len(test_steps),
+                "prompt_text": f"Plan execution for prompt {prompt_id}",
+                "dispatch_mode": "agent",
+            }
+
+        # Push mode (default): call Java runner directly via HTTP
         try:
             import httpx
-            
-            java_runner_url = os.getenv("JAVA_RUNNER_URL", "https://java-runner.testhelix.com")
+
+            # Use local Java runner for development
+            java_runner_url = os.getenv("JAVA_RUNNER_URL", "http://localhost:8080")
             target_url = f"{java_runner_url}/api/v1/execute"
-            
+            logger.info(f"Using Java runner at: {java_runner_url}")
+
             # Apply action mapping to steps before sending to Java runner
             mapped_steps = []
             action_mapping = {
@@ -771,6 +1111,10 @@ async def execute_prompt(
             
             logger.info(f"Starting step mapping. test_steps count: {len(test_steps)}, step_ids count: {len(step_ids)}")
             logger.info(f"Step IDs: {step_ids}")
+
+            # Determine selector policy from configuration
+            selector_policy_value = "css" if policy_config.get("preferCssOverXpath", True) else "xpath"
+            logger.info(f"Applying selector policy: {selector_policy_value} (preferCssOverXpath={policy_config.get('preferCssOverXpath')})")
             
             for i, step in enumerate(test_steps):
                 mapped_step = step.copy()  # Create a copy to avoid modifying original
@@ -788,52 +1132,95 @@ async def execute_prompt(
                 else:
                     logger.error(f"Step {i+1}: No step ID available! step_ids length: {len(step_ids)}, current index: {i}")
                 
+                # Apply selector policy to each step
+                mapped_step["selectorPolicy"] = selector_policy_value
+                
                 mapped_steps.append(mapped_step)
                 
             logger.info(f"Final mapped_steps count: {len(mapped_steps)}")
+
+            # Execute test on each selected browser
+            all_executions = []
             
-            execution_request = {
-                "promptId": prompt_id,
-                "executionId": execution_id,  # Pass the database execution ID
-                "steps": mapped_steps,
-                "authToken": auth_token or ""
-            }
-            
-            logger.info(f"Calling Java runner service at: {target_url}")
-            logger.info(f"Request payload - promptId: {prompt_id}, steps count: {len(test_steps)}, has auth: {bool(auth_token)}")
-            logger.info(f"DETAILED REQUEST PAYLOAD: {json.dumps(execution_request, indent=2)}")
-            
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                logger.info("Making HTTP POST request to Java runner...")
-                logger.info(f"Request headers: Content-Type=application/json, timeout=60s")
-                response = await client.post(
-                    target_url,
-                    json=execution_request,
-                    timeout=60.0
+            for browser_type in browsers_to_run:
+                # Create a separate execution record for each browser
+                browser_execution_id, browser_step_ids = await create_execution_record(
+                    db, prompt_id, test_steps, current_user, browser_type=browser_type
                 )
                 
-                logger.info(f"Java runner response - Status: {response.status_code}, Headers: {dict(response.headers)}")
-                logger.info(f"Java runner response body: {response.text}")
+                # Remap steps with the new step IDs for this execution
+                browser_mapped_steps = []
+                for i, step in enumerate(mapped_steps):
+                    browser_step = step.copy()
+                    if i < len(browser_step_ids):
+                        browser_step["id"] = browser_step_ids[i]
+                    browser_mapped_steps.append(browser_step)
                 
-                if response.status_code == 200:
-                    result = response.json()
-                    logger.info(f"Java runner started execution successfully: {result}")
-                    logger.info(f"Execution ID from Java runner: {result.get('executionId')}")
-                    logger.info(f"Status from Java runner: {result.get('status')}")
-                    
-                    return {
-                        "success": True,
-                        "message": "Test execution started via Java runner service",
-                        "execution_id": execution_id,
-                        "java_runner_execution_id": result.get("executionId"),
-                        "java_runner_status": result.get("status"),
-                        "steps_count": len(test_steps),
-                        "prompt_text": f"Plan execution for prompt {prompt_id}"
-                    }
-                else:
-                    response_text = response.text if hasattr(response, 'text') else str(response.content)
-                    logger.error(f"Java runner failed - Status: {response.status_code}, Response: {response_text}")
-                    raise Exception(f"Java runner service error: {response.status_code} - {response_text}")
+                execution_request = {
+                    "promptId": prompt_id,
+                    "executionId": browser_execution_id,
+                    "steps": browser_mapped_steps,
+                    "authToken": auth_token or "",
+                    "policyConfig": policy_config,
+                    "browserType": browser_type
+                }
+                
+                logger.info(f"Calling Java runner for browser: {browser_type} at: {target_url}")
+                logger.info(f"Request payload - promptId: {prompt_id}, browser: {browser_type}, steps count: {len(test_steps)}")
+                
+                async with httpx.AsyncClient(timeout=60.0) as client:
+                    try:
+                        response = await client.post(
+                            target_url,
+                            json=execution_request,
+                            timeout=60.0
+                        )
+                        
+                        logger.info(f"Java runner response for {browser_type} - Status: {response.status_code}")
+                        
+                        if response.status_code == 200:
+                            result = response.json()
+                            all_executions.append({
+                                "browser": browser_type,
+                                "execution_id": browser_execution_id,
+                                "java_runner_execution_id": result.get("executionId"),
+                                "status": result.get("status"),
+                                "success": True
+                            })
+                            logger.info(f"Successfully started execution on {browser_type}: {browser_execution_id}")
+                        else:
+                            response_text = response.text if hasattr(response, 'text') else str(response.content)
+                            logger.error(f"Java runner failed for {browser_type} - Status: {response.status_code}, Response: {response_text}")
+                            all_executions.append({
+                                "browser": browser_type,
+                                "execution_id": browser_execution_id,
+                                "status": "failed",
+                                "error": response_text,
+                                "success": False
+                            })
+                    except Exception as e:
+                        logger.error(f"Error executing on {browser_type}: {e}")
+                        all_executions.append({
+                            "browser": browser_type,
+                            "execution_id": browser_execution_id,
+                            "status": "error",
+                            "error": str(e),
+                            "success": False
+                        })
+            
+            # Return results for all browsers
+            successful_executions = [e for e in all_executions if e["success"]]
+            failed_executions = [e for e in all_executions if not e["success"]]
+            
+            return {
+                "success": len(successful_executions) > 0,
+                "message": f"Test execution started on {len(successful_executions)}/{len(browsers_to_run)} browsers",
+                "executions": all_executions,
+                "successful_count": len(successful_executions),
+                "failed_count": len(failed_executions),
+                "steps_count": len(test_steps),
+                "prompt_text": f"Plan execution for prompt {prompt_id}"
+            }
             
         except httpx.TimeoutException as e:
             logger.error(f"Timeout calling Java runner service: {e}")
@@ -875,60 +1262,125 @@ async def execute_prompt(
         logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Failed to execute prompt: {str(e)}")
 
-async def create_execution_record(db: DatabaseManager, prompt_id: str, steps: List[Dict], current_user: 'CurrentUser') -> tuple[str, List[str]]:
+async def create_execution_record(db: DatabaseManager, prompt_id: str, steps: List[Dict], current_user: Optional['CurrentUser'], browser_type: str = "chrome") -> tuple[str, List[str]]:
     """Create a new execution record using proper exec.runs table and return execution_id and step_ids"""
     try:
-        # Ensure user has a project
-        if not current_user.project or not current_user.project.id:
-            raise Exception("User must be assigned to a project to create executions")
-        
-        # Use current user's project
-        project_uuid = current_user.project.id
-        
-        # Use current user's UUID
-        created_by_uuid = current_user.user.id
+        # Get project and user - handle dev mode where current_user might be None
+        if current_user and current_user.project and current_user.project.id:
+            # Use current user's project
+            project_uuid = current_user.project.id
+            created_by_uuid = current_user.user.id
+            tenant_id_for_limits = str(current_user.tenant.id) if current_user.tenant and current_user.tenant.id else None
+        else:
+            # Dev mode or no user - get default project and user
+            logger.info("Dev mode: Fetching default project and user")
+            project_query = "SELECT id FROM core.projects WHERE is_active = true ORDER BY created_at DESC LIMIT 1"
+            project_result = await db.execute_one(project_query)
+            if not project_result:
+                raise Exception("No active project found")
+            project_uuid = project_result['id']
+            
+            user_query = "SELECT id FROM core.users WHERE is_active = true ORDER BY created_at DESC LIMIT 1"
+            user_result = await db.execute_one(user_query)
+            created_by_uuid = user_result['id'] if user_result else None
+            tenant_id_for_limits = None
+
+        # Resolve tenant for quota checks when not available via auth context.
+        if not tenant_id_for_limits:
+            tenant_lookup = await db.execute_one(
+                "SELECT tenant_id FROM core.projects WHERE id = $1",
+                project_uuid,
+            )
+            tenant_id_for_limits = str(tenant_lookup['tenant_id']) if tenant_lookup and tenant_lookup.get('tenant_id') else None
+
+        # Enforce monthly run limits at record-creation boundary (safety net for all callers).
+        if tenant_id_for_limits:
+            await require_active_subscription(db, tenant_id_for_limits)
+            await enforce_monthly_test_runs_limit(db, tenant_id_for_limits, additional_runs=1)
         
         # Create or get a test case record in the tests.test_cases table
         test_case_uuid = uuid.uuid5(uuid.NAMESPACE_URL, f"prompt:{prompt_id}")
         
-        # Create test case with confirmed user - using actual tests.test_cases schema
-        test_case_query = """
-        INSERT INTO tests.test_cases (
-            id, 
-            project_id, 
-            plan_id,
-            title, 
-            description
-        )
-        VALUES ($1, $2, $3, $4, $5)
-        ON CONFLICT (id) DO NOTHING
+        # Look up the actual plan ID from planner.plans table using prompt_id
+        plan_lookup_query = """
+        SELECT id FROM planner.plans 
+        WHERE prompt_id = $1
+        ORDER BY created_at DESC
+        LIMIT 1
         """
+        plan_lookup_result = await db.execute_one(plan_lookup_query, prompt_id)
         
-        await db.execute_one(
-            test_case_query,
-            test_case_uuid,
-            project_uuid,  # Use discovered valid project UUID
-            prompt_id,     # Add plan_id (prompt_id)
-            f"Prompt-driven test: {prompt_id[:8]}",
-            f"Automated test execution for prompt {prompt_id}"
-        )
+        # Use the plan's ID if found, otherwise NULL
+        actual_plan_id = plan_lookup_result['id'] if plan_lookup_result else None
         
-        # Now insert into exec.runs table - NOTE: exec.runs does NOT have project_id column
-        # It only references test_case_id and session_id (optional)
+        if not actual_plan_id:
+            logger.warning(f"No plan found in planner.plans for prompt_id={prompt_id}, creating test_case without plan_id")
+        else:
+            logger.info(f"Found plan ID {actual_plan_id} for prompt_id={prompt_id}")
+        
+        # Create test case - try with plan_id first, fall back without it if column doesn't exist
+        try:
+            test_case_query = """
+            INSERT INTO tests.test_cases (
+                id, 
+                project_id, 
+                plan_id,
+                title, 
+                description
+            )
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (id) DO NOTHING
+            """
+            
+            await db.execute_one(
+                test_case_query,
+                test_case_uuid,
+                project_uuid,
+                actual_plan_id,
+                f"Prompt-driven test: {prompt_id[:8]}",
+                f"Automated test execution for prompt {prompt_id}"
+            )
+        except Exception as e:
+            # If plan_id column doesn't exist, try without it
+            logger.warning(f"Falling back to test case creation without plan_id: {str(e)}")
+            test_case_query = """
+            INSERT INTO tests.test_cases (
+                id, 
+                project_id, 
+                title, 
+                description
+            )
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (id) DO NOTHING
+            """
+            
+            await db.execute_one(
+                test_case_query,
+                test_case_uuid,
+                project_uuid,
+                f"Prompt-driven test: {prompt_id[:8]}",
+                f"Automated test execution for prompt {prompt_id}"
+            )
+        
+        # Now insert into exec.runs table - add project_id if required
         execution_query = """
         INSERT INTO exec.runs (
             test_case_id,
+            project_id,
+            browser_type,
             status,
             started_at,
             runner_meta
         )
-        VALUES ($1, $2, $3, $4)
+        VALUES ($1, $2, $3, $4, $5, $6)
         RETURNING id
         """
         
         execution_result = await db.execute_one(
             execution_query,
-            test_case_uuid,  # Reference to test case in tests schema
+            test_case_uuid,
+            project_uuid,
+            browser_type,
             "running",
             datetime.now(),
             json.dumps({
@@ -937,41 +1389,61 @@ async def create_execution_record(db: DatabaseManager, prompt_id: str, steps: Li
                 "execution_type": "api_triggered",
                 "framework_version": "1.0",
                 "prompt_id": prompt_id,
-                "test_case_name": f"Prompt-driven test: {prompt_id[:8]}",
                 "triggered_by": "api-execution",
-                "project_name": "self-healing-framework"
+                "project_name": "self-healing-framework",
+                "browser": browser_type
             })
         )
         
         execution_id = str(execution_result["id"])
         
         # Also create step_results records for each step and collect their IDs
-        # Note: Using test_run_id column name as per actual table schema
         step_ids = []
         for i, step in enumerate(steps):
-            step_query = """
-            INSERT INTO exec.step_results (
-                test_run_id,
-                step_order,
-                action_data,
-                status
-            )
-            VALUES ($1, $2, $3, $4)
-            RETURNING id
-            """
-            
-            step_result = await db.execute_one(
-                step_query,
-                execution_id,  # This should reference our exec.runs record
-                i + 1,
-                json.dumps({
-                    "action": step.get("action", "unknown"),
-                    "locator": step.get("locator", step.get("selector", "")),
-                    "value": step.get("value", ""),
-                    "description": step.get("description", "")
-                }),
-                "pending"
-            )
+            # Try with action_data column first, fall back to simpler schema if it doesn't exist
+            try:
+                step_query = """
+                INSERT INTO exec.step_results (
+                    test_run_id,
+                    step_order,
+                    action_data,
+                    status
+                )
+                VALUES ($1, $2, $3, $4)
+                RETURNING id
+                """
+                
+                step_result = await db.execute_one(
+                    step_query,
+                    execution_id,
+                    i + 1,
+                    json.dumps({
+                        "action": step.get("action", "unknown"),
+                        "locator": step.get("locator", step.get("selector", "")),
+                        "value": step.get("value", ""),
+                        "description": step.get("description", "")
+                    }),
+                    "pending"
+                )
+            except Exception as e:
+                # If action_data doesn't exist, try minimal schema
+                logger.warning(f"Falling back to minimal step_results schema: {str(e)}")
+                step_query = """
+                INSERT INTO exec.step_results (
+                    test_run_id,
+                    step_order,
+                    status
+                )
+                VALUES ($1, $2, $3)
+                RETURNING id
+                """
+                
+                step_result = await db.execute_one(
+                    step_query,
+                    execution_id,
+                    i + 1,
+                    "pending"
+                )
             
             step_ids.append(str(step_result['id']))
             
@@ -1107,9 +1579,13 @@ def update_db_status_sync(status: str, execution_id: str, prompt_id: str = None,
         return False
 
 async def execute_java_test_background(prompt_id: str, test_steps: List[Dict], execution_id: str, bindings: Optional[List[Dict]] = None):
-    """Background execution with ENFORCED database mode"""
+    """Background execution with ENFORCED database mode.
 
-        # Get current selector policy for passing to Java runner
+    This path is used when the HTTP Java runner service is unavailable.
+    It converts steps to the local Java CLI format and launches demo.Main directly.
+    """
+
+    # Get current selector policy for passing to Java runner
     current_selector_policy = "css"  # Default
     try:
         # Get current policy configuration - same logic as get_policy_based_selector
@@ -1122,7 +1598,7 @@ async def execute_java_test_background(prompt_id: str, test_steps: List[Dict], e
         LIMIT 1
         """
         policy_result = await db.execute_one(policy_query)
-        
+
         if policy_result and policy_result.get("context"):
             config_data = json.loads(policy_result["context"])
             locator_healing = config_data.get("configurations", {}).get("locatorHealing", {})
@@ -1130,91 +1606,82 @@ async def execute_java_test_background(prompt_id: str, test_steps: List[Dict], e
             current_selector_policy = "css" if prefer_css else "xpath"
     except Exception as e:
         logger.warning(f"Could not get selector policy: {e}")
-    
+
     # Initialize variables for compatibility
     status = "running"
     results = None
-    
+
     # Update status to running
     update_db_status_sync(status, execution_id, prompt_id, "Test execution in progress", results, bindings)
-    
-    # Continue with Java test execution
+
     logger.info("Starting Java test execution")
-    
-    # Convert to Java runner format
-    java_steps = []
-    
-    # Convert to Java runner format
+
+    # Convert to Java runner format (single pass)
+    java_steps: List[Dict[str, Any]] = []
     for step in test_steps:
-        
-        # Continue with Java test execution
-        logger.info("Starting Java test execution")
-        
-        # Convert to Java runner format
-        java_steps = []
-        for step in test_steps:
-            # Check if steps are already in Java format (from AI debug execution)
-            if "elementId" in step and "page" in step:
-                # Steps are already in Java format, ensure selectorPolicy is set
-                if "selectorPolicy" not in step:
-                    step["selectorPolicy"] = current_selector_policy
-                java_steps.append(step)
-            else:
-                # Steps need conversion from old format
-                action = step["action"]
-                if action == "open_url":
-                    action = "open"
-                elif action == "assert_visible":
-                    action = "verify_element"
-                elif action == "assert_text":
-                    action = "verify_text"
-                elif action == "screenshot":
-                    action = "screenshot"
-                # Keep extract_data and calculate as-is since Java runner supports them
-                
-                # Format locator properly
-                locator = step["locator"]
-                if locator and not locator.startswith("css=") and not locator.startswith("xpath="):
-                    # Check if it's an XPath selector (starts with / or contains xpath-specific syntax)
-                    if locator.startswith("/") or "//*[" in locator or "[@" in locator:
-                        locator = f"xpath={locator}"
-                    elif locator.startswith("#") or locator.startswith(".") or "[" in locator:
-                        locator = f"css={locator}"
-                
-                # For open_url, put URL in locator field as well
-                if step["action"] == "open_url":
-                    locator = step["value"]
-                
-                # Special handling for extract_data and calculate actions
-                data_value = step["value"]
-                if step["action"] == "extract_data":
-                    # For extract_data, the Java runner expects the variable name in the 'data' field
-                    data_value = step["value"]  # Variable name
-                elif step["action"] == "calculate":
-                    # For calculate, the Java runner expects the result variable in 'data' field
-                    # and the formula in 'locator' field (which is already set above)
-                    data_value = step["value"]  # Result variable name
-                    
-                java_steps.append({
-                    "page": "saucedemo",
-                    "action": action,
-                    "locator": locator,
-                    "elementId": f"element_{len(java_steps) + 1}",
-                    "data": data_value,
-                    "selectorPolicy": current_selector_policy  # KEY FIX: Pass policy to Java runner
-                })
+        # Check if steps are already in Java format (from AI debug execution)
+        if "elementId" in step and "page" in step:
+            # Steps are already in Java format, ensure selectorPolicy is set
+            if "selectorPolicy" not in step:
+                step["selectorPolicy"] = current_selector_policy
+            java_steps.append(step)
+            continue
+
+        # Steps need conversion from old format
+        action = step.get("action", "")
+        if action == "open_url":
+            action = "open"
+        elif action == "assert_visible":
+            action = "verify_element"
+        elif action == "assert_text":
+            action = "verify_text"
+        # Keep extract_data and calculate as-is since Java runner supports them
+
+        # Format locator properly
+        locator = step.get("locator", step.get("selector", ""))
+        if locator and not locator.startswith("css=") and not locator.startswith("xpath="):
+            # Check if it's an XPath selector (starts with / or contains xpath-specific syntax)
+            if locator.startswith("/") or "//*[" in locator or "[@" in locator:
+                locator = f"xpath={locator}"
+            elif locator.startswith("#") or locator.startswith(".") or "[" in locator:
+                locator = f"css={locator}"
+
+        # For open_url, put URL in locator field as well
+        if step.get("action") == "open_url":
+            locator = step.get("value", "")
+
+        # Special handling for extract_data and calculate actions
+        data_value = step.get("value", "")
+        if step.get("action") == "extract_data":
+            # For extract_data, the Java runner expects the variable name in the 'data' field
+            data_value = step.get("value", "")  # Variable name
+        elif step.get("action") == "calculate":
+            # For calculate, the Java runner expects the result variable in 'data' field
+            # and the formula in 'locator' field (which is already set above)
+            data_value = step.get("value", "")  # Result variable name
+
+        java_steps.append({
+            "page": "saucedemo",
+            "action": action,
+            "locator": locator,
+            "elementId": f"element_{len(java_steps) + 1}",
+            "data": data_value,
+            "selectorPolicy": current_selector_policy,
+        })
         with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
             json.dump(java_steps, f, indent=2)  # Write steps array directly, not wrapped in object
             temp_file = f.name
 
         java_runner_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../java-runner"))
-        
-        # On Windows, we need to be careful with classpath and path separators
+
+        # On Windows, we need to be careful with classpath and path separators.
+        # Maven is configured to copy dependencies into a top-level 'lib' directory,
+        # so we include that on the classpath instead of the non-existent target/dependency.
         if os.name == 'nt':
-            classpath = "target\\classes;target\\dependency\\*"
+            classpath = "target\\classes;lib\\*"
             temp_file_java = temp_file.replace('\\', '/')
         else:
-            classpath = "target/classes:target/dependency/*"
+            classpath = "target/classes:lib/*"
             temp_file_java = temp_file
         
         cmd_parts = ["java", "-Djava.awt.headless=false", "-Dtest.visible=true", "-cp", classpath, "demo.Main", temp_file_java]
@@ -1241,7 +1708,7 @@ async def execute_java_test_background(prompt_id: str, test_steps: List[Dict], e
                         break
                     line = line.strip()
                     if line:
-                        print(f"Java output: {line}")
+                        logger.debug(f"Java output: {line}")
                 
                 return_code = process.wait()
                 
@@ -1277,29 +1744,29 @@ async def execute_java_test_background(prompt_id: str, test_steps: List[Dict], e
                     try:
                         final_status = "completed" if return_code == 0 else "failed"
                         update_db_status_sync(final_status, execution_id, prompt_id, f"Execution finished (parse error: {str(e)})")
-                    except:
-                        pass
+                    except Exception as status_err:
+                        logger.warning("Failed to update execution status after parse error: %s", status_err)
                 
                 # Clean up temp file
                 try:
                     os.unlink(temp_file)
                 except Exception as e:
-                    pass
+                    logger.warning("Failed to cleanup temp file %s: %s", temp_file, e)
                     
             except Exception as e:
                 # Mark execution as failed in database
                 try:
                     update_db_status_sync("failed", execution_id, prompt_id, f"Java execution failed: {str(e)}")
-                except:
-                    pass
+                except Exception as status_err:
+                    logger.warning("Failed to update execution status after Java failure: %s", status_err)
                     try:
                         update_db_status_sync("failed", execution_id, prompt_id, f"Java execution error: {str(e)}")
-                    except:
-                        pass
+                    except Exception as status_err_2:
+                        logger.warning("Fallback status update also failed: %s", status_err_2)
                 try:
                     os.unlink(temp_file)
-                except:
-                    pass
+                except Exception as cleanup_err:
+                    logger.warning("Failed to cleanup temp file after Java failure: %s", cleanup_err)
         
         # Start daemon thread
         thread = threading.Thread(target=run_java, daemon=True)
@@ -1316,12 +1783,12 @@ def execute_java_test_background_wrapper(prompt_id: str, test_steps: List[Dict],
         asyncio.set_event_loop(loop)
         loop.run_until_complete(execute_java_test_background(prompt_id, test_steps, execution_id, bindings))
     except Exception as e:
-        pass
+        logger.exception("Background Java execution wrapper failed")
     finally:
         try:
             loop.close()
-        except:
-            pass
+        except Exception as close_err:
+            logger.warning("Failed to close event loop in background wrapper: %s", close_err)
 
 async def update_execution_status(db: DatabaseManager, execution_id: str, status: str, message: str = None, results: Dict = None):
     """Update execution status using proper exec.runs table"""
@@ -1438,6 +1905,23 @@ async def execute_debug_steps(
         # Create a test case for the debug execution (required by foreign key constraint)
         test_case_uuid = uuid.uuid4()
         
+        # Look up the actual plan ID from planner.plans table using prompt_id
+        plan_lookup_query = """
+        SELECT id FROM planner.plans 
+        WHERE prompt_id = $1
+        ORDER BY created_at DESC
+        LIMIT 1
+        """
+        plan_lookup_result = await db.execute_one(plan_lookup_query, prompt_id)
+        
+        # Use the plan's ID if found, otherwise NULL
+        actual_plan_id = plan_lookup_result['id'] if plan_lookup_result else None
+        
+        if not actual_plan_id:
+            logger.warning(f"No plan found in planner.plans for prompt_id={prompt_id} (debug execution), creating test_case with plan_id=NULL")
+        else:
+            logger.info(f"Found plan ID {actual_plan_id} for prompt_id={prompt_id} (debug execution)")
+        
         # Create test case for AI debug execution
         test_case_query = """
         INSERT INTO tests.test_cases (
@@ -1462,7 +1946,7 @@ async def execute_debug_steps(
             test_case_query,
             test_case_uuid,
             project_uuid,
-            prompt_id,  # Add plan_id (prompt_id)
+            actual_plan_id,  # Use actual plan ID from planner.plans, not prompt_id
             f"AI Debug Run: {test_name[:50]}",  # Truncate title if too long
             f"AI-generated minimal reproduction steps for prompt {prompt_id}",
             "ai_debug",
@@ -1702,15 +2186,39 @@ async def update_step_status(
 ):
     """
     Endpoint for Java runner to update individual step status by step ID
+    Also captures healing attempt data if provided
     """
     try:
         status = request.get("status")
         error_details = request.get("error_details")
         screenshot_path = request.get("screenshot_path")
         finished_at = request.get("finished_at")
+        healed = request.get("healed", False)
+        healing_attempts = request.get("healing_attempts", [])  # NEW: capture healing data
         
         if not status:
             raise HTTPException(status_code=400, detail="status is required")
+        
+        # If healing was attempted, convert status to pending_review
+        # This marks any step where healing was tried (success or fail) for human review
+        if healed:
+            status = "pending_review"
+            logger.info(f"Step {step_id}: Healing attempted, converting status to pending_review (original: {request.get('status')})")
+        
+        # Convert error_details to JSON if it's a string
+        import json as json_lib
+        if error_details and isinstance(error_details, str):
+            try:
+                # Wrap plain string error messages in a JSON object
+                error_details_json = json_lib.dumps({"message": error_details})
+            except Exception as e:
+                logger.warning(f"Failed to JSON encode error_details, storing as-is: {e}")
+                error_details_json = json_lib.dumps({"message": str(error_details)})
+        elif error_details:
+            # Already a dict/object, just ensure it's JSON
+            error_details_json = json_lib.dumps(error_details)
+        else:
+            error_details_json = None
             
         # Update the step result by step ID
         update_query = """
@@ -1742,12 +2250,148 @@ async def update_step_status(
         await db.execute_command(
             update_query,
             status,
-            error_details,
+            error_details_json,
             screenshot_path,
             finished_timestamp,
             datetime.now(),
             step_id
         )
+        
+        # NEW: Store healing attempt data if healing was attempted
+        if healed:
+            try:
+                if healing_attempts:
+                    # Detailed attempts provided by Java runner
+                    for attempt in healing_attempts:
+                        # Create locator event
+                        event_query = """
+                        INSERT INTO healing.locator_events (
+                            run_step_id, event_type, original_selector, 
+                            failure_reason, created_at
+                        ) VALUES ($1, $2, $3, $4, $5)
+                        RETURNING id
+                        """
+
+                        original_selector = attempt.get('originalLocator', {})
+                        if isinstance(original_selector, str):
+                            original_selector = {'css': original_selector}
+
+                        event_id = await db.execute_one(
+                            event_query,
+                            step_id,
+                            'element_not_found',
+                            json_lib.dumps(original_selector),
+                            error_details or 'Element not found',
+                            datetime.now()
+                        )
+
+                        # Create candidates and decision for each attempted alternative
+                        attempted_alternatives = attempt.get('attemptedAlternatives', [])
+                        healed_locator = attempt.get('healedLocator')
+                        result = attempt.get('result', 'failed')
+
+                        if attempted_alternatives and event_id:
+                            for idx, alt_locator in enumerate(attempted_alternatives):
+                                # Insert candidate
+                                candidate_query = """
+                                INSERT INTO healing.candidates (
+                                    locator_event_id, selector, selector_type,
+                                    score, rationale, created_at
+                                ) VALUES ($1, $2, $3, $4, $5, $6)
+                                RETURNING id
+                                """
+
+                                selector_data = {'css': alt_locator} if isinstance(alt_locator, str) else alt_locator
+
+                                candidate_id = await db.execute_one(
+                                    candidate_query,
+                                    event_id['id'],
+                                    json_lib.dumps(selector_data),
+                                    'css',
+                                    0.5 - (idx * 0.1),  # Decreasing score for each attempt
+                                    f'Alternative locator attempt {idx + 1}',
+                                    datetime.now()
+                                )
+
+                                # If this was the healed locator, create a decision
+                                if healed_locator and alt_locator == healed_locator and candidate_id:
+                                    decision_query = """
+                                    INSERT INTO healing.decisions (
+                                        locator_event_id, chosen_candidate_id,
+                                        decision_type, rationale, success, automated, decided_at
+                                    ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+                                    """
+
+                                    await db.execute_command(
+                                        decision_query,
+                                        event_id['id'],
+                                        candidate_id['id'],
+                                        'automated',
+                                        f'Healing {result}',
+                                        result == 'success',
+                                        True,
+                                        datetime.now()
+                                    )
+
+                    logger.info(f"Stored {len(healing_attempts)} healing attempts for step {step_id}")
+                else:
+                    # No structured attempts were provided, but healing was attempted.
+                    # Record a generic failed healing event so the UI can display it.
+                    generic_failure_reason = None
+                    if error_details:
+                        if isinstance(error_details, str):
+                            generic_failure_reason = error_details
+                        elif isinstance(error_details, dict):
+                            generic_failure_reason = error_details.get("message") or json_lib.dumps(error_details)
+                    if not generic_failure_reason:
+                        generic_failure_reason = "Healing attempted but no alternative locators were found"
+
+                    # Try to recover the original selector from the step's action_data
+                    original_selector_payload = {}
+                    try:
+                        selector_row = await db.execute_one(
+                            "SELECT action_data FROM exec.step_results WHERE id = $1",
+                            step_id
+                        )
+
+                        if selector_row and selector_row.get("action_data"):
+                            try:
+                                action_data = json_lib.loads(selector_row["action_data"])
+                            except Exception:
+                                action_data = {}
+
+                            locator_value = None
+                            if isinstance(action_data, dict):
+                                locator_value = (
+                                    action_data.get("locator")
+                                    or action_data.get("selector")
+                                    or action_data.get("target")
+                                    or action_data.get("value")
+                                )
+
+                            if locator_value:
+                                original_selector_payload = {"raw": locator_value}
+                    except Exception as e:
+                        logger.warning(f"Failed to load original selector for healing event: {e}")
+
+                    event_query = """
+                    INSERT INTO healing.locator_events (
+                        run_step_id, event_type, original_selector,
+                        failure_reason, created_at
+                    ) VALUES ($1, $2, $3, $4, $5)
+                    """
+
+                    await db.execute_command(
+                        event_query,
+                        step_id,
+                        'healing_failed_no_candidates',
+                        json_lib.dumps(original_selector_payload or {}),
+                        generic_failure_reason,
+                        datetime.now()
+                    )
+            except Exception as e:
+                logger.error(f"Failed to store healing attempts: {e}")
+                # Don't fail the whole request if healing storage fails
         
         return {
             "success": True,
@@ -1759,3 +2403,4 @@ async def update_step_status(
     except Exception as e:
         logger.error(f"Error updating step status: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to update step status: {str(e)}")
+

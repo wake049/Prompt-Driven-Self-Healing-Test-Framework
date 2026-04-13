@@ -148,8 +148,8 @@ TOOL_SCHEMAS = {
     "context.put": {
         "type": "object",
         "properties": {
-            "key": {"type": "string", "description": "Context key"},
-            "value": {"description": "Context value"},
+            "key": {"type": "string", "minLength": 1, "maxLength": 256, "description": "Context key"},
+            "value": {"description": "Context value", "maxLength": 65536},
             "type": {"type": "string", "description": "Value type hint"}
         },
         "required": ["key", "value"]
@@ -158,7 +158,7 @@ TOOL_SCHEMAS = {
     "context.get": {
         "type": "object",
         "properties": {
-            "key": {"type": "string", "description": "Context key to retrieve"}
+            "key": {"type": "string", "minLength": 1, "maxLength": 256, "description": "Context key to retrieve"}
         },
         "required": ["key"]
     },
@@ -166,7 +166,7 @@ TOOL_SCHEMAS = {
     "context.expectEqual": {
         "type": "object",
         "properties": {
-            "key": {"type": "string", "description": "Context key"},
+            "key": {"type": "string", "minLength": 1, "maxLength": 256, "description": "Context key"},
             "expected": {"description": "Expected value"},
             "message": {"type": "string", "description": "Custom assertion message"}
         },
@@ -176,7 +176,7 @@ TOOL_SCHEMAS = {
     "elements.add": {
         "type": "object",
         "properties": {
-            "elementId": {"type": "string", "description": "Element identifier"},
+            "elementId": {"type": "string", "minLength": 1, "description": "Element identifier"},
             "elementData": {
                 "type": "object",
                 "properties": {
@@ -194,7 +194,7 @@ TOOL_SCHEMAS = {
     "elements.get": {
         "type": "object",
         "properties": {
-            "elementId": {"type": "string", "description": "Element identifier"}
+            "elementId": {"type": "string", "minLength": 1, "description": "Element identifier"}
         },
         "required": ["elementId"]
     },
@@ -220,7 +220,7 @@ TOOL_SCHEMAS = {
     "sql_update_element": {
         "type": "object",
         "properties": {
-            "element_id": {"type": "string", "description": "Element ID to update"},
+            "element_id": {"type": "string", "minLength": 1, "description": "Element ID to update"},
             "updates": {
                 "type": "object",
                 "description": "Fields to update",
@@ -338,5 +338,119 @@ TOOL_SCHEMAS = {
             "health_status": {"type": "string", "description": "Current health status of the element"}
         },
         "required": ["element_id", "element_name"]
+    },
+
+    "generate_test_scenarios": {
+        "type": "object",
+        "properties": {
+            "document_content": {
+                "type": "string",
+                "description": "Text content of the business document to analyze (should be anonymized)"
+            },
+            "document_name": {
+                "type": "string",
+                "description": "Name of the document for reference"
+            },
+            "document_type": {
+                "type": "string",
+                "enum": ["text", "markdown", "requirements", "user_story", "design_doc"],
+                "description": "Type of document being analyzed",
+                "default": "text"
+            },
+            "save_as_prompts": {
+                "type": "boolean",
+                "description": "Whether to save generated scenarios as prompts in the database",
+                "default": False
+            },
+            "starting_url": {
+                "type": "string",
+                "description": "Default starting URL for generated test scenarios"
+            },
+            "anonymization_mappings": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "placeholder": {"type": "string", "description": "Placeholder like [COMPANY_A]"},
+                        "original": {"type": "string", "description": "Original sensitive value"},
+                        "type": {"type": "string", "description": "Type: COMPANY, PERSON, AMOUNT, etc."},
+                        "count": {"type": "integer", "default": 1}
+                    },
+                    "required": ["placeholder", "original", "type"]
+                },
+                "description": "Mapping of placeholders to original values for de-anonymization"
+            },
+            "deanonymize_response": {
+                "type": "boolean",
+                "description": "If true, restore original values in the returned scenarios",
+                "default": False
+            },
+            "validate_anonymization": {
+                "type": "boolean",
+                "description": "If true, check for unredacted sensitive data before processing",
+                "default": True
+            }
+        },
+        "required": ["document_content"]
+    },
+
+    "refine_test_scenarios": {
+        "type": "object",
+        "properties": {
+            "scenarios": {
+                "type": "array",
+                "items": {"type": "object"},
+                "description": "Current list of test scenarios to refine"
+            },
+            "feedback": {
+                "type": "string",
+                "description": "User's feedback for refining scenarios (e.g., 'add more edge cases', 'remove scenario 3')"
+            },
+            "document_summary": {
+                "type": "string",
+                "description": "Summary of the original document for context"
+            },
+            "anonymization_mappings": {
+                "type": "array",
+                "items": {"type": "object"},
+                "description": "Mapping of placeholders to original values for de-anonymization"
+            },
+            "deanonymize_response": {
+                "type": "boolean",
+                "description": "If true, restore original values in the returned scenarios",
+                "default": False
+            }
+        },
+        "required": ["scenarios", "feedback"]
+    },
+
+    "confirm_test_scenarios": {
+        "type": "object",
+        "properties": {
+            "scenarios": {
+                "type": "array",
+                "items": {"type": "object"},
+                "description": "Finalized test scenarios to save as prompts"
+            },
+            "document_name": {
+                "type": "string",
+                "description": "Source document name for reference"
+            },
+            "starting_url": {
+                "type": "string",
+                "description": "Default starting URL for all saved prompts"
+            },
+            "anonymization_mappings": {
+                "type": "array",
+                "items": {"type": "object"},
+                "description": "Mapping of placeholders to original values for de-anonymization before saving"
+            },
+            "deanonymize_before_save": {
+                "type": "boolean",
+                "description": "If true (default), restore original values before saving prompts",
+                "default": True
+            }
+        },
+        "required": ["scenarios"]
     }
 }

@@ -5,6 +5,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import styled from 'styled-components';
+import { spinKeyframes } from '../../../shared/styles/keyframes';
 import { useTheme } from '../../../contexts/ThemeContext';
 import { config } from '../../../app/config';
 import { promptsApiService, PromptData as APIPromptData, CreatePromptRequest } from '../api';
@@ -12,16 +13,13 @@ import { useAuth } from '../../../contexts/AuthContext';
 import { RefreshCw, Plus, FileText, Search, Filter, Eye, Edit3 } from 'lucide-react';
 // Styled Components with modern design
 const Container = styled.div`
-  padding: 32px 64px;
-  max-width: 1800px;
-  margin: 0 auto;
+  padding: 32px 40px;
   background: ${props => props.theme.colors.background};
   min-height: 100vh;
   width: 100%;
   font-family: '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'Helvetica Neue', 'Arial', sans-serif;
   @media (max-width: 768px) {
     padding: 16px;
-    max-width: 100%;
   }
 `;
 const Header = styled.div`
@@ -60,7 +58,7 @@ const ActionsBar = styled.div`
   }
 `;
 const NewButton = styled.button`
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #185FA5;
   color: white;
   border: none;
   padding: 12px 24px;
@@ -170,14 +168,14 @@ const TableHeaderCell = styled.th`
 const TableBody = styled.tbody`
   background: ${props => props.theme.colors.surface};
 `;
-const TableRow = styled.tr<{ clickable?: boolean }>`
+const TableRow = styled.tr<{ $clickable?: boolean }>`
   border-bottom: 1px solid ${props => props.theme.colors.border};
   transition: all 0.2s ease;
-  cursor: ${props => props.clickable ? 'pointer' : 'default'};
+  cursor: ${props => props.$clickable ? 'pointer' : 'default'};
   &:hover {
-    background: ${props => props.clickable ? 'rgba(102, 126, 234, 0.05)' : 'rgba(0, 0, 0, 0.02)'};
-    transform: ${props => props.clickable ? 'translateY(-1px)' : 'none'};
-    box-shadow: ${props => props.clickable ? '0 2px 8px rgba(0, 0, 0, 0.1)' : 'none'};
+    background: ${props => props.$clickable ? 'rgba(102, 126, 234, 0.05)' : 'rgba(0, 0, 0, 0.02)'};
+    transform: ${props => props.$clickable ? 'translateY(-1px)' : 'none'};
+    box-shadow: ${props => props.$clickable ? '0 2px 8px rgba(0, 0, 0, 0.1)' : 'none'};
   }
   &:last-child {
     border-bottom: none;
@@ -228,7 +226,7 @@ const DateText = styled.div`
   font-weight: 500;
 `;
 const ActionButton = styled.button`
-  background: linear-gradient(135deg, #667eea, #764ba2);
+  background: linear-gradient(135deg, #185FA5, #185FA5);
   color: white;
   border: none;
   padding: 8px 12px;
@@ -261,11 +259,7 @@ const LoadingSpinner = styled.div`
   border-radius: 50%;
   width: 32px;
   height: 32px;
-  animation: spin 1s linear infinite;
-  @keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
-  }
+  animation: ${spinKeyframes} 1s linear infinite;
 `;
 const LoadingText = styled.span`
   color: ${props => props.theme.colors.textSecondary};
@@ -273,8 +267,8 @@ const LoadingText = styled.span`
 `;
 const ErrorMessage = styled.div`
   background: linear-gradient(135deg, #fee2e2, #fecaca);
-  border: 1px solid #f87171;
-  color: #dc2626;
+  border: 1px solid #c85050;
+  color: #8a2222;
   padding: 16px 20px;
   border-radius: 12px;
   margin-bottom: 24px;
@@ -293,6 +287,25 @@ const Footer = styled.div`
   box-shadow: ${props => props.theme.shadows.small};
   color: ${props => props.theme.colors.textSecondary};
   font-size: 14px;
+`;
+const PaginationControls = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+`;
+const PaginationButton = styled.button`
+  border: 1px solid ${props => props.theme.colors.border};
+  background: ${props => props.theme.colors.surface};
+  color: ${props => props.theme.colors.text};
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-weight: 600;
+  cursor: pointer;
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
 `;
 // Modal Components
 const ModalOverlay = styled.div`
@@ -416,7 +429,7 @@ const SubmitButton = styled.button`
   border-radius: 8px;
   font-size: 14px;
   font-weight: 600;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #185FA5;
   color: white;
   cursor: pointer;
   transition: all 0.3s ease;
@@ -434,7 +447,7 @@ const SubmitButton = styled.button`
 `;
 // Helper function to get tag colors
 const getTagColor = (tag: string): string => {
-  const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'];
+  const colors = ['#3b82f6', '#1D9E75', '#f59e0b', '#A32D2D', '#8b5cf6', '#06b6d4'];
   const hash = tag.split('').reduce((a, b) => a + b.charCodeAt(0), 0);
   return colors[hash % colors.length];
 };
@@ -460,6 +473,7 @@ export const PromptsTable: React.FC = () => {
   const [showModal, setShowModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
   const [newPrompt, setNewPrompt] = useState({
     title: '',
     description: '',
@@ -474,6 +488,11 @@ export const PromptsTable: React.FC = () => {
     prompt.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
     prompt.tags.some(tag => tag.name.toLowerCase().includes(searchTerm.toLowerCase()))
   );
+  const promptsPerPage = 20;
+  const totalPages = Math.max(1, Math.ceil(filteredPrompts.length / promptsPerPage));
+  const pageStartIndex = (currentPage - 1) * promptsPerPage;
+  const pageEndIndex = pageStartIndex + promptsPerPage;
+  const paginatedPrompts = filteredPrompts.slice(pageStartIndex, pageEndIndex);
   // Fetch prompts from authenticated API
   const fetchPrompts = async () => {
     try {
@@ -493,7 +512,7 @@ export const PromptsTable: React.FC = () => {
           name: tag,
           color: getTagColor(tag)
         })) : [],
-        dateModified: apiPrompt.updated_at || apiPrompt.created_at || '',
+        dateModified: apiPrompt.dateModified || apiPrompt.updated_at || apiPrompt.created_at || '',
         content: apiPrompt.content || '',
         category: apiPrompt.category,
         usage_count: apiPrompt.usage_count
@@ -556,17 +575,31 @@ export const PromptsTable: React.FC = () => {
   useEffect(() => {
     fetchPrompts();
   }, []);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, prompts.length]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
   const handleNewPrompt = () => {
     setShowModal(true);
   };
   const handleCloseModal = () => {
     setShowModal(false);
+    setSubmitting(false);
     setNewPrompt({ title: '', description: '', content: '', category: '', tags: '', startingUrl: '' });
   };
   const handleSubmitPrompt = async (e: React.FormEvent) => {
     e.preventDefault();
+    console.log('📝 Form submitted with data:', newPrompt);
+    
     if (!newPrompt.title.trim() || !newPrompt.description.trim()) {
-      alert('Please fill in all required fields');
+      alert('Please fill in all required fields: Title and Description');
       return;
     }
     const tagsArray = newPrompt.tags
@@ -574,6 +607,7 @@ export const PromptsTable: React.FC = () => {
       .map(tag => tag.trim())
       .filter(tag => tag.length > 0);
     try {
+      console.log('🚀 Creating prompt...');
       await createPrompt({
         title: newPrompt.title.trim(),
         description: newPrompt.description.trim(),
@@ -582,9 +616,12 @@ export const PromptsTable: React.FC = () => {
         tags: tagsArray,
         startingUrl: newPrompt.startingUrl.trim()
       });
+      console.log('✅ Prompt created successfully');
       handleCloseModal();
     } catch (err) {
-      alert('Failed to create prompt. Please try again.');
+      console.error('❌ Error creating prompt:', err);
+      alert(`Failed to create prompt: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      setSubmitting(false);
     }
   };
   const handleInputChange = (field: string, value: string) => {
@@ -594,7 +631,7 @@ export const PromptsTable: React.FC = () => {
     }));
   };
   const handleRowClick = (promptId: string) => {
-    navigate(`/prompts/${promptId}`);
+    navigate(`/app/prompts/${promptId}`);
   };
   if (loading) {
     return (
@@ -670,16 +707,16 @@ export const PromptsTable: React.FC = () => {
                 </TableCell>
               </TableRow>
             ) : (
-              filteredPrompts.map((prompt) => (
+              paginatedPrompts.map((prompt) => (
                 <TableRow
                   key={prompt.id}
-                  clickable={true}
+                  $clickable={true}
                   onClick={() => handleRowClick(prompt.id)}
                 >
                   <TableCell>
                     <PromptTitle>{prompt.title}</PromptTitle>
                     {prompt.category && (
-                      <Tag color="#10b981" style={{ marginTop: '8px' }}>
+                      <Tag color="#1D9E75" style={{ marginTop: '8px' }}>
                         {prompt.category}
                       </Tag>
                     )}
@@ -701,11 +738,12 @@ export const PromptsTable: React.FC = () => {
                   </TableCell>
                   <TableCell>
                     <DateText>
-                      {new Date(prompt.dateModified).toLocaleDateString('en-US', {
-                        year: 'numeric',
-                        month: 'short',
-                        day: 'numeric'
-                      })}
+                      {prompt.dateModified && prompt.dateModified !== '' ? 
+                        new Date(prompt.dateModified).toLocaleDateString('en-US', {
+                          year: 'numeric',
+                          month: 'short',
+                          day: 'numeric'
+                        }) : 'N/A'}
                     </DateText>
                   </TableCell>
                 </TableRow>
@@ -717,12 +755,27 @@ export const PromptsTable: React.FC = () => {
       {/* Footer */}
       <Footer>
         <div>
-          Showing {filteredPrompts.length} of {prompts.length} prompts
+          Showing {filteredPrompts.length === 0 ? 0 : pageStartIndex + 1}-{Math.min(pageEndIndex, filteredPrompts.length)} of {filteredPrompts.length} prompts
           {searchTerm && ` (filtered by "${searchTerm}")`}
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <span>Rows per page: {filteredPrompts.length}</span>
-        </div>
+        <PaginationControls>
+          <span>Rows per page: {promptsPerPage}</span>
+          <PaginationButton
+            onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+            disabled={currentPage === 1}
+          >
+            Previous
+          </PaginationButton>
+          <PaginationButton disabled>
+            Page {currentPage} of {totalPages}
+          </PaginationButton>
+          <PaginationButton
+            onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+            disabled={currentPage === totalPages}
+          >
+            Next
+          </PaginationButton>
+        </PaginationControls>
       </Footer>
       {/* New Prompt Modal */}
       {showModal && (

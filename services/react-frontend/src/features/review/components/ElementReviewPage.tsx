@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import styled from 'styled-components';
+import styled, { keyframes } from 'styled-components';
 import { useTheme } from '../../../contexts/ThemeContext';
 import { sqlApiClient, RecordedElementDB } from '../../../shared/utils/sqlApiClient';
 import { useElementSelectorSync, useSyncNotifications } from '../../../shared/hooks/useSyncHooks';
@@ -12,6 +12,23 @@ import {
   getDynamicContentWarning,
   DynamicContentMatch 
 } from '../../../shared/utils/dynamicContentDetection';
+
+// animation keyframes
+const pulseAnimation = keyframes`
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+`;
+
+const slideInAnimation = keyframes`
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+`;
 
 // RecordedElement interface for frontend use
 export interface RecordedElement {
@@ -84,8 +101,6 @@ const BackButton = styled.button<{ theme: any }>`
   }
 `;
 const ContentWrapper = styled.div`
-  max-width: 1600px;
-  margin: 0 auto;
   padding: 0 40px 40px;
   position: relative;
   z-index: 10;
@@ -109,7 +124,7 @@ const Header = styled.div<{ theme: any }>`
     left: 0;
     right: 0;
     height: 4px;
-    background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+    background: linear-gradient(90deg, #185FA5 0%, #185FA5 100%);
   }
 `;
 const Title = styled.h1<{ theme: any }>`
@@ -309,7 +324,7 @@ const ActionButton = styled.button<{ variant?: 'primary' | 'secondary' | 'danger
     switch (props.variant) {
       case 'primary':
         return `
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          background: #185FA5;
           color: white;
           &:hover { 
             transform: translateY(-2px);
@@ -318,7 +333,7 @@ const ActionButton = styled.button<{ variant?: 'primary' | 'secondary' | 'danger
         `;
       case 'danger':
         return `
-          background: linear-gradient(135deg, #f56565 0%, #e53e3e 100%);
+          background: linear-gradient(135deg, #c85050 0%, #A32D2D 100%);
           color: white;
           &:hover { 
             transform: translateY(-2px);
@@ -408,7 +423,7 @@ const EditInput = styled.input<{ theme: any }>`
   color: ${props => props.theme.colors.text};
   &:focus {
     outline: none;
-    border-color: #667eea;
+    border-color: #185FA5;
     box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
     background: ${props => props.theme.colors.surface === '#2d3748' ? 
       'rgba(45, 55, 72, 1)' : 'rgba(255, 255, 255, 1)'};
@@ -432,7 +447,7 @@ const EditTextarea = styled.textarea<{ theme: any }>`
   color: ${props => props.theme.colors.text};
   &:focus {
     outline: none;
-    border-color: #667eea;
+    border-color: #185FA5;
     box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
     background: ${props => props.theme.colors.surface === '#2d3748' ? 
       'rgba(45, 55, 72, 1)' : 'rgba(255, 255, 255, 1)'};
@@ -455,7 +470,7 @@ const RecommendationItem = styled.div<{ theme: any }>`
     'linear-gradient(135deg, rgba(72, 187, 120, 0.15) 0%, rgba(56, 178, 172, 0.15) 100%)' :
     'linear-gradient(135deg, rgba(72, 187, 120, 0.05) 0%, rgba(56, 178, 172, 0.05) 100%)'};
   border-radius: 12px;
-  border-left: 4px solid #48bb78;
+  border-left: 4px solid #1D9E75;
   margin-bottom: 12px;
   font-size: 0.95rem;
   color: ${props => props.theme.colors.text};
@@ -508,8 +523,8 @@ const ReviewQueueBadge = styled.div<{ isInQueue: boolean; theme: any }>`
 `;
 const ReviewQueueButton = styled.button<{ isInQueue: boolean }>`
   background: ${props => props.isInQueue 
-    ? 'linear-gradient(135deg, #f56565 0%, #e53e3e 100%)' 
-    : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'};
+    ? 'linear-gradient(135deg, #c85050 0%, #A32D2D 100%)' 
+    : '#185FA5'};
   color: white;
   border: none;
   border-radius: 12px;
@@ -575,7 +590,7 @@ const ReviewQueueTextarea = styled.textarea<{ theme: any }>`
   transition: all 0.3s ease;
   &:focus {
     outline: none;
-    border-color: #667eea;
+    border-color: #185FA5;
     box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
   }
   &::placeholder {
@@ -596,7 +611,7 @@ const DialogButton = styled.button<{ variant?: 'primary' | 'secondary'; theme?: 
   border: none;
   box-shadow: ${props => props.theme?.shadows?.small || '0 4px 6px rgba(0, 0, 0, 0.1)'};
   background: ${props => props.variant === 'primary' 
-    ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' 
+    ? '#185FA5' 
     : (props.theme?.colors?.surface === '#2d3748' ? 
         'rgba(45, 55, 72, 0.9)' : 'rgba(255, 255, 255, 0.9)')};
   color: ${props => props.variant === 'primary' ? 'white' : props.theme?.colors?.textSecondary || '#718096'};
@@ -616,7 +631,7 @@ const SyncStatusBadge = styled.div<{ hasRelated: boolean; isUpdating: boolean }>
   font-weight: 600;
   transition: all 0.3s ease;
   ${props => props.hasRelated ? `
-    background: linear-gradient(135deg, #48bb78 0%, #38b2ac 100%);
+    background: linear-gradient(135deg, #1D9E75 0%, #38b2ac 100%);
     color: white;
     box-shadow: 0 2px 8px rgba(72, 187, 120, 0.3);
   ` : `
@@ -624,12 +639,8 @@ const SyncStatusBadge = styled.div<{ hasRelated: boolean; isUpdating: boolean }>
     color: #718096;
   `}
   ${props => props.isUpdating && `
-    animation: pulse 2s infinite;
+    animation: ${pulseAnimation} 2s infinite;
   `}
-  @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.7; }
-  }
 `;
 const SyncNotification = styled.div<{ type: 'success' | 'error' | 'info' }>`
   position: fixed;
@@ -641,25 +652,15 @@ const SyncNotification = styled.div<{ type: 'success' | 'error' | 'info' }>`
   color: white;
   font-weight: 500;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  animation: slideIn 0.3s ease-out;
+  animation: ${slideInAnimation} 0.3s ease-out;
   background: ${props => {
     switch (props.type) {
-      case 'success': return 'linear-gradient(135deg, #48bb78 0%, #38b2ac 100%)';
-      case 'error': return 'linear-gradient(135deg, #f56565 0%, #e53e3e 100%)';
+      case 'success': return 'linear-gradient(135deg, #1D9E75 0%, #38b2ac 100%)';
+      case 'error': return 'linear-gradient(135deg, #c85050 0%, #A32D2D 100%)';
       case 'info': return 'linear-gradient(135deg, #4299e1 0%, #3182ce 100%)';
       default: return 'linear-gradient(135deg, #4299e1 0%, #3182ce 100%)';
     }
   }};
-  @keyframes slideIn {
-    from {
-      transform: translateX(100%);
-      opacity: 0;
-    }
-    to {
-      transform: translateX(0);
-      opacity: 1;
-    }
-  }
 `;
 const RelatedPromptsSection = styled.div<{ theme: any }>`
   background: ${props => props.theme.colors.surface === '#2d3748' ? 
@@ -691,7 +692,7 @@ const PromptReference = styled.div`
     left: 0;
     width: 4px;
     height: 100%;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: #185FA5;
     opacity: 0.6;
   }
   &:hover {
@@ -742,7 +743,7 @@ const PromptMeta = styled.div<{ theme: any }>`
   transition: color 0.3s ease;
 `;
 const StepBadge = styled.span`
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #185FA5;
   color: white;
   padding: 4px 8px;
   border-radius: 6px;
@@ -753,7 +754,7 @@ const ParameterTag = styled.span<{ theme: any }>`
   background: ${props => props.theme.colors.surface === '#2d3748' ? 
     'rgba(72, 187, 120, 0.2)' : 'rgba(72, 187, 120, 0.1)'};
   color: ${props => props.theme.colors.surface === '#2d3748' ? 
-    '#68d391' : '#38a169'};
+    '#68d391' : '#1D9E75'};
   padding: 4px 8px;
   border-radius: 6px;
   font-size: 11px;
@@ -780,7 +781,7 @@ const SyncHeader = styled.div`
   justify-content: space-between;
   margin-bottom: 20px;
   padding: 16px 20px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #185FA5;
   border-radius: 12px;
   color: white;
   h3 {
@@ -857,8 +858,10 @@ const ElementReviewPage: React.FC<ElementReviewPageProps> = ({ elementId, onBack
   const [isInReviewQueue, setIsInReviewQueue] = useState(false);
   const [reviewQueueNote, setReviewQueueNote] = useState('');
   const [showReviewQueueDialog, setShowReviewQueueDialog] = useState(false);
+    const [isSaving, setIsSaving] = useState(false);
+  const [syncPage, setSyncPage] = useState(1);
   const targetElementId = elementId || id;
-  // Sync functionality
+  // Sync functionality - use element.id (logical key) for sync service
   const {
     updateSelector,
     isUpdating: isSyncUpdating,
@@ -866,8 +869,25 @@ const ElementReviewPage: React.FC<ElementReviewPageProps> = ({ elementId, onBack
     relatedPromptsCount,
     hasRelatedPrompts,
     relatedPromptIds
-  } = useElementSelectorSync(targetElementId || '');
+  } = useElementSelectorSync((element?.id ? String(element.id) : (targetElementId || '')));
   const { notification, clearNotification } = useSyncNotifications();
+  const syncItemsPerPage = 8;
+  const totalSyncRefs = relationships?.promptRefs.length || 0;
+  const totalSyncPages = Math.max(1, Math.ceil(totalSyncRefs / syncItemsPerPage));
+  const syncStartIndex = (syncPage - 1) * syncItemsPerPage;
+  const syncEndIndex = syncStartIndex + syncItemsPerPage;
+  const paginatedPromptRefs = relationships?.promptRefs.slice(syncStartIndex, syncEndIndex) || [];
+
+  useEffect(() => {
+    setSyncPage(1);
+  }, [totalSyncRefs]);
+
+  useEffect(() => {
+    if (syncPage > totalSyncPages) {
+      setSyncPage(totalSyncPages);
+    }
+  }, [syncPage, totalSyncPages]);
+
   useEffect(() => {
     if (targetElementId) {
       loadElement(targetElementId);
@@ -878,6 +898,11 @@ const ElementReviewPage: React.FC<ElementReviewPageProps> = ({ elementId, onBack
       loadReviewQueueStatus();
     }
   }, [element]);
+
+  const getPromptDisplayTitle = (promptRef: any): string => {
+    const title = (promptRef?.promptTitle || '').toString().trim();
+    return title || 'Prompt title unavailable';
+  };
   // Listen for storage changes to update review queue status
   useEffect(() => {
     const handleStorageChange = (e: StorageEvent) => {
@@ -1085,7 +1110,7 @@ const ElementReviewPage: React.FC<ElementReviewPageProps> = ({ elementId, onBack
     if (onBack) {
       onBack();
     } else {
-      navigate('/elements');
+      navigate('/app/elements');
     }
   };
   const handleDelete = async () => {
@@ -1098,7 +1123,7 @@ const ElementReviewPage: React.FC<ElementReviewPageProps> = ({ elementId, onBack
         // Handle sync relationships for deleted element
         try {
           const { elementPromptSyncService } = await import('../../../shared/services/elementPromptSyncService');
-          const syncResult = await elementPromptSyncService.handleDeletedElement(element.id);
+          const syncResult = await elementPromptSyncService.handleDeletedElement(String(deleteId));
           if (syncResult.alternativeFound) {
             alert(`Element deleted successfully!\n\n${syncResult.message}`);
           } else if (syncResult.success) {
@@ -1125,11 +1150,13 @@ const ElementReviewPage: React.FC<ElementReviewPageProps> = ({ elementId, onBack
   };
   const handleSaveEdit = async () => {
     if (!element || !editForm) return;
+      setIsSaving(true);
     try {
-      // Check if selectors changed
-      const selectorChanged = 
-        editForm.cssSelector !== element.cssSelector || 
-        editForm.xpath !== element.xpath;
+    // Check if selectors changed
+      const cssChanged = editForm.cssSelector !== element.cssSelector;
+      const xpathChanged = editForm.xpath !== element.xpath;
+      const selectorChanged = cssChanged || xpathChanged;
+
       // Update the element with new values
       const updatedElement = {
         ...element,
@@ -1139,35 +1166,42 @@ const ElementReviewPage: React.FC<ElementReviewPageProps> = ({ elementId, onBack
         text: editForm.text,
         timestamp: Date.now() // Update timestamp
       };
-      // Call API to update element  
-      await sqlApiClient.updateElement(String(element.dbId || element.id), {
-        logical_key: editForm.id,
-        css_selector: editForm.cssSelector,
-        xpath: editForm.xpath,
-        text_content: editForm.text
-      });
-      // If selectors changed and element has related prompts, sync them
-      if (selectorChanged && hasRelatedPrompts) {
-        try {
-          // Use CSS selector if available, otherwise XPath
-          const newSelector = editForm.cssSelector || editForm.xpath;
-          const selectorType: 'css' | 'xpath' = editForm.cssSelector ? 'css' : 'xpath';
-          if (newSelector) {
-            await updateSelector(newSelector, selectorType);
-          }
-        } catch (syncError) {// Don't fail the entire update if sync fails
-          alert(`Element updated successfully, but failed to sync with related prompts: ${syncError}`);
+
+      // If selector changed, use sync service to update element and cascade to prompts
+      if (selectorChanged) {
+        const newSelector = editForm.cssSelector || editForm.xpath || '';
+        const selectorType = editForm.cssSelector ? 'css' : 'xpath';
+        
+        // Update the element and sync to prompts
+        await updateSelector(newSelector, selectorType);
+        
+        // Reload the element data and reinitialize relationships to show updated prompts
+        if (targetElementId) {
+          // Small delay to ensure backend has processed the cascade
+          setTimeout(async () => {
+            await loadElement(targetElementId);
+          }, 500);
         }
-      }
-      setElement(updatedElement);
-      setIsEditing(false);
-      setEditForm(null);
-      if (selectorChanged && hasRelatedPrompts) {
-        alert(`Element updated successfully and synced to ${relatedPromptsCount} related prompts!`);
+        
+        setElement(updatedElement);
+        setIsEditing(false);
+        setEditForm(null);
+        alert('✓ Element updated and all related prompts synced automatically!');
       } else {
+        // If only non-selector fields changed, update via API
+        await sqlApiClient.updateElement(String(element.dbId || element.id), {
+          logical_key: editForm.id,
+          text_content: editForm.text
+        });
+        setElement(updatedElement);
+        setIsEditing(false);
+        setEditForm(null);
         alert('Element updated successfully!');
       }
-    } catch (err) {alert('Failed to update element');
+    } catch (err) {
+      alert('Failed to update element');
+    } finally {
+      setIsSaving(false);
     }
   };
   const handleCancelEdit = () => {
@@ -1470,11 +1504,16 @@ const ElementReviewPage: React.FC<ElementReviewPageProps> = ({ elementId, onBack
                     />
                   </EditFormRow>
                   <EditActions theme={theme}>
-                    <ActionButton theme={theme} onClick={handleCancelEdit}>
+                    {isSaving && (
+                      <InfoLabel theme={theme} style={{ marginRight: 'auto' }}>
+                        Saving element and syncing prompts...
+                      </InfoLabel>
+                    )}
+                    <ActionButton theme={theme} onClick={handleCancelEdit} disabled={isSaving}>
                       Cancel
                     </ActionButton>
-                    <ActionButton theme={theme} variant="primary" onClick={handleSaveEdit}>
-                      Save Changes
+                    <ActionButton theme={theme} variant="primary" onClick={handleSaveEdit} disabled={isSaving}>
+                      {isSaving ? 'Saving...' : 'Save Changes'}
                     </ActionButton>
                   </EditActions>
                 </EditForm>
@@ -1547,7 +1586,7 @@ const ElementReviewPage: React.FC<ElementReviewPageProps> = ({ elementId, onBack
                     ✨ <strong>Smart Sync Enabled:</strong> This element is referenced in {relatedPromptsCount} prompt{relatedPromptsCount !== 1 ? 's' : ''}. 
                     Any changes to selectors will automatically sync to all related prompts.
                   </InfoLabel>
-                  {relationships && relationships.promptRefs.map((promptRef, index) => (
+                  {paginatedPromptRefs.map((promptRef, index) => (
                     <PromptCard theme={theme} key={index}>
                       <PromptHeader>
                         <PromptTitle theme={theme}>
@@ -1564,12 +1603,7 @@ const ElementReviewPage: React.FC<ElementReviewPageProps> = ({ elementId, onBack
                           color: 'var(--text-secondary, #718096)', 
                           marginBottom: '4px' 
                         }}>
-                          Prompt ID: <code style={{ 
-                            fontSize: '12px',
-                            background: 'var(--code-bg, rgba(0,0,0,0.05))',
-                            padding: '2px 4px',
-                            borderRadius: '3px'
-                          }}>{promptRef.promptId}</code>
+                          Prompt: <strong>{getPromptDisplayTitle(promptRef)}</strong>
                         </div>
                       </div>
                       <div>
@@ -1585,6 +1619,44 @@ const ElementReviewPage: React.FC<ElementReviewPageProps> = ({ elementId, onBack
                       </div>
                     </PromptCard>
                   ))}
+                  {totalSyncRefs > syncItemsPerPage && (
+                    <div style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      marginTop: '12px',
+                      padding: '10px 12px',
+                      border: `1px solid ${theme.colors.border}`,
+                      borderRadius: '8px',
+                      background: theme.colors.surface
+                    }}>
+                      <div style={{ fontSize: '13px', color: theme.colors.textSecondary }}>
+                        Showing {syncStartIndex + 1}-{Math.min(syncEndIndex, totalSyncRefs)} of {totalSyncRefs} references
+                      </div>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button
+                          onClick={() => setSyncPage(prev => Math.max(1, prev - 1))}
+                          disabled={syncPage === 1}
+                          style={{ padding: '6px 10px', borderRadius: '6px', border: `1px solid ${theme.colors.border}` }}
+                        >
+                          Previous
+                        </button>
+                        <button
+                          disabled
+                          style={{ padding: '6px 10px', borderRadius: '6px', border: `1px solid ${theme.colors.border}` }}
+                        >
+                          Page {syncPage} of {totalSyncPages}
+                        </button>
+                        <button
+                          onClick={() => setSyncPage(prev => Math.min(totalSyncPages, prev + 1))}
+                          disabled={syncPage === totalSyncPages}
+                          style={{ padding: '6px 10px', borderRadius: '6px', border: `1px solid ${theme.colors.border}` }}
+                        >
+                          Next
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <EmptyState theme={theme}>
@@ -1650,7 +1722,7 @@ const ElementReviewPage: React.FC<ElementReviewPageProps> = ({ elementId, onBack
                   <ul style={{ 
                     margin: 0, 
                     paddingLeft: '20px',
-                    color: theme.colors.surface === '#2d3748' ? '#fc8181' : '#721c24',
+                    color: theme.colors.surface === '#2d3748' ? '#d47070' : '#721c24',
                     backgroundColor: theme.colors.surface === '#2d3748' ? 'rgba(245, 101, 101, 0.1)' : '#f8d7da',
                     padding: '12px 20px',
                     borderRadius: '6px',
@@ -1783,7 +1855,33 @@ const ElementReviewPage: React.FC<ElementReviewPageProps> = ({ elementId, onBack
         </SectionsGrid>
         {/* Action Buttons */}
         <ActionButtons theme={theme}>
-          <ActionButton theme={theme} onClick={() => alert('Clone functionality coming soon!')}>
+          <ActionButton theme={theme} onClick={async () => {
+            if (!element) return;
+            try {
+              const cloneData: Partial<RecordedElementDB> = {
+                logical_key: (element.logical_key || element.id) + '_copy',
+                css_selector: element.css_selector,
+                xpath: element.xpath,
+                tag_name: element.tag_name,
+                page_url: element.page_url,
+                text_content: element.text_content,
+                attributes: element.attributes,
+              };
+              const result = await sqlApiClient.createElement(cloneData);
+              if (result.success && result.data) {
+                const newId = result.data.id || result.data.dbId;
+                if (newId) {
+                  navigate(`/app/elements/${newId}`);
+                } else {
+                  navigate('/app/elements');
+                }
+              } else {
+                alert('Failed to clone element: ' + (result.error || 'Unknown error'));
+              }
+            } catch (err: any) {
+              alert('Failed to clone element: ' + (err.message || String(err)));
+            }
+          }}>
              Clone Element
           </ActionButton>
           <ActionButton theme={theme} variant="danger" onClick={handleDelete}>

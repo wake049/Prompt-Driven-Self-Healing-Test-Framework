@@ -6,6 +6,7 @@
  */
 
 import { MCPFrontendManager } from './mcpFrontendClient';
+import { config } from '../app/config';
 
 // Keep the same interface types for compatibility
 export interface ExecutionRun {
@@ -92,11 +93,7 @@ export interface PerformanceMetrics {
 
 class MCPExecutionApiService {
   private async getMCPClient() {
-    const client = await MCPFrontendManager.getInstance();
-    if (!client.isConnectedToServer()) {
-      throw new Error("MCP server connection required for execution API operations");
-    }
-    return client;
+    return MCPFrontendManager.getInstance();
   }
 
   // Core execution management
@@ -127,12 +124,28 @@ class MCPExecutionApiService {
   }
 
   async getExecutionDetails(executionId: string): Promise<any> {
-    const client = await this.getMCPClient();
-    const result = await client.callTool("fetch_test_data", {
-      data_type: "execution_details",
-      filters: { execution_id: executionId }
-    });
-    return result.data || result;
+    // Use direct REST API call as MCP doesn't support execution_details yet
+    try {
+      const baseUrl = config.apiBaseUrl;
+      const token = localStorage.getItem('auth_token');
+      
+      const response = await fetch(`${baseUrl}/api/v1/dashboard/execution/${executionId}/details`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token && { 'Authorization': `Bearer ${token}` })
+        }
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      return await response.json();
+    } catch (error) {
+      console.error('Error fetching execution details:', error);
+      throw error;
+    }
   }
 
   async deleteExecution(executionId: string): Promise<{success: boolean}> {

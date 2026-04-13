@@ -17,6 +17,9 @@ import {
   Save,
   Play
 } from 'lucide-react';
+import { config as appConfig } from '../../../app/config';
+
+const apiBase = appConfig.apiBaseUrl;
 
 // ================================
 // Types
@@ -139,7 +142,7 @@ const ContentArea = styled.div`
 `;
 
 const OverviewCard = styled.div`
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #185FA5;
   border-radius: 12px;
   padding: 24px;
   color: white;
@@ -464,7 +467,7 @@ const AISettingsPage: React.FC = () => {
       setLoading(true);
       setError(null);
       
-      const response = await fetch('/api/v1/ai-config/config');
+      const response = await fetch(`${apiBase}/api/v1/ai-config/config`);
       if (!response.ok) {
         throw new Error(`Failed to load configuration: ${response.statusText}`);
       }
@@ -486,7 +489,7 @@ const AISettingsPage: React.FC = () => {
       setError(null);
       setSuccess(null);
 
-      const response = await fetch('/api/v1/ai-config/config', {
+      const response = await fetch(`${apiBase}/api/v1/ai-config/config`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -522,7 +525,7 @@ const AISettingsPage: React.FC = () => {
       setTestingProvider(provider.provider);
       setError(null);
 
-      const response = await fetch('/api/v1/ai-config/test-provider', {
+      const response = await fetch(`${apiBase}/api/v1/ai-config/test-provider`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -569,7 +572,7 @@ const AISettingsPage: React.FC = () => {
 
   const setActiveProvider = async (providerName: string) => {
     try {
-      const response = await fetch('/api/v1/ai-config/switch-provider', {
+      const response = await fetch(`${apiBase}/api/v1/ai-config/switch-provider`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -605,6 +608,10 @@ const AISettingsPage: React.FC = () => {
         return '';
       case 'azure':
         return '☁️';
+      case 'ollama':
+        return '🦙';
+      case 'google':
+        return '';
       case 'local':
         return '🖥️';
       default:

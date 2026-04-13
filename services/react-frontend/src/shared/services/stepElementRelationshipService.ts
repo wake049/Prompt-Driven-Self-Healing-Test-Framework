@@ -7,7 +7,7 @@
 import { MCPFrontendManager } from '../../services/mcpFrontendClient';
 
 const config = {
-  apiBaseUrl: 'https://testhelix.com'
+  apiBaseUrl: 'https://fluxtest.io'
 };
 
 export interface StepElementReference {

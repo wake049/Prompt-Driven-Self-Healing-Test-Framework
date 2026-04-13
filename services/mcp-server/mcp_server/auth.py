@@ -11,22 +11,36 @@ from .schemas import MCPErrorCode, MCPError
 
 logger = logging.getLogger(__name__)
 
-# Default token for development
-DEFAULT_DEV_TOKEN = "devtoken"
 
-# Tenant mapping (in production, this would be from a database)
-TENANT_TOKENS = {
-    "devtoken": {
-        "tenant_id": "dev",
-        "name": "Development Tenant",
-        "permissions": ["*"]
-    },
-    "testtoken": {
-        "tenant_id": "test", 
-        "name": "Test Tenant",
-        "permissions": ["read", "write"]
-    }
-}
+def _build_tenant_tokens() -> Dict[str, Dict[str, Any]]:
+    """Build tenant tokens from environment variables only.
+    
+    MCP_AUTH_TOKEN must be set. In non-production environments,
+    a random token is generated at startup if not configured.
+    """
+    tokens = {}
+    env_token = os.getenv("MCP_AUTH_TOKEN")
+    if env_token:
+        tokens[env_token] = {
+            "tenant_id": os.getenv("MCP_TENANT_ID", "default"),
+            "name": os.getenv("MCP_TENANT_NAME", "Default Tenant"),
+            "permissions": ["*"]
+        }
+    return tokens
+
+
+TENANT_TOKENS = _build_tenant_tokens()
+
+
+def _is_production_env() -> bool:
+    """Detect production environment for strict auth enforcement."""
+    environment = (
+        os.getenv("ENVIRONMENT")
+        or os.getenv("PLANNER_ENV")
+        or os.getenv("NODE_ENV")
+        or ""
+    ).strip().lower()
+    return environment in {"prod", "production"}
 
 
 def authenticate(token: Optional[str]) -> Dict[str, Any]:
@@ -50,7 +64,7 @@ def authenticate(token: Optional[str]) -> Dict[str, Any]:
     if not token:
         raise MCPError(
             code=MCPErrorCode.UNAUTHORIZED.value,
-            message="Authentication required",
+            message="Authentication required — set MCP_AUTH_TOKEN environment variable",
             data={"reason": "missing_token"}
         )
     

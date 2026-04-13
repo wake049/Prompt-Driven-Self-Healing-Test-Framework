@@ -67,25 +67,68 @@ public class Main {
             // Set page load strategy to EAGER to avoid waiting for all resources
             options.setPageLoadStrategy(org.openqa.selenium.PageLoadStrategy.EAGER);
             
+            // ============================================
+            // STEALTH MODE: Anti-Bot Detection Settings
+            // ============================================
+            System.out.println("Step 3a: Configuring stealth mode to bypass bot detection...");
+            
+            // Hide automation flags
+            options.addArguments("--disable-blink-features=AutomationControlled");
+            options.setExperimentalOption("excludeSwitches", new String[]{"enable-automation"});
+            options.setExperimentalOption("useAutomationExtension", false);
+            
+            // Set realistic user preferences
+            java.util.Map<String, Object> prefs = new java.util.HashMap<>();
+            prefs.put("credentials_enable_service", false);
+            prefs.put("profile.password_manager_enabled", false);
+            prefs.put("profile.default_content_setting_values.notifications", 2);
+            options.setExperimentalOption("prefs", prefs);
+            
+            // Realistic user agent (latest Chrome on Windows 10)
+            String userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+            options.addArguments("--user-agent=" + userAgent);
+            
+            // Additional stealth arguments
+            options.addArguments("--ignore-certificate-errors");
+            options.addArguments("--allow-running-insecure-content");
+            options.addArguments("--disable-features=IsolateOrigins,site-per-process");
+            
             // Additional stability options
             options.addArguments("--no-sandbox");
             options.addArguments("--disable-dev-shm-usage");
-            options.addArguments("--disable-blink-features=AutomationControlled");
             options.addArguments("--disable-extensions");
             options.addArguments("--disable-plugins");
             options.addArguments("--disable-images"); // Speed up loading
-            options.addArguments("--disable-web-security");
-            options.addArguments("--ignore-certificate-errors");
-            options.addArguments("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
             options.addArguments("--window-size=1920,1080");
             
             if (!isHeadless) {
                 options.addArguments("--start-maximized");
             }
             
+            System.out.println("Step 3b: Stealth mode configured");
+            
             System.out.println("Step 4: Creating ChromeDriver instance...");
             driver = new ChromeDriver(options);
             System.out.println("Step 5: ChromeDriver created successfully");
+            
+            // Execute CDP commands to hide WebDriver traces
+            System.out.println("Step 5a: Hiding WebDriver traces via CDP...");
+            try {
+                org.openqa.selenium.chromium.ChromiumDriver chromiumDriver = (org.openqa.selenium.chromium.ChromiumDriver) driver;
+                
+                // Override navigator.webdriver flag
+                chromiumDriver.executeCdpCommand("Page.addScriptToEvaluateOnNewDocument", java.util.Map.of(
+                    "source", 
+                    "Object.defineProperty(navigator, 'webdriver', {get: () => undefined});" +
+                    "Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});" +
+                    "Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});" +
+                    "window.chrome = {runtime: {}};" +
+                    "Object.defineProperty(navigator, 'permissions', {get: () => ({query: () => Promise.resolve({state: 'granted'})})});"
+                ));
+                System.out.println("Step 5b: WebDriver traces hidden successfully");
+            } catch (Exception e) {
+                System.out.println("Warning: Could not hide WebDriver traces: " + e.getMessage());
+            }
             
             System.out.println("Step 6: Setting timeouts...");
             // Set aggressive timeouts to prevent hanging

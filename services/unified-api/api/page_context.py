@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
 import json
+import logging
 
 from core.auth import get_current_active_user
 from models.auth_models import CurrentUser
@@ -17,6 +18,8 @@ from services.page_context_service import page_context_service
 from services.file_upload_service import file_upload_service
 from repositories.page_context_repository import PageContextRepository
 from core.database import get_database
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -177,9 +180,9 @@ async def get_page_contexts(
         if category:
             contexts = await db.fetch(
                 """
-                SELECT id, page_id, context_type, description, category, 
+                SELECT id, page_id, screenshot_url, description, category, 
                        website_url, primary_actions, usage_count, last_used_at,
-                       created_at, updated_at, screenshot_url
+                       created_at, updated_at
                 FROM repo.page_contexts 
                 WHERE category = $1 
                 ORDER BY created_at DESC 
@@ -190,9 +193,9 @@ async def get_page_contexts(
         else:
             contexts = await db.fetch(
                 """
-                SELECT id, page_id, context_type, description, category,
+                SELECT id, page_id, screenshot_url, description, category,
                        website_url, primary_actions, usage_count, last_used_at,
-                       created_at, updated_at, screenshot_url
+                       created_at, updated_at
                 FROM repo.page_contexts 
                 ORDER BY created_at DESC 
                 LIMIT $1
@@ -210,7 +213,7 @@ async def get_page_contexts(
                     try:
                         import json
                         primary_actions = json.loads(primary_actions)
-                    except:
+                    except Exception:
                         primary_actions = []
                 elif not isinstance(primary_actions, list):
                     primary_actions = []
@@ -218,7 +221,7 @@ async def get_page_contexts(
                 # Convert relative screenshot URL to full URL
                 screenshot_url = ctx.get("screenshot_url")
                 if screenshot_url and screenshot_url.startswith("/uploads"):
-                    screenshot_url = f"https://testhelix.com{screenshot_url}"
+                    screenshot_url = f"https://fluxtest.io{screenshot_url}"
                 
                 result.append({
                     "id": str(ctx["id"]),
@@ -234,7 +237,7 @@ async def get_page_contexts(
                     "updatedAt": ctx.get("updated_at").isoformat() if ctx.get("updated_at") else None
                 })
             except Exception as e:
-                print(f"Error processing context: {e}")
+                logger.warning("Error processing context: %s", e)
                 continue
         
         return {
@@ -274,7 +277,7 @@ async def get_page_context(
         # Convert relative screenshot URL to full URL
         screenshot_url = context.get("screenshot_url")
         if screenshot_url and screenshot_url.startswith("/uploads"):
-            screenshot_url = f"https://testhelix.com{screenshot_url}"
+            screenshot_url = f"https://fluxtest.io{screenshot_url}"
         
         return {
             "success": True,
@@ -393,7 +396,7 @@ async def update_page_context_with_files(
         # Convert relative screenshot URL to full URL
         result_screenshot_url = result.get("screenshot_url")
         if result_screenshot_url and result_screenshot_url.startswith("/uploads"):
-            result_screenshot_url = f"https://testhelix.com{result_screenshot_url}"
+            result_screenshot_url = f"https://fluxtest.io{result_screenshot_url}"
         
         return {
             "success": True,

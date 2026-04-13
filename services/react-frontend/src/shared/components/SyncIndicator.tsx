@@ -4,6 +4,7 @@
  */
 import React from 'react';
 import styled from 'styled-components';
+import { pulseKeyframes } from '../styles/keyframes';
 
 interface SyncIndicatorProps {
   status: 'idle' | 'syncing' | 'success' | 'error';
@@ -68,7 +69,7 @@ const SyncDot = styled.div<{ status: string }>`
       case 'syncing':
         return `
           background: #ffc107;
-          animation: pulse 1.5s infinite;
+          animation: ${pulseKeyframes} 1.5s infinite;
         `;
       case 'success':
         return `background: #28a745;`;
@@ -78,12 +79,6 @@ const SyncDot = styled.div<{ status: string }>`
         return `background: #6c757d;`;
     }
   }}
-  
-  @keyframes pulse {
-    0% { opacity: 1; }
-    50% { opacity: 0.5; }
-    100% { opacity: 1; }
-  }
 `;
 
 const NotificationContainer = styled.div<{ type: string }>`

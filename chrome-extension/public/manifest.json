@@ -1,19 +1,19 @@
 {
   "manifest_version": 3,
   "name": "Self-Healing Test Framework",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Chrome extension for automated test element recording and execution with MCP server integration.",
   "action": { 
     "default_popup": "popup.html",
     "default_title": "MCP Test Runner"
   },
-  "permissions": ["activeTab", "scripting", "storage"],
+  "permissions": ["activeTab", "scripting", "storage", "cookies"],
   "host_permissions": [
     "http://localhost:8000/*", 
     "http://localhost:3000/*", 
-    "https://testhelix.com/*",
-    "https://mcp.testhelix.com/*",
-    "wss://mcp.testhelix.com/*",
+    "https://fluxtest.io/*",
+    "https://mcp.fluxtest.io/*",
+    "wss://mcp.fluxtest.io/*",
     "https://*/*", 
     "http://*/*"
   ],
@@ -30,7 +30,7 @@
       "matches": [
         "http://localhost:8000/*",
         "http://localhost:3000/*",
-        "https://testhelix.com/*",
+        "https://fluxtest.io/*",
         "https://testframework.local/*"
       ],
       "js": ["auth-capture.js"],

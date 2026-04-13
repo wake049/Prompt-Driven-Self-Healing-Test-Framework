@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import styled from 'styled-components';
+import { spinKeyframes } from '../../shared/styles/keyframes';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNavigate, Link } from 'react-router-dom';
 
@@ -8,7 +9,7 @@ const LoginContainer = styled.div`
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #185FA5;
 `;
 
 const LoginCard = styled.div`
@@ -55,7 +56,7 @@ const Input = styled.input`
 
   &:focus {
     outline: none;
-    border-color: #667eea;
+    border-color: #185FA5;
   }
 
   &:disabled {
@@ -65,7 +66,7 @@ const Input = styled.input`
 `;
 
 const SubmitButton = styled.button`
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #185FA5;
   color: white;
   border: none;
   padding: 14px 20px;
@@ -106,12 +107,8 @@ const LoadingSpinner = styled.div`
   border: 2px solid #ffffff;
   border-radius: 50%;
   border-top-color: transparent;
-  animation: spin 1s ease-in-out infinite;
+  animation: ${spinKeyframes} 1s ease-in-out infinite;
   margin-right: 8px;
-
-  @keyframes spin {
-    to { transform: rotate(360deg); }
-  }
 `;
 
 const RegisterLink = styled.div`
@@ -121,7 +118,7 @@ const RegisterLink = styled.div`
   font-size: 14px;
 
   a {
-    color: #667eea;
+    color: #185FA5;
     text-decoration: none;
     font-weight: 500;
 
@@ -147,7 +144,7 @@ const Login: React.FC = () => {
 
     const success = await login(email, password);
     if (success) {
-      navigate('/dashboard');
+      navigate('/app');
     }
   };
 
@@ -192,7 +189,7 @@ const Login: React.FC = () => {
         </Form>
         
         <RegisterLink>
-          Don't have an account? <Link to="/register">Sign up</Link>
+          Don't have an account? <Link to="/onboarding">Sign up</Link>
         </RegisterLink>
       </LoginCard>
     </LoginContainer>

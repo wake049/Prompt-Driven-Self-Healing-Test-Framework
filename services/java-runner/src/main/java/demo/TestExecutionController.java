@@ -147,6 +147,9 @@ public class TestExecutionController {
         public List<Map<String, Object>> steps;
         public String authToken;
         public String executionId;
+        public Map<String, Object> policyConfig;  // Policy configuration
+        public String browserType;  // Browser type: chrome, firefox, edge, safari
+        public TestDataConfig testDataConfig;  // API test data configuration
         
         public String getPromptId() { return promptId; }
         public void setPromptId(String promptId) { this.promptId = promptId; }
@@ -159,6 +162,38 @@ public class TestExecutionController {
         
         public String getExecutionId() { return executionId; }
         public void setExecutionId(String executionId) { this.executionId = executionId; }
+        
+        public Map<String, Object> getPolicyConfig() { return policyConfig; }
+        public void setPolicyConfig(Map<String, Object> policyConfig) { this.policyConfig = policyConfig; }
+        
+        public String getBrowserType() { return browserType; }
+        public void setBrowserType(String browserType) { this.browserType = browserType; }
+        
+        public TestDataConfig getTestDataConfig() { return testDataConfig; }
+        public void setTestDataConfig(TestDataConfig testDataConfig) { this.testDataConfig = testDataConfig; }
+    }
+    
+    /**
+     * Configuration for API test data setup before UI test execution.
+     * Allows creating precondition data (e.g., bookings, users) via API calls.
+     */
+    public static class TestDataConfig {
+        public List<String> setupIds;              // Specific setup IDs to execute
+        public Map<String, String> variableOverrides;  // Override variable values
+        public boolean skipOnFailure = false;      // Continue UI test even if setup fails
+        public boolean executeForPrompt = true;    // Execute all setups linked to prompt
+        
+        public List<String> getSetupIds() { return setupIds; }
+        public void setSetupIds(List<String> setupIds) { this.setupIds = setupIds; }
+        
+        public Map<String, String> getVariableOverrides() { return variableOverrides; }
+        public void setVariableOverrides(Map<String, String> variableOverrides) { this.variableOverrides = variableOverrides; }
+        
+        public boolean isSkipOnFailure() { return skipOnFailure; }
+        public void setSkipOnFailure(boolean skipOnFailure) { this.skipOnFailure = skipOnFailure; }
+        
+        public boolean isExecuteForPrompt() { return executeForPrompt; }
+        public void setExecuteForPrompt(boolean executeForPrompt) { this.executeForPrompt = executeForPrompt; }
     }
     
     public static class ExecutionResponse {

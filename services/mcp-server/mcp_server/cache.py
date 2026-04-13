@@ -108,8 +108,8 @@ def get_session_cache() -> LRUCacheWithTTL:
     return _session_cache
 
 def cache_key(prefix: str, *args: str) -> str:
-    """Generate cache key from prefix and arguments"""
-    return f"{prefix}:{':'.join(str(arg) for arg in args)}"
+    """Generate cache key from prefix and arguments using null byte delimiter to avoid collisions"""
+    return f"{prefix}\x00{'\x00'.join(str(arg) for arg in args)}"
 
 def cached_call(cache: LRUCacheWithTTL, key: str, func, *args, **kwargs):
     """

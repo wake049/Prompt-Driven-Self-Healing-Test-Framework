@@ -1,4 +1,5 @@
 import { useAuth } from '../../contexts/AuthContext';
+import { config } from '../../app/config';
 
 export interface ExecutionStats {
   total_executions: number;
@@ -66,7 +67,7 @@ class AuthenticatedApiService {
   }
 
   private async fetchWithAuth<T>(endpoint: string, options?: RequestInit): Promise<T> {
-    const response = await fetch(`https://testhelix.com${endpoint}`, {
+    const response = await fetch(`${config.apiBaseUrl}${endpoint}`, {
       headers: this.getAuthHeaders(),
       ...options,
     });
@@ -107,6 +108,14 @@ class AuthenticatedApiService {
 
   async getExecutionSteps(executionId: string): Promise<ExecutionStepsData> {
     return this.fetchWithAuth<ExecutionStepsData>(`/api/v1/dashboard/execution/execution/${executionId}/steps`);
+  }
+
+  async getExecutionDetails(executionId: string): Promise<any> {
+    return this.fetchWithAuth<any>(`/api/v1/dashboard/execution/execution/${executionId}/details`);
+  }
+
+  async getExecutionSummaryData(executionId: string): Promise<any> {
+    return this.fetchWithAuth<any>(`/api/execution-dashboard/execution/${executionId}`);
   }
 }
 

@@ -103,7 +103,7 @@ class PageContextService:
                 parsed = urlparse(page_url)
                 domain = parsed.netloc.lower()
                 context.domain_name = domain
-            except:
+            except Exception:
                 pass
         
         # Detect page type from domain

@@ -5,10 +5,11 @@
  * and prompt steps that use those selectors. When an element's selector is 
  * updated, all prompts using that element are automatically updated, and vice versa.
  */
-import { MCPFrontendManager } from '../../services/mcpFrontendClient';
 
 export interface RecordedElement {
   id: string;
+  dbId?: string;
+  logicalKey?: string;
   cssSelector?: string;
   xpath?: string;
   selectors?: string[];
@@ -19,15 +20,18 @@ export interface RecordedElement {
 }
 // Configuration
 const config = {
-  apiBaseUrl: 'https://testhelix.com'
+  apiBaseUrl: import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:8000' : '')
 };
 export interface ElementReference {
   elementId: string;
+  dbId?: string;
+  logicalKey?: string;
   currentSelector: string;
   selectorType: 'css' | 'xpath';
 }
 export interface PromptStepReference {
   promptId: string;
+  promptTitle?: string;
   stepIndex: number;
   parameterKey: string; // 'selector', 'elementId', etc.
   currentValue: string;
@@ -47,17 +51,67 @@ class ElementPromptSyncService {
   private relationships: Map<string, SyncRelationship> = new Map();
   private eventListeners: ((event: SyncEvent) => void)[] = [];
   private initialized = false;
+  private initPromise: Promise<void> | null = null;
+  private buildMapPromise: Promise<void> | null = null;
+  private lastRelationshipRefresh = 0;
+  private readonly relationshipRefreshIntervalMs = 30000;
+
+  private getPlanSteps(plan: any): any[] {
+    if (!plan) return [];
+
+    // If direct steps are already present and non-empty, trust them.
+    if (Array.isArray(plan.steps) && plan.steps.length > 0) {
+      return plan.steps;
+    }
+
+    let planData: any = plan.plan_json;
+    if (typeof planData === 'string') {
+      try {
+        planData = JSON.parse(planData);
+      } catch {
+        planData = {};
+      }
+    }
+
+    if (planData && Array.isArray(planData.steps)) {
+      return planData.steps;
+    }
+    if (planData && Array.isArray(planData.actions)) {
+      return planData.actions;
+    }
+
+    return [];
+  }
+
   /**
    * Initialize the sync service by analyzing existing elements and prompts
    */
   async initialize(): Promise<void> {
     if (this.initialized) return;
+    if (this.initPromise) {
+      await this.initPromise;
+      return;
+    }
+
+    this.initPromise = (async () => {
+      const token = localStorage.getItem('auth_token');
+      if (!token) {
+        return;
+      }
+      try {
+        // Load all elements and prompts to build relationship map
+        await this.buildRelationshipMap();
+        this.initialized = true;
+        this.lastRelationshipRefresh = Date.now();
+      } catch (error) {
+        throw error;
+      }
+    })();
+
     try {
-      // Load all elements and prompts to build relationship map
-      await this.buildRelationshipMap();
-      this.initialized = true;
-    } catch (error) {
-      throw error;
+      await this.initPromise;
+    } finally {
+      this.initPromise = null;
     }
   }
   /**
@@ -72,6 +126,12 @@ class ElementPromptSyncService {
    * Build the relationship map between elements and prompts
    */
   private async buildRelationshipMap(): Promise<void> {
+    if (this.buildMapPromise) {
+      await this.buildMapPromise;
+      return;
+    }
+
+    this.buildMapPromise = (async () => {
     const [elements, plans] = await Promise.all([
       this.loadAllElements(),
       this.loadAllPlans()
@@ -83,52 +143,68 @@ class ElementPromptSyncService {
     for (const element of elements) {
       const elementRef: ElementReference = {
         elementId: element.id,
+        dbId: (element as any).dbId,
+        logicalKey: (element as any).logicalKey,
         currentSelector: element.cssSelector || element.xpath || '',
         selectorType: element.cssSelector ? 'css' : 'xpath'
       };
       const promptRefs: PromptStepReference[] = [];
+      const seenPromptRefs = new Set<string>();
       // Find plans that reference this element
       for (const plan of plans) {
         if (plan.plan_json || plan.steps) {
           try {
             // Handle different step structures
-            let steps = [];
-            if (plan.steps) {
-              // Direct steps array from API response
-              steps = plan.steps;
-            } else if (plan.plan_json) {
-              // Parse plan_json
-              const planData = typeof plan.plan_json === 'string' 
-                ? JSON.parse(plan.plan_json) 
-                : plan.plan_json;
-              steps = planData.steps || planData.actions || [];
-            }
+            const steps = this.getPlanSteps(plan);
             steps.forEach((step: any, stepIndex: number) => {
+              // Support all step formats: {params}, {args}, and flat top-level fields
               const params = step.params || {};
-              // Log step details for debugging
-              const selectorKeys = ['selector', 'elementId', 'target', 'locator', 'element', 'css_selector', 'xpath'];
+              const args = step.args || {};
+              const selectorKeys = [
+                'selector', 'elementId', 'target', 'locator', 'element',
+                'css_selector', 'xpath', 'dual_selectors', 'original_selector',
+                'value', 'target_selector'
+              ];
               // Track which parameters we've already processed to avoid duplicates
               const processedSelectors = new Set<string>();
-              for (const key of selectorKeys) {
-                const value = params[key];
-                if (value && this.isMatchingSelector(value, element)) {
-                  // Check if we've already processed this exact selector value for this step
-                  const selectorKey = `${stepIndex}-${value}`;
-                  if (!processedSelectors.has(selectorKey)) {
-                    processedSelectors.add(selectorKey);
-                    promptRefs.push({
-                      promptId: plan.prompt_id,
-                      stepIndex,
-                      parameterKey: key,
-                      currentValue: value
-                    });
-                    relationshipsFound++;
-                  } else {
+              // Collect candidate (source, key, value) triples across all formats
+              const candidates: Array<{source: any, key: string}> = [
+                // step.params.* (legacy format)
+                ...selectorKeys.map(k => ({ source: params, key: k })),
+                // step.args.* (AI-generated format)
+                ...selectorKeys.map(k => ({ source: args, key: `args.${k}` })),
+                // step.* top-level (flat format)
+                ...selectorKeys.map(k => ({ source: step, key: `step.${k}` })),
+              ];
+              for (const { source, key } of candidates) {
+                const rawKey = key.includes('.') ? key.split('.').pop()! : key;
+                const value = source[rawKey];
+                const selectorCandidates = this.extractSelectorStrings(value);
+                for (const selectorValue of selectorCandidates) {
+                  if (this.isMatchingSelector(selectorValue, element)) {
+                    const selectorKey = `${stepIndex}-${selectorValue}`;
+                    if (!processedSelectors.has(selectorKey)) {
+                      const refKey = `${plan.prompt_id}|${stepIndex}|${selectorValue.trim().toLowerCase()}`;
+                      if (seenPromptRefs.has(refKey)) {
+                        continue;
+                      }
+                      processedSelectors.add(selectorKey);
+                      seenPromptRefs.add(refKey);
+                      promptRefs.push({
+                        promptId: plan.prompt_id,
+                        promptTitle: plan.prompt_title,
+                        stepIndex,
+                        parameterKey: key,
+                        currentValue: selectorValue
+                      });
+                      relationshipsFound++;
+                    }
                   }
                 }
               }
             });
           } catch (error) {
+            // Ignore invalid plan payloads and continue scanning other plans.
           }
         }
       }
@@ -139,12 +215,13 @@ class ElementPromptSyncService {
         });
       }
     }
-    // Enhanced debugging
-    if (this.relationships.size === 0) {
-      if (elements.length > 0) {
-      }
-      if (plans.length > 0) {
-      }
+    void relationshipsFound;
+    })();
+
+    try {
+      await this.buildMapPromise;
+    } finally {
+      this.buildMapPromise = null;
     }
   }
   /**
@@ -211,10 +288,13 @@ class ElementPromptSyncService {
    * Check if a selector value matches an element
    */
   private isMatchingSelector(selectorValue: string, element: RecordedElement): boolean {
-    if (!selectorValue || !element) return false;
+    if (!selectorValue || !element || typeof selectorValue !== 'string') return false;
     // Normalize selectors for comparison
     const normalizeSelector = (sel?: string) => sel?.trim().toLowerCase() || '';
-    const normalizedValue = normalizeSelector(selectorValue);
+    let normalizedValue = normalizeSelector(selectorValue);
+    normalizedValue = normalizedValue
+      .replace(/^css\s*[:=]\s*/, '')
+      .replace(/^xpath\s*[:=]\s*/, '');
     // Check exact matches
     if (normalizedValue === normalizeSelector(element.cssSelector) || 
         normalizedValue === normalizeSelector(element.xpath)) {
@@ -224,24 +304,30 @@ class ElementPromptSyncService {
     if (normalizedValue === element.id?.toLowerCase()) {
       return true;
     }
-    // Check if selector contains element identifiers
+
+    if (normalizedValue === (element.dbId || '').toLowerCase()) {
+      return true;
+    }
+
+    // Check logical key references when plan steps store element names instead of selectors
+    if (normalizedValue === (element.logicalKey || '').toLowerCase()) {
+      return true;
+    }
+    // Check candidate selectors tied to this element
     const elementSelectors = [
       element.cssSelector,
       element.xpath,
       element.id,
       ...(element.selectors || [])
     ].filter(Boolean).map(sel => normalizeSelector(sel));
-    // More flexible matching for existing selectors
+
     for (const sel of elementSelectors) {
       if (!sel) continue;
       // Exact match
       if (sel === normalizedValue) {
         return true;
       }
-      // Partial matches for CSS selectors
-      if (normalizedValue.includes(sel) || sel.includes(normalizedValue)) {
-        return true;
-      }
+
       // For CSS selectors, check if they target the same element
       if (element.cssSelector && selectorValue.includes('#') && element.cssSelector.includes('#')) {
         const valueId = normalizedValue.match(/#([^.\s]+)/)?.[1];
@@ -253,12 +339,61 @@ class ElementPromptSyncService {
     }
     return false;
   }
+
+  private extractSelectorStrings(value: any): string[] {
+    const selectors = new Set<string>();
+
+    const collect = (v: any): void => {
+      if (!v) return;
+      if (typeof v === 'string') {
+        const s = v.trim();
+        if (s) selectors.add(s);
+        return;
+      }
+      if (Array.isArray(v)) {
+        for (const item of v) collect(item);
+        return;
+      }
+      if (typeof v === 'object') {
+        const keys = [
+          'selector', 'target', 'locator', 'element', 'elementId',
+          'css', 'css_selector', 'xpath', 'original_selector',
+          'value', 'target_selector'
+        ];
+        for (const k of keys) {
+          if (k in v) collect(v[k]);
+        }
+        if (v.dual_selectors && typeof v.dual_selectors === 'object') {
+          collect(v.dual_selectors.css_selector);
+          collect(v.dual_selectors.xpath_selector);
+        }
+      }
+    };
+
+    collect(value);
+    return Array.from(selectors);
+  }
   /**
    * Ensure the service is initialized before any operation
    */
   private async ensureInitialized(): Promise<void> {
+    const token = localStorage.getItem('auth_token');
+    if (!token) {
+      this.initialized = false;
+      return;
+    }
     if (!this.initialized) {
       await this.initialize();
+      return;
+    }
+
+    // Keep relationships fresh as prompts/elements are edited.
+    const now = Date.now();
+    const shouldRefresh = this.relationships.size === 0;
+
+    if (shouldRefresh) {
+      await this.buildRelationshipMap();
+      this.lastRelationshipRefresh = now;
     }
   }
   /**
@@ -271,26 +406,42 @@ class ElementPromptSyncService {
   ): Promise<void> {
     await this.ensureInitialized();
     const relationship = this.relationships.get(elementId);
-    if (!relationship) {
-      return;
-    }
-    const oldSelector = relationship.elementRef.currentSelector;
+    
+    // Always update the element even if no related prompts exist
+    const oldSelector = relationship?.elementRef.currentSelector || '';
     try {
-      // Update the element in the database
-      await this.updateElementInDatabase(elementId, newSelector, selectorType);
-      // Update all related prompts
-      await this.updateRelatedPrompts(relationship, newSelector);
-      // Update local relationship
-      relationship.elementRef.currentSelector = newSelector;
-      relationship.elementRef.selectorType = selectorType;
-      // Emit sync event
-      this.emitSyncEvent({
-        type: 'element-updated',
-        source: relationship.elementRef,
-        oldValue: oldSelector,
-        newValue: newSelector,
-        timestamp: new Date()
-      });
+      // Update the element in the database (use dbId if available)
+      const updateId = relationship?.elementRef.dbId || elementId;
+      await this.updateElementInDatabase(updateId, newSelector, selectorType);
+      
+      // Update all related prompts only if relationship exists
+      if (relationship) {
+        await this.updateRelatedPrompts(relationship, newSelector);
+        // Update local relationship
+        relationship.elementRef.currentSelector = newSelector;
+        relationship.elementRef.selectorType = selectorType;
+        // Emit sync event
+        this.emitSyncEvent({
+          type: 'element-updated',
+          source: relationship.elementRef,
+          oldValue: oldSelector,
+          newValue: newSelector,
+          timestamp: new Date()
+        });
+      } else {
+        // Element exists but has no related prompts - still emit a sync event
+        this.emitSyncEvent({
+          type: 'element-updated',
+          source: {
+            elementId,
+            currentSelector: newSelector,
+            selectorType
+          } as ElementReference,
+          oldValue: oldSelector,
+          newValue: newSelector,
+          timestamp: new Date()
+        });
+      }
     } catch (error) {
       throw error;
     }
@@ -329,8 +480,9 @@ class ElementPromptSyncService {
       await this.updatePromptStepInDatabase(promptId, stepIndex, parameterKey, newSelector);
       // Update the element if the selector is different
       if (newSelector !== relationship.elementRef.currentSelector) {
+        const updateId = relationship.elementRef.dbId || elementId;
         await this.updateElementInDatabase(
-          elementId, 
+          updateId, 
           newSelector, 
           newSelector.startsWith('//') ? 'xpath' : 'css'
         );
@@ -373,20 +525,47 @@ class ElementPromptSyncService {
     newSelector: string, 
     selectorType: 'css' | 'xpath'
   ): Promise<void> {
-    const mcpClient = await MCPFrontendManager.getInstance();
-    if (!mcpClient) {
-      throw new Error('MCP client not available');
-    }
-
-    const updateData = selectorType === 'css' 
-      ? { cssSelector: newSelector }
+    const updateData = selectorType === 'css'
+      ? { css_selector: newSelector }
       : { xpath: newSelector };
 
-    await mcpClient.callTool('sql_update_element', {
-      elementId,
-      updateData
+    const token = localStorage.getItem('auth_token');
+    const response = await fetch(`${config.apiBaseUrl}/api/v1/sql/elements/${elementId}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify(updateData),
     });
+    if (!response.ok) {
+      throw new Error(`Failed to update element ${elementId}`);
+    }
   }
+
+  private setStepParameterValue(step: any, parameterKey: string, newValue: string): boolean {
+    if (!step) {
+      return false;
+    }
+
+    if (parameterKey.startsWith('args.')) {
+      const key = parameterKey.split('.').pop()!;
+      step.args = step.args || {};
+      step.args[key] = newValue;
+      return true;
+    }
+
+    if (parameterKey.startsWith('step.')) {
+      const key = parameterKey.split('.').pop()!;
+      step[key] = newValue;
+      return true;
+    }
+
+    step.params = step.params || {};
+    step.params[parameterKey] = newValue;
+    return true;
+  }
+
   /**
    * Update prompt step in database (works with plans table via existing API)
    */
@@ -408,22 +587,62 @@ class ElementPromptSyncService {
         return;
       }
       const plansData = await plansResponse.json();
-      const testPlans = plansData.test_plans || [];
+      const testPlans = plansData.plans || plansData.test_plans || [];
       if (testPlans.length === 0) {
         return;
       }
-      const plan = testPlans[0]; // Use the first plan
-      // Update the specific parameter
-      if (plan.steps && plan.steps[stepIndex]) {
-        if (!plan.steps[stepIndex].params) {
-          plan.steps[stepIndex].params = {};
+      let updatedAny = false;
+
+      for (const plan of testPlans) {
+        let planJson: any = plan.plan_json;
+        if (typeof planJson === 'string') {
+          try {
+            planJson = JSON.parse(planJson);
+          } catch {
+            planJson = {};
+          }
         }
-        plan.steps[stepIndex].params[parameterKey] = newValue;
-        // The current API doesn't have a direct update endpoint for plans
-        // This would need to be implemented in the backend
-        // TODO: Implement plan update endpoint in the backend
-        // For now, we'll just log what would be updated
-      } else {
+        if (!planJson || typeof planJson !== 'object') {
+          planJson = {};
+        }
+
+        const fallbackSteps = Array.isArray(plan.steps) ? plan.steps : [];
+        const steps = Array.isArray(planJson.steps) ? planJson.steps : fallbackSteps;
+        if (!steps[stepIndex]) {
+          continue;
+        }
+
+        this.setStepParameterValue(steps[stepIndex], parameterKey, newValue);
+
+        const saveResponse = await fetch(`${config.apiBaseUrl}/api/v1/generated-test-plans`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            id: plan.id,
+            prompt_id: plan.prompt_id || promptId,
+            plan_json: {
+              ...planJson,
+              steps,
+            },
+            confidence_score: plan.confidence_score,
+            model_used: plan.model_used,
+            generation_time_ms: plan.generation_time_ms,
+            status: plan.status || 'draft',
+          }),
+        });
+
+        if (!saveResponse.ok) {
+          throw new Error(`Failed to persist synced step for prompt ${promptId}`);
+        }
+
+        updatedAny = true;
+      }
+
+      if (!updatedAny) {
+        throw new Error(`No editable step found at index ${stepIndex} for prompt ${promptId}`);
       }
     } catch (error) {
       throw error;
@@ -451,29 +670,66 @@ class ElementPromptSyncService {
    * Load all elements from database
    */
   private async loadAllElements(): Promise<RecordedElement[]> {
-    try {
-      const mcpClient = await MCPFrontendManager.getInstance();
-      if (!mcpClient) {
-        return [];
+    const mapElement = (dbElement: any): RecordedElement => ({
+      id: dbElement.dbId || dbElement.id || dbElement.element_key,
+      dbId: dbElement.dbId,
+      logicalKey: dbElement.logical_key || dbElement.element_key || dbElement.id,
+      cssSelector: dbElement.css_selector || dbElement.cssSelector,
+      xpath: dbElement.xpath,
+      selectors: [
+        ...(dbElement.selectors || []),
+        dbElement.logical_key,
+        dbElement.element_key,
+      ].filter(Boolean),
+      tagName: dbElement.tag || dbElement.tagName,
+      textContent: dbElement.text_content || dbElement.textContent,
+      href: dbElement.href,
+      className: dbElement.class_name || dbElement.className
+    });
+
+    const dedupeElements = (elements: RecordedElement[]): RecordedElement[] => {
+      // API already returns newest-first, so keep first occurrence.
+      const seen = new Set<string>();
+      const deduped: RecordedElement[] = [];
+
+      for (const el of elements) {
+        const key = [
+          (el.logicalKey || '').toLowerCase(),
+          (el.cssSelector || '').toLowerCase(),
+          (el.xpath || '').toLowerCase(),
+        ].join('|');
+
+        // Fallback key when selectors/logical key are missing.
+        const fallbackKey = (el.dbId || el.id || '').toLowerCase();
+        const dedupeKey = key === '||' ? fallbackKey : key;
+
+        if (!dedupeKey || seen.has(dedupeKey)) {
+          continue;
+        }
+        seen.add(dedupeKey);
+        deduped.push(el);
       }
 
-      const response = await mcpClient.callTool('sql_get_all_elements', {});
-      
-      // Convert the response to RecordedElement format
-      const elements = response.content?.[0]?.data || [];
-      return elements.map((dbElement: any) => ({
-        id: dbElement.id || dbElement.element_key,
-        cssSelector: dbElement.css_selector || dbElement.cssSelector,
-        xpath: dbElement.xpath,
-        selectors: dbElement.selectors || [],
-        tagName: dbElement.tag || dbElement.tagName,
-        textContent: dbElement.text_content || dbElement.textContent,
-        href: dbElement.href,
-        className: dbElement.class_name || dbElement.className
-      }));
+      return deduped;
+    };
+
+    // Use REST API directly for fast/consistent frontend behavior.
+    try {
+      const token = localStorage.getItem('auth_token');
+      const response = await fetch(`${config.apiBaseUrl}/api/v1/sql/elements?limit=1000`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (response.ok) {
+        const data = await response.json();
+        const mapped = (data.data || []).map(mapElement);
+        const deduped = dedupeElements(mapped);
+        return deduped;
+      }
     } catch (error) {
-      return [];
+      // silent fail
     }
+
+    return [];
   }
   /**
    * Load all plans from database (structured steps) - Direct approach
@@ -481,6 +737,47 @@ class ElementPromptSyncService {
   private async loadAllPlans(): Promise<any[]> {
     try {
       const token = localStorage.getItem('auth_token');
+
+      // Fast path: single bulk request for latest plans in current project.
+      try {
+        const bulkResponse = await fetch(
+          `${config.apiBaseUrl}/api/v1/generated-test-plans?latest_per_prompt=true&limit=1000`,
+          {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+            },
+          }
+        );
+
+        if (bulkResponse.ok) {
+          const bulkData = await bulkResponse.json();
+          const bulkPlans = bulkData.plans || [];
+          const mappedPlans: any[] = [];
+
+          for (const plan of bulkPlans) {
+            const steps = this.getPlanSteps(plan);
+            if (!Array.isArray(steps) || steps.length === 0) {
+              continue;
+            }
+
+            mappedPlans.push({
+              id: plan.id,
+              prompt_id: plan.prompt_id,
+              prompt_title: (plan.prompt_title || '').toString().trim(),
+              plan_json: plan.plan_json || { steps: [] },
+              status: plan.status || 'active',
+              steps,
+            });
+          }
+
+          if (mappedPlans.length > 0) {
+            return mappedPlans;
+          }
+        }
+      } catch {
+        // Fallback to legacy per-prompt loading below.
+      }
+
       // First, get all prompts
       const promptsResponse = await fetch(`${config.apiBaseUrl}/api/v1/prompts?limit=1000`, {
         headers: {
@@ -500,7 +797,7 @@ class ElementPromptSyncService {
       const allPlans: any[] = [];
       let successCount = 0;
       let notFoundCount = 0;
-      for (let i = 0; i < Math.min(3, prompts.length); i++) {
+      for (let i = 0; i < prompts.length; i++) {
         const prompt = prompts[i];
           const url = `${config.apiBaseUrl}/api/v1/generated-test-plans/by-prompt/${prompt.id}`;
           const plansResponse = await fetch(url, {
@@ -510,29 +807,37 @@ class ElementPromptSyncService {
           });
           if (plansResponse.ok) {
             const plansData = await plansResponse.json();
-            const testPlans = plansData.test_plans || plansData.data || plansData || [];
+            const testPlans = plansData.plans || plansData.test_plans || plansData.data || (Array.isArray(plansData) ? plansData : []);
             if (testPlans.length > 0) {
               successCount++;
-              for (const plan of testPlans) {
+              // Use only the latest plan per prompt to avoid duplicate references
+              const latestPlan = testPlans[0];
+              for (const plan of [latestPlan]) {
+                const steps = this.getPlanSteps(plan);
+                if (!Array.isArray(steps) || steps.length === 0) {
+                  continue;
+                }
+                const promptTitle = (prompt.title || prompt.name || prompt.content || prompt.text || '').toString().split('\n')[0].trim();
                 // Convert to the format expected by the sync service
                 allPlans.push({
                   id: plan.id,
                   prompt_id: plan.prompt_id || prompt.id,
-                  plan_json: { steps: plan.steps || [] },
+                  prompt_title: promptTitle,
+                  plan_json: plan.plan_json || { steps: [] },
                   status: plan.status || 'active',
-                  steps: plan.steps || []
+                  steps
                 });
               }
             } else {
             }
           } else {
             notFoundCount++;
-            const errorText = await plansResponse.text();
+            await plansResponse.text();
           }
       }
       // If no plans found through API, check if we can access them differently
-      if (allPlans.length === 0) {
-      }
+      void successCount;
+      void notFoundCount;
       return allPlans;
     } catch (error) {
       return [];
@@ -622,7 +927,7 @@ class ElementPromptSyncService {
       });
       if (plansResponse.ok) {
         const plansData = await plansResponse.json();
-        const testPlans = plansData.test_plans || [];
+        const testPlans = plansData.plans || plansData.test_plans || [];
         if (testPlans.length > 0) {
           const plan = testPlans[0];
           // Add generated_steps in the format the sync service expects
@@ -637,18 +942,39 @@ class ElementPromptSyncService {
     }
   }
   /**
-   * Get all relationships for debugging
+   * Get all relationships
    */
   async getRelationships(): Promise<Map<string, SyncRelationship>> {
     await this.ensureInitialized();
     return new Map(this.relationships);
   }
+
+  private resolveRelationship(elementId: string): SyncRelationship | null {
+    const direct = this.relationships.get(elementId);
+    if (direct) {
+      return direct;
+    }
+
+    const normalized = (elementId || '').toLowerCase();
+    for (const relationship of this.relationships.values()) {
+      const logicalKey = (relationship.elementRef.logicalKey || '').toLowerCase();
+      const dbId = (relationship.elementRef.dbId || '').toLowerCase();
+      const keyId = (relationship.elementRef.elementId || '').toLowerCase();
+
+      if (normalized && (normalized === logicalKey || normalized === dbId || normalized === keyId)) {
+        return relationship;
+      }
+    }
+
+    return null;
+  }
+
   /**
    * Get relationships for a specific element
    */
   async getElementRelationships(elementId: string): Promise<SyncRelationship | null> {
     await this.ensureInitialized();
-    return this.relationships.get(elementId) || null;
+    return this.resolveRelationship(elementId);
   }
   /**
    * Load all prompts from database (text-based prompts)
@@ -674,7 +1000,7 @@ class ElementPromptSyncService {
   }
   async hasRelatedPrompts(elementId: string): Promise<boolean> {
     await this.ensureInitialized();
-    const relationship = this.relationships.get(elementId);
+    const relationship = this.resolveRelationship(elementId);
     return !!(relationship && relationship.promptRefs.length > 0);
   }
   /**
@@ -682,7 +1008,7 @@ class ElementPromptSyncService {
    */
   async getRelatedPromptsCount(elementId: string): Promise<number> {
     await this.ensureInitialized();
-    const relationship = this.relationships.get(elementId);
+    const relationship = this.resolveRelationship(elementId);
     return relationship ? relationship.promptRefs.length : 0;
   }
   /**
@@ -738,126 +1064,6 @@ class ElementPromptSyncService {
       }
     } else {
       this.relationships.delete(elementId);
-    }
-  }
-  /**
-   * Debug function - get summary of current state
-   */
-  getDebugSummary(): any {
-    return {
-      initialized: this.initialized,
-      relationshipCount: this.relationships.size,
-      relationships: Array.from(this.relationships.entries()).map(([elementId, rel]) => ({
-        elementId,
-        selector: rel.elementRef.currentSelector,
-        selectorType: rel.elementRef.selectorType,
-        promptCount: rel.promptRefs.length,
-        prompts: rel.promptRefs.map(ref => ({
-          promptId: ref.promptId,
-          step: ref.stepIndex,
-          param: ref.parameterKey,
-          value: ref.currentValue
-        }))
-      }))
-    };
-  }
-  /**
-   * Debug function - test selector matching
-   */
-  testSelectorMatch(selector: string, elementId?: string): any {
-    const results: any[] = [];
-    if (elementId) {
-      // Test specific element
-      const relationship = this.relationships.get(elementId);
-      if (relationship) {
-        const element = {
-          id: elementId,
-          cssSelector: relationship.elementRef.currentSelector,
-          xpath: relationship.elementRef.currentSelector
-        };
-        const matches = this.isMatchingSelector(selector, element as any);
-        results.push({
-          elementId,
-          currentSelector: relationship.elementRef.currentSelector,
-          testSelector: selector,
-          matches
-        });
-      }
-    } else {
-      // Test all elements
-      for (const [elemId, rel] of this.relationships) {
-        const element = {
-          id: elemId,
-          cssSelector: rel.elementRef.currentSelector,
-          xpath: rel.elementRef.currentSelector
-        };
-        const matches = this.isMatchingSelector(selector, element as any);
-        results.push({
-          elementId: elemId,
-          currentSelector: rel.elementRef.currentSelector,
-          testSelector: selector,
-          matches
-        });
-      }
-    }
-    return results;
-  }
-  /**
-   * Debug function - check if test plans exist
-   */
-  async checkTestPlans(): Promise<any> {
-    try {
-      const token = localStorage.getItem('auth_token');
-      // Try to get all test plans
-  const response = await fetch(`${config.apiBaseUrl}/api/v1/generated-test-plans?limit=10`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
-      if (response.ok) {
-        const data = await response.json();
-        return data;
-      } else {
-        return null;
-      }
-    } catch (error) {
-      return null;
-    }
-  }
-  /**
-   * Debug function - check specific prompt's plans
-   */
-  async checkPromptPlans(promptId?: string): Promise<any> {
-    try {
-      const token = localStorage.getItem('auth_token');
-      // Get prompts first to find a valid ID
-      if (!promptId) {
-        const promptsResponse = await fetch(`${config.apiBaseUrl}/api/v1/prompts?limit=1`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        if (promptsResponse.ok) {
-          const promptsData = await promptsResponse.json();
-          const prompts = promptsData.data || [];
-          if (prompts.length > 0) {
-            promptId = prompts[0].id;
-          } else {
-            return null;
-          }
-        }
-      }
-      // Check plans for this prompt
-  const plansResponse = await fetch(`${config.apiBaseUrl}/api/v1/generated-test-plans/by-prompt/${promptId}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (plansResponse.ok) {
-        const plansData = await plansResponse.json();
-        return plansData;
-      } else {
-        const errorText = await plansResponse.text();
-        return { error: errorText, status: plansResponse.status };
-      }
-    } catch (error) {
-      return null;
     }
   }
   /**
@@ -942,7 +1148,7 @@ class ElementPromptSyncService {
   private async findAlternativeElement(deletedElementRef: any): Promise<any> {
     try {
       // Get all elements from the same page
-      const elementsResponse = await fetch('/api/v1/sql/elements?limit=1000');
+      const elementsResponse = await fetch(`${config.apiBaseUrl}/api/v1/sql/elements?limit=1000`);
       if (!elementsResponse.ok) {
         throw new Error('Failed to fetch elements');
       }
@@ -1035,10 +1241,4 @@ class ElementPromptSyncService {
 }
 // Create singleton instance
 export const elementPromptSyncService = new ElementPromptSyncService();
-// Auto-initialize on import (in a real app, you might want more control over this)
-elementPromptSyncService.initialize().catch(console.error);
-// Expose to global window for debugging
-if (typeof window !== 'undefined') {
-  (window as any).syncService = elementPromptSyncService;
-}
 export default elementPromptSyncService;

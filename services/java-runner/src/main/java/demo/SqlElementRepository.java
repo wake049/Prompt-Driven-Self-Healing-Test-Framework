@@ -2,10 +2,13 @@ package demo;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpGet;
+import org.apache.http.client.methods.HttpPut;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.entity.StringEntity;
 import org.apache.http.impl.client.CloseableHttpClient;
-import org.apache.http.impl.client.HttpClients;
 import org.apache.http.util.EntityUtils;
 
 import java.io.IOException;
@@ -17,7 +20,7 @@ import java.util.List;
 public class SqlElementRepository {
     private static final String SQL_BACKEND_URL = System.getenv("UNIFIED_API_URL") != null ? 
         System.getenv("UNIFIED_API_URL") : 
-        "https://testhelix.com";
+        "https://fluxtest.io";
     private static final String ELEMENTS_ENDPOINT = "/api/elements";
     private final ObjectMapper objectMapper;
 
@@ -59,7 +62,7 @@ public class SqlElementRepository {
         List<String> preferredSelectors = new ArrayList<>();
         List<String> fallbackSelectors = new ArrayList<>();
         
-        try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
+        try (CloseableHttpClient httpClient = HttpClientFactory.create()) {
             // Build query parameters
             StringBuilder urlBuilder = new StringBuilder(SQL_BACKEND_URL + ELEMENTS_ENDPOINT + "?");
             
@@ -154,16 +157,70 @@ public class SqlElementRepository {
     }
 
     public void saveHealingSuccess(String elementId, String page, String originalLocator, String healedLocator) {
-        // In a real implementation, you might want to update the database with successful healing
-        // For now, we'll just log it
-        System.out.println("Healing success recorded: " + elementId + " healed from " + originalLocator + " to " + healedLocator);
-        
-        // TODO: Could add an API call to update the element in the database with the new working locator
-        // or create a healing log entry in the database
+        System.out.println("Healing success: " + elementId + " healed from " + originalLocator + " to " + healedLocator);
+
+        // 1. Update the element's primary_selector via the unified API
+        //    The backend cascades changes to all test plans and pending steps.
+        try (CloseableHttpClient httpClient = HttpClientFactory.create()) {
+            String updateUrl = SQL_BACKEND_URL + "/api/v1/sql/elements/" + URLEncoder.encode(elementId, StandardCharsets.UTF_8.toString());
+            HttpPut httpPut = new HttpPut(updateUrl);
+            httpPut.setHeader("Content-Type", "application/json");
+
+            ObjectNode body = objectMapper.createObjectNode();
+            if (healedLocator.startsWith("//") || healedLocator.startsWith("(//")) {
+                body.put("xpath", healedLocator);
+            } else {
+                body.put("css_selector", healedLocator);
+            }
+
+            httpPut.setEntity(new StringEntity(objectMapper.writeValueAsString(body), StandardCharsets.UTF_8));
+
+            try (CloseableHttpResponse response = httpClient.execute(httpPut)) {
+                int status = response.getStatusLine().getStatusCode();
+                if (status >= 200 && status < 300) {
+                    System.out.println("Element " + elementId + " updated in DB with healed locator (cascaded to test plans)");
+                } else {
+                    System.err.println("Failed to update element — HTTP " + status);
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("Error persisting healed locator: " + e.getMessage());
+        }
+
+        // 2. Record the healing event in healing.locator_events
+        try (CloseableHttpClient httpClient = HttpClientFactory.create()) {
+            String healingUrl = SQL_BACKEND_URL + "/api/v1/healing/submit";
+            HttpPost httpPost = new HttpPost(healingUrl);
+            httpPost.setHeader("Content-Type", "application/json");
+
+            ObjectNode attempt = objectMapper.createObjectNode();
+            attempt.put("original_locator", originalLocator);
+            attempt.put("healed_locator", healedLocator);
+            attempt.put("page", page);
+            attempt.put("element_id", elementId);
+            attempt.put("success", true);
+            attempt.put("strategy", "alternative_selector");
+
+            ObjectNode submission = objectMapper.createObjectNode();
+            submission.putArray("healing_attempts").add(attempt);
+
+            httpPost.setEntity(new StringEntity(objectMapper.writeValueAsString(submission), StandardCharsets.UTF_8));
+
+            try (CloseableHttpResponse response = httpClient.execute(httpPost)) {
+                int status = response.getStatusLine().getStatusCode();
+                if (status >= 200 && status < 300) {
+                    System.out.println("Healing event recorded for analytics");
+                } else {
+                    System.err.println("Failed to record healing event — HTTP " + status);
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("Error recording healing event: " + e.getMessage());
+        }
     }
 
     public boolean isAvailable() {
-        try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
+        try (CloseableHttpClient httpClient = HttpClientFactory.create()) {
             HttpGet httpGet = new HttpGet(SQL_BACKEND_URL + "/health");
             httpGet.setHeader("Accept", "application/json");
             
@@ -177,7 +234,7 @@ public class SqlElementRepository {
     }
 
     public int getElementCount() {
-        try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
+        try (CloseableHttpClient httpClient = HttpClientFactory.create()) {
             HttpGet httpGet = new HttpGet(SQL_BACKEND_URL + ELEMENTS_ENDPOINT + "?limit=1");
             httpGet.setHeader("Accept", "application/json");
             

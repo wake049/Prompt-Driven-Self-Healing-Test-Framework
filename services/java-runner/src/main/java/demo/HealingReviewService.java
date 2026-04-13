@@ -7,7 +7,6 @@ import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.entity.StringEntity;
 import org.apache.http.impl.client.CloseableHttpClient;
-import org.apache.http.impl.client.HttpClients;
 import org.apache.http.util.EntityUtils;
 
 import java.io.IOException;
@@ -19,7 +18,7 @@ import java.util.ArrayList;
 public class HealingReviewService {
     private static final String REVIEW_API_URL = System.getenv("UNIFIED_API_URL") != null ? 
         System.getenv("UNIFIED_API_URL") + "/api/v1/healing/submit" : 
-        "https://testhelix.com/api/v1/healing/submit";
+        "https://fluxtest.io/api/v1/healing/submit";
     private final ObjectMapper objectMapper;
 
     public HealingReviewService() {
@@ -42,7 +41,7 @@ public class HealingReviewService {
             String jsonPayload = objectMapper.writeValueAsString(submission);
             
             // Submit to review API
-            try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
+            try (CloseableHttpClient httpClient = HttpClientFactory.create()) {
                 HttpPost httpPost = new HttpPost(REVIEW_API_URL);
                 httpPost.setHeader("Content-Type", "application/json");
                 
@@ -80,10 +79,10 @@ public class HealingReviewService {
     }
 
     public boolean isReviewApiAvailable() {
-        try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
+        try (CloseableHttpClient httpClient = HttpClientFactory.create()) {
             String healthUrl = System.getenv("UNIFIED_API_URL") != null ? 
                 System.getenv("UNIFIED_API_URL") + "/health" : 
-                "https://testhelix.com/health";
+                "https://fluxtest.io/health";
             HttpGet httpGet = new HttpGet(healthUrl);
             httpGet.setHeader("Accept", "application/json");
             

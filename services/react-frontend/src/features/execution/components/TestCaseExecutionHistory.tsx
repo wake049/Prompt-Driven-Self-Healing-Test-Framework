@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
+import { useNavigate } from 'react-router-dom';
 import unifiedApiClient from '../../../shared/utils/unifiedApiClient';
-import ExecutionStepsModal from './ExecutionStepsModal';
 import { executionApiService } from '../api';
 import { useTheme } from '../../../contexts/ThemeContext';
 import EnhancedStatusBadge from '../../../shared/ui/EnhancedStatusBadge';
@@ -39,7 +39,45 @@ const RefreshButton = styled.button`
     background: #0052a3;
   }
 `;
+const RerunButton = styled.button<{ browser?: string }>`
+  background: ${props => {
+    switch (props.browser) {
+      case 'firefox': return '#FF7139';
+      case 'edge': return '#0078D7';
+      case 'safari': return '#006CFF';
+      default: return '#4285F4'; // Chrome
+    }
+  }};
+  color: white;
+  border: none;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-transform: uppercase;
+  
+  &:hover {
+    opacity: 0.8;
+    transform: translateY(-1px);
+  }
+  
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+`;
 
+const BrowserIcon = styled.span`
+  margin-right: 4px;
+`;
+
+const ActionButtons = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+`;
 const StatsRow = styled.div`
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -208,7 +246,7 @@ const TableHeader = styled.div`
 
 const TableRow = styled.div<{ clickable?: boolean }>`
   display: grid;
-  grid-template-columns: 2fr 1fr 1fr 1fr 1.5fr;
+  grid-template-columns: 1.2fr 2fr 1fr 1fr 0.8fr 0.8fr 0.8fr 0.8fr 1fr 1.5fr;
   padding: 12px 16px;
   border-bottom: 1px solid #e9ecef;
   align-items: center;
@@ -290,6 +328,7 @@ interface ExecutionRecord {
   failed_steps: number;
   pending_review_steps?: number; // NEW: Steps that passed but required healing
   healed_steps?: number; // NEW: Total healed steps count
+  browser_type?: string; // NEW: Browser used for execution
 }
 
 interface TestCaseExecutionHistoryProps {
@@ -304,21 +343,47 @@ const TestCaseExecutionHistory: React.FC<TestCaseExecutionHistoryProps> = ({
   title = "Execution History" 
 }) => {
   const theme = useTheme();
+  const navigate = useNavigate();
   const [stats, setStats] = useState<ExecutionStats | null>(null);
   const [executions, setExecutions] = useState<ExecutionRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selectedExecutionId, setSelectedExecutionId] = useState<string | null>(null);
-  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [rerunningExecution, setRerunningExecution] = useState<string | null>(null);
 
   const handleExecutionClick = (executionId: string) => {
-    setSelectedExecutionId(executionId);
-    setIsModalOpen(true);
+    navigate(`/app/execution/${executionId}`);
   };
 
-  const handleCloseModal = () => {
-    setIsModalOpen(false);
-    setSelectedExecutionId(null);
+  const handleRerun = async (executionId: string, browser: string) => {
+    try {
+      setRerunningExecution(executionId);
+      const response = await unifiedApiClient.request(
+        `/api/v1/execution/rerun-execution/${executionId}?browser=${browser}`,
+        { method: 'POST' }
+      );
+      
+      if (response.success) {
+        alert(`Test rerun started on ${browser}!\nNew execution IDs: ${response.executions?.map((e: any) => e.execution_id).join(', ')}`);
+        // Reload executions to show the new run
+        fetchData();
+      } else {
+        alert(`Failed to rerun test: ${response.message}`);
+      }
+    } catch (error: any) {
+      console.error('Error rerunning execution:', error);
+      alert(`Error rerunning test: ${error.message}`);
+    } finally {
+      setRerunningExecution(null);
+    }
+  };
+
+  const getBrowserIcon = (browser?: string) => {
+    switch (browser?.toLowerCase()) {
+      case 'firefox': return '🦊';
+      case 'edge': return '🌊';
+      case 'safari': return '🧭';
+      default: return '🌐'; // Chrome
+    }
   };
 
   const fetchData = async () => {
@@ -445,15 +510,7 @@ const TestCaseExecutionHistory: React.FC<TestCaseExecutionHistoryProps> = ({
       )}
 
       <ExecutionsTable>
-        <TableHeader>
-          <TableRow style={{ fontWeight: 600 }}>
-            <div>Test Run</div>
-            <div>Status</div>
-            <div>Success Rate</div>
-            <div>Duration</div>
-            <div>Started</div>
-          </TableRow>
-        </TableHeader>
+
         
         {executions.length === 0 ? (
           <EmptyState>
@@ -470,6 +527,7 @@ const TestCaseExecutionHistory: React.FC<TestCaseExecutionHistoryProps> = ({
             }}>
               <div>Run ID</div>
               <div>Prompt Description</div>
+              <div>Browser</div>
               <div>Date</div>
               <div>Duration</div>
               <div>Steps</div>
@@ -491,6 +549,9 @@ const TestCaseExecutionHistory: React.FC<TestCaseExecutionHistoryProps> = ({
                   {execution.test_name || 'Test Execution'}
                   <small>ID: {execution.id}</small>
                 </ExecutionDescription>
+                <div style={{ fontSize: '18px' }}>
+                  {getBrowserIcon(execution.browser_type)} {execution.browser_type || 'chrome'}
+                </div>
                 <DateValue>
                   {new Date(execution.started_at).toLocaleDateString('en-US', {
                     year: 'numeric',
@@ -517,33 +578,43 @@ const TestCaseExecutionHistory: React.FC<TestCaseExecutionHistoryProps> = ({
                 </MetricValue>
                 <div>
                   <EnhancedStatusBadge 
-                    status={execution.status === 'completed' ? 'pass' : execution.status}
+                    status={
+                      execution.failed_steps && execution.failed_steps > 0 
+                        ? 'failed' 
+                        : (execution.status === 'completed' ? 'pass' : execution.status)
+                    }
                     healedSteps={execution.healed_steps || execution.pending_review_steps || 0}
                     size="medium"
                   />
                 </div>
-                <div>
+                <ActionButtons>
                   <ActionButton onClick={(e) => {
                     e.stopPropagation();
                     handleExecutionClick(execution.id);
                   }}>
                     View Details
                   </ActionButton>
-                </div>
+                  {['chrome', 'firefox', 'edge', 'safari'].map(browser => (
+                    <RerunButton
+                      key={browser}
+                      browser={browser}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleRerun(execution.id, browser);
+                      }}
+                      disabled={rerunningExecution === execution.id}
+                      title={`Rerun on ${browser}`}
+                    >
+                      <BrowserIcon>{getBrowserIcon(browser)}</BrowserIcon>
+                      {browser}
+                    </RerunButton>
+                  ))}
+                </ActionButtons>
               </ExecutionItem>
             ))}
           </>
         )}
       </ExecutionsTable>
-
-      {/* Modal for execution step details */}
-      {selectedExecutionId && (
-        <ExecutionStepsModal
-          executionId={selectedExecutionId}
-          isOpen={isModalOpen}
-          onClose={handleCloseModal}
-        />
-      )}
     </HistoryContainer>
   );
 };

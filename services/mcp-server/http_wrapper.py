@@ -3,6 +3,8 @@ HTTP wrapper for MCP server to make it ALB-compatible
 """
 import asyncio
 import json
+import logging
+import os
 import time
 import sys
 from pathlib import Path
@@ -11,6 +13,20 @@ from fastapi import FastAPI, WebSocket, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
+
+# Configure logging FIRST - unbuffered output for Render logs
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+# Force unbuffered output
+sys.stdout.reconfigure(line_buffering=True)
+sys.stderr.reconfigure(line_buffering=True)
+
+logger = logging.getLogger(__name__)
 
 # Add the current directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
@@ -27,12 +43,12 @@ async def lifespan(app: FastAPI):
     global mcp_server, startup_error
     # Startup
     try:
-        print("🚀 Initializing MCP Server...")
+        logger.info("🚀 Initializing MCP Server...")
         mcp_server = MCPServer()
-        print("✅ MCP Server initialized successfully")
+        logger.info("✅ MCP Server initialized successfully")
         startup_error = None
     except Exception as e:
-        print(f"❌ Failed to initialize MCP Server: {e}")
+        logger.error(f"❌ Failed to initialize MCP Server: {e}")
         startup_error = str(e)
         mcp_server = None
     
@@ -42,16 +58,17 @@ async def lifespan(app: FastAPI):
     try:
         if mcp_server and hasattr(mcp_server, 'unified_api_client'):
             await mcp_server.unified_api_client.aclose()
-            print("🔄 MCP Server shutdown complete")
+            logger.info("🔄 MCP Server shutdown complete")
     except Exception as e:
-        print(f"⚠️ Error during shutdown: {e}")
+        logger.warning(f"⚠️ Error during shutdown: {e}")
 
 app = FastAPI(title="MCP Server HTTP Wrapper", lifespan=lifespan)
 
 # Add CORS middleware to handle cross-origin requests
+_allowed_origins = os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:5173").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify exact origins
+    allow_origins=[o.strip() for o in _allowed_origins],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -195,8 +212,8 @@ async def detailed_health_check():
                     "successful_requests": stats.get("successful_requests", 0),
                     "avg_latency_ms": stats.get("avg_latency_ms", 0)
                 }
-            except Exception:
-                pass
+            except Exception as stats_err:
+                logger.warning("Failed to read MCP stats during health check: %s", stats_err)
         
         return health_data
         
@@ -220,20 +237,32 @@ async def mcp_root():
     """MCP root endpoint"""
     return {"service": "MCP Server", "status": "running", "transport": "websocket", "endpoints": ["/mcp/ws", "/mcp/health"]}
 
+MCP_AUTH_REQUIRED = os.getenv("MCP_AUTH_REQUIRED", "false").lower() == "true"
+MCP_API_KEY = os.getenv("MCP_API_KEY", "")
+
 @app.websocket("/mcp/ws")
 async def mcp_websocket_endpoint(websocket: WebSocket):
     """MCP WebSocket endpoint matching frontend URL pattern"""
-    print(f"New WebSocket connection attempt to /mcp/ws from {websocket.client}")
-    print(f"Headers: {websocket.headers}")
+    logger.info(f"New WebSocket connection attempt to /mcp/ws from {websocket.client}")
+    
+    # Validate auth before accepting when auth is required
+    if MCP_AUTH_REQUIRED and MCP_API_KEY:
+        token = websocket.query_params.get("token", "")
+        auth_header = websocket.headers.get("authorization", "")
+        provided_key = token or (auth_header.removeprefix("Bearer ").strip() if auth_header else "")
+        if not provided_key or provided_key != MCP_API_KEY:
+            logger.warning(f"WebSocket auth failed from {websocket.client}")
+            await websocket.close(code=4003, reason="Authentication required")
+            return
     
     try:
         await websocket.accept()
-        print(f"WebSocket connection accepted for /mcp/ws")
+        logger.info(f"WebSocket connection accepted for /mcp/ws")
         
         while True:
             # Receive message from client
             message = await websocket.receive_text()
-            print(f"Received message: {message[:100]}...")
+            logger.debug(f"Received message: {message[:100]}...")
             
             # Process through MCP server
             if mcp_server is None:
@@ -246,25 +275,25 @@ async def mcp_websocket_endpoint(websocket: WebSocket):
                 continue
                 
             response = await mcp_server.handle_message(message)
-            print(f"Sending response: {response[:100]}...")
+            logger.debug(f"Sending response: {response[:100]}...")
             
             # Send response back
             await websocket.send_text(response)
     except Exception as e:
-        print(f"WebSocket error in /mcp/ws: {e}")
+        logger.error(f"WebSocket error in /mcp/ws: {e}")
         import traceback
         traceback.print_exc()
     finally:
-        print(f"WebSocket connection closed for /mcp/ws")
+        logger.info(f"WebSocket connection closed for /mcp/ws")
         try:
             await websocket.close()
-        except:
+        except Exception:
             pass
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """WebSocket endpoint for MCP communication"""
-    print(f"WebSocket connection attempt at /ws from {websocket.client}")
+    logger.info(f"WebSocket connection attempt at /ws from {websocket.client}")
     await websocket.accept()
     
     try:
@@ -278,17 +307,17 @@ async def websocket_endpoint(websocket: WebSocket):
             # Send response back
             await websocket.send_text(response)
     except Exception as e:
-        print(f"WebSocket error at /ws: {e}")
+        logger.error(f"WebSocket error at /ws: {e}")
     finally:
         try:
             await websocket.close()
-        except:
+        except Exception:
             pass
 
 @app.websocket("/")
 async def root_websocket_endpoint(websocket: WebSocket):
     """WebSocket endpoint at root path for ALB routing"""
-    print(f"WebSocket connection attempt at / from {websocket.client}")
+    logger.info(f"WebSocket connection attempt at / from {websocket.client}")
     await websocket.accept()
     
     try:
@@ -302,22 +331,39 @@ async def root_websocket_endpoint(websocket: WebSocket):
             # Send response back
             await websocket.send_text(response)
     except Exception as e:
-        print(f"WebSocket error at /: {e}")
+        logger.error(f"WebSocket error at /: {e}")
     finally:
         try:
             await websocket.close()
-        except:
+        except Exception:
             pass
 
 @app.post("/mcp")
 async def mcp_http_endpoint(request: dict):
     """HTTP endpoint for MCP requests (alternative to WebSocket)"""
+    from mcp_server.auth import authenticate
     try:
+        if not isinstance(request, dict):
+            raise HTTPException(status_code=400, detail="Request body must be a JSON object")
+
+        # Extract auth token from request
+        auth_token = request.pop("auth_token", None)
+        authenticate(auth_token)  # Raises MCPError if invalid
+
         message = json.dumps(request)
         response = await mcp_server.handle_message(message)
         return JSONResponse(content=json.loads(response))
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    logger.info("🚀 Starting MCP Server on 0.0.0.0:8001")
+    uvicorn.run(
+        app, 
+        host="0.0.0.0", 
+        port=8001,
+        log_level="info",
+        access_log=True
+    )

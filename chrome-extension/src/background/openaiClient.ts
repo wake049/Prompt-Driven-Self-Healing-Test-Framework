@@ -13,20 +13,79 @@ export type AISuggestionResult = {
   candidates: AICandidate[];
 };
 
+/** Active provider configuration from the backend */
+type ProviderConfig = {
+  provider: string;
+  model: string;
+  endpoint_url?: string;
+  source: string;
+  temperature: number;
+  max_tokens: number;
+};
+
+/** Cached provider configuration */
+let cachedProviderConfig: ProviderConfig | null = null;
+let cacheExpiry = 0;
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * Fetch the active AI provider configuration from the backend.
+ * Uses database-configured provider if available, falls back to environment defaults.
+ */
+async function getActiveProvider(tenantId?: string, projectId?: string): Promise<ProviderConfig | null> {
+  // Return cached config if valid
+  if (cachedProviderConfig && Date.now() < cacheExpiry) {
+    return cachedProviderConfig;
+  }
+
+  try {
+    const params = new URLSearchParams();
+    if (tenantId) params.append('tenant_id', tenantId);
+    if (projectId) params.append('project_id', projectId);
+
+    const response = await fetch(`http://localhost:3002/api/ai-providers/active?${params.toString()}`);
+
+    if (response.ok) {
+      const config = await response.json();
+      cachedProviderConfig = config;
+      cacheExpiry = Date.now() + CACHE_TTL;
+      console.log(`✅ Using provider: ${config.provider} / ${config.model} (${config.source})`);
+      return config;
+    } else {
+      console.warn('⚠️ Failed to fetch provider config, using default');
+      return null;
+    }
+  } catch (error) {
+    console.error('❌ Error fetching provider config:', error);
+    return null;
+  }
+}
+
 /**
  * Process a single shard of elements with the AI service.
  * Optimized for speed with compact payloads and fast timeouts.
+ * 
+ * Uses the active AI provider configured in the database.
  */
 export async function askShard(
   intent: string,
   url: string,
   els: ElementIdentity[],
-  elp: ElementPayload[]
+  elp: ElementPayload[],
+  tenantId?: string,
+  projectId?: string
 ): Promise<AISuggestionResult> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
 
   try {
+    // Fetch active provider configuration
+    const providerConfig = await getActiveProvider(tenantId, projectId);
+    
+    if (providerConfig) {
+      console.log(`🔧 Using ${providerConfig.provider} provider for element suggestion`);
+    }
+
     // Build compact, index-aligned payload (guard against length mismatch)
     const elements = els.map((el, index) => {
       const p = elp[index]; // may be undefined if arrays differ; guard below

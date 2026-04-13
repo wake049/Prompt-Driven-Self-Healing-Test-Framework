@@ -57,13 +57,14 @@ class PageContextRepository:
                 raise Exception("Failed to create or find page record")
             
             print(f"🔍 Preparing to insert page context...")
+            # Use the actual columns that exist in the database
             query = """
                 INSERT INTO repo.page_contexts (
-                    id, page_id, context_type, screenshot_url, description, category, 
+                    id, page_id, screenshot_url, description, category, 
                     website_url, primary_actions, usage_count, 
                     last_used_at, created_at, updated_at
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
                 RETURNING *
             """
             
@@ -72,12 +73,11 @@ class PageContextRepository:
             params = [
                 context_id,
                 page_id,
-                'user_uploaded',  # context_type - required field
                 page_context_data.get('screenshot_url'),
                 page_context_data.get('page_description', ''),
                 page_context_data.get('page_type'),
                 page_context_data.get('page_url'),
-                json.dumps(page_context_data.get('primary_actions', [])),  # Convert list to JSON string
+                page_context_data.get('primary_actions', []),  # Pass list directly for JSONB column
                 0,  # initial usage_count
                 None,  # last_used_at
                 datetime.utcnow(),

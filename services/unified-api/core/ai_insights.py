@@ -152,7 +152,7 @@ class AIInsightsEngine:
             drift_factors.append(f"High change frequency ({drift_frequency} different locators)")
         
         # Factor 4: Recent instability
-        last_change = datetime.now() - timedelta(days=7)  # Mock recent change
+        last_change = datetime.now() - timedelta(days=7)  # Approximate — real tracking requires event log
         if drift_frequency > 1:
             drift_score += 0.2
             drift_factors.append("Recent locator changes detected")

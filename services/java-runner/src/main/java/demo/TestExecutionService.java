@@ -4,11 +4,12 @@ import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.chrome.ChromeDriver;
 import org.openqa.selenium.chrome.ChromeOptions;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpPut;
 import org.apache.http.entity.StringEntity;
 import org.apache.http.impl.client.CloseableHttpClient;
-import org.apache.http.impl.client.HttpClients;
 import org.apache.http.util.EntityUtils;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -18,8 +19,12 @@ import java.util.concurrent.ConcurrentHashMap;
 @Service
 public class TestExecutionService {
     
-    private static final String UNIFIED_API_URL = System.getenv("UNIFIED_API_URL") != null ? 
-        System.getenv("UNIFIED_API_URL") : "https://testhelix.com";
+    @Value("${app.unified-api.url}")
+    private String unifiedApiUrl;
+    
+    @Autowired
+    private ApiTestDataService apiTestDataService;
+    
     private static final String API_AUTH_TOKEN = System.getenv("API_AUTH_TOKEN");
     
     public void executeTestSteps(TestExecutionController.ExecutionRequest request, String executionId, 
@@ -38,7 +43,9 @@ public class TestExecutionService {
             
             // Create a fresh WebDriver instance for this execution
             System.out.println("Creating WebDriver instance...");
-            driver = createWebDriverInstance();
+            String browserType = request.getBrowserType();
+            boolean headless = Boolean.parseBoolean(System.getProperty("headless", "false"));
+            driver = createWebDriverInstance(browserType, headless);
             System.out.println("WebDriver created successfully");
             
             // Create isolated execution context
@@ -49,7 +56,17 @@ public class TestExecutionService {
                 request.getAuthToken(), 
                 driver
             );
+            
+            // Apply policy configuration if provided
+            if (request.getPolicyConfig() != null) {
+                System.out.println("Applying policy configuration to execution context...");
+                context.policyConfig = request.getPolicyConfig();
+            }
+            
             System.out.println("Execution context created");
+            
+            // Execute API test data setups to create precondition data
+            executeApiTestDataSetups(request, context, executions, executionId);
             
             // Execute the test steps
             System.out.println("Starting step execution...");
@@ -87,17 +104,110 @@ public class TestExecutionService {
         }
     }
     
+    /**
+     * Execute API test data setups to create precondition data before UI tests.
+     * Variables extracted from API responses are injected into the execution context
+     * for use in UI test steps (e.g., ${booking_id}).
+     */
+    private void executeApiTestDataSetups(
+            TestExecutionController.ExecutionRequest request,
+            TestExecutionContext context,
+            Map<String, TestExecutionController.ExecutionStatus> executions,
+            String executionId) {
+        
+        // Check if test data config is provided
+        TestExecutionController.TestDataConfig testDataConfig = request.getTestDataConfig();
+        
+        // Determine if we should execute test data setups
+        boolean hasExplicitConfig = testDataConfig != null && 
+            (testDataConfig.getSetupIds() != null && !testDataConfig.getSetupIds().isEmpty());
+        boolean shouldExecuteForPrompt = testDataConfig == null || testDataConfig.isExecuteForPrompt();
+        
+        if (!hasExplicitConfig && !shouldExecuteForPrompt) {
+            System.out.println("No API test data configuration provided, skipping.");
+            return;
+        }
+        
+        System.out.println("=== EXECUTING API TEST DATA SETUPS ===");
+        executions.put(executionId, new TestExecutionController.ExecutionStatus(
+            "running", "Executing API test data setups..."));
+        
+        try {
+            ApiTestDataService.TestDataConfig config = new ApiTestDataService.TestDataConfig();
+            
+            if (hasExplicitConfig) {
+                // Use explicitly provided setup IDs
+                config.setupIds = testDataConfig.getSetupIds();
+                if (testDataConfig.getVariableOverrides() != null) {
+                    config.variableOverrides = testDataConfig.getVariableOverrides();
+                }
+                config.skipOnFailure = testDataConfig.isSkipOnFailure();
+            } else {
+                // Execute all setups linked to the prompt
+                config.promptId = request.getPromptId();
+                if (testDataConfig != null && testDataConfig.getVariableOverrides() != null) {
+                    config.variableOverrides = testDataConfig.getVariableOverrides();
+                }
+                config.skipOnFailure = testDataConfig != null && testDataConfig.isSkipOnFailure();
+            }
+            
+            // Execute the API test data setups
+            ApiTestDataService.TestDataResult result = apiTestDataService.executeTestDataSetups(
+                config, request.getAuthToken());
+            
+            if (result.success) {
+                // Inject extracted variables into the execution context
+                if (result.variables != null && !result.variables.isEmpty()) {
+                    context.initialVariables.putAll(result.variables);
+                    System.out.println("✓ Injected " + result.variables.size() + 
+                        " variables from API test data into execution context");
+                    for (Map.Entry<String, String> var : result.variables.entrySet()) {
+                        System.out.println("  ${" + var.getKey() + "} = " + var.getValue());
+                    }
+                }
+                
+                executions.put(executionId, new TestExecutionController.ExecutionStatus(
+                    "running", "API test data setup completed, starting UI tests..."));
+                    
+            } else {
+                String errorMsg = "API test data setup failed: " + result.errorMessage;
+                System.err.println("✗ " + errorMsg);
+                
+                if (!config.skipOnFailure) {
+                    throw new RuntimeException(errorMsg);
+                } else {
+                    System.out.println("Skipping failure and continuing with UI tests...");
+                    executions.put(executionId, new TestExecutionController.ExecutionStatus(
+                        "running", "API test data setup failed but continuing: " + result.errorMessage));
+                }
+            }
+            
+        } catch (RuntimeException e) {
+            throw e;  // Re-throw to stop execution
+        } catch (Exception e) {
+            System.err.println("Error executing API test data setups: " + e.getMessage());
+            e.printStackTrace();
+            
+            boolean skipOnFailure = testDataConfig != null && testDataConfig.isSkipOnFailure();
+            if (!skipOnFailure) {
+                throw new RuntimeException("API test data setup failed: " + e.getMessage(), e);
+            }
+        }
+        
+        System.out.println("=== END API TEST DATA SETUPS ===\n");
+    }
+    
     private void reportExecutionStatus(String executionId, String status, String message, Map<String, Object> results) {
         try {
             System.out.println("=== REPORTING EXECUTION STATUS ===");
             System.out.println("UNIFIED_API_URL environment variable: " + System.getenv("UNIFIED_API_URL"));
-            System.out.println("UNIFIED_API_URL constant value: " + UNIFIED_API_URL);
+            System.out.println("Using unifiedApiUrl: " + unifiedApiUrl);
             System.out.println("Reporting execution status to unified API: " + status + " for ID: " + executionId);
             
-            String statusUrl = UNIFIED_API_URL + "/api/v1/execution/execution/" + executionId + "/status";
+            String statusUrl = unifiedApiUrl + "/api/v1/execution/execution/" + executionId + "/status";
             System.out.println("Status URL: " + statusUrl);
             
-            try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
+            try (CloseableHttpClient httpClient = HttpClientFactory.create()) {
                 HttpPut httpPut = new HttpPut(statusUrl);
                 httpPut.setHeader("Content-Type", "application/json");
                 
@@ -134,7 +244,11 @@ public class TestExecutionService {
         }
     }
     
-    private void updateStepStatus(String stepId, String status, String errorDetails, String screenshotPath) {
+    private void updateStepStatus(String stepId, String status, String errorDetails, String screenshotPath, Boolean healed) {
+        updateStepStatus(stepId, status, errorDetails, screenshotPath, healed, null);
+    }
+    
+    private void updateStepStatus(String stepId, String status, String errorDetails, String screenshotPath, Boolean healed, StepResult result) {
         try {
             if (stepId == null) {
                 System.err.println("Cannot update step status: stepId is null");
@@ -146,11 +260,12 @@ public class TestExecutionService {
             System.out.println("Status: " + status);
             System.out.println("Error Details: " + errorDetails);
             System.out.println("Screenshot Path: " + screenshotPath);
+            System.out.println("Healed: " + healed);
             
-            String stepStatusUrl = UNIFIED_API_URL + "/api/v1/execution/step/" + stepId + "/status";
+            String stepStatusUrl = unifiedApiUrl + "/api/v1/execution/step/" + stepId + "/status";
             System.out.println("Step Status URL: " + stepStatusUrl);
             
-            try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
+            try (CloseableHttpClient httpClient = HttpClientFactory.create()) {
                 HttpPut httpPut = new HttpPut(stepStatusUrl);
                 httpPut.setHeader("Content-Type", "application/json");
                 
@@ -169,6 +284,30 @@ public class TestExecutionService {
                 
                 if (screenshotPath != null) {
                     requestBody.put("screenshot_path", screenshotPath);
+                }
+                
+                // Add healed flag if present
+                if (healed != null && healed) {
+                    requestBody.put("healed", true);
+                    
+                    // Add healing attempts if result is provided
+                    if (result != null && result.getAttemptedAlternatives() != null && !result.getAttemptedAlternatives().isEmpty()) {
+                        List<Map<String, Object>> healingAttempts = new ArrayList<>();
+                        Map<String, Object> healingAttempt = new HashMap<>();
+                        
+                        healingAttempt.put("originalLocator", result.getOriginalLocator());
+                        healingAttempt.put("attemptedAlternatives", result.getAttemptedAlternatives());
+                        healingAttempt.put("healedLocator", result.getHealedLocator());
+                        healingAttempt.put("result", result.getHealedLocator() != null ? "success" : "failed");
+                        if (errorDetails != null) {
+                            healingAttempt.put("error", errorDetails);
+                        }
+                        
+                        healingAttempts.add(healingAttempt);
+                        requestBody.put("healing_attempts", healingAttempts);
+                        
+                        System.out.println("Added healing attempts: " + result.getAttemptedAlternatives().size() + " alternatives");
+                    }
                 }
                 
                 // Add timestamp
@@ -195,17 +334,25 @@ public class TestExecutionService {
     }
     
     private WebDriver createWebDriverInstance() {
-        ChromeOptions options = new ChromeOptions();
+        return createWebDriverInstance(null, false);
+    }
+    
+    private WebDriver createWebDriverInstance(String browserTypeStr, boolean headless) {
+        // Parse browser type, default to Chrome
+        BrowserType browserType = BrowserType.CHROME;
+        if (browserTypeStr != null && !browserTypeStr.trim().isEmpty()) {
+            try {
+                browserType = BrowserType.fromValue(browserTypeStr);
+                System.out.println("Using browser: " + browserType.getDisplayName());
+            } catch (IllegalArgumentException e) {
+                System.err.println("Invalid browser type: " + browserTypeStr + ". Defaulting to Chrome.");
+            }
+        } else {
+            System.out.println("No browser specified, defaulting to Chrome");
+        }
         
-        // Configure for containerized environment
-        options.addArguments("--headless");
-        options.addArguments("--no-sandbox");
-        options.addArguments("--disable-dev-shm-usage");
-        options.addArguments("--disable-gpu");
-        options.addArguments("--window-size=1920,1080");
-        options.addArguments("--remote-debugging-port=9222");
-        
-        return new ChromeDriver(options);
+        // Create driver using factory
+        return WebDriverFactory.createDriver(browserType, headless);
     }
     
     private void executeSteps(TestExecutionContext context, List<Map<String, Object>> steps,
@@ -219,6 +366,36 @@ public class TestExecutionService {
         ElementRepository elementRepository = new ElementRepository();
         SelfHealing selfHealing = new SelfHealing(context.driver, elementRepository);
         ExecutionService executionService = new ExecutionService(context.driver, selfHealing);
+        
+        // Inject initial variables from API test data setup
+        if (context.initialVariables != null && !context.initialVariables.isEmpty()) {
+            System.out.println("Injecting " + context.initialVariables.size() + " variables from API test data...");
+            executionService.injectInitialVariables(context.initialVariables);
+        }
+        
+        // Apply policy configuration if provided
+        if (context.policyConfig != null) {
+            System.out.println("Applying policy configuration to self-healing...");
+            selfHealing.setPolicyConfig(context.policyConfig);
+            
+            // Apply execution safety policy to ExecutionService
+            if (context.policyConfig.containsKey("blockDestructiveActions")) {
+                boolean blockDestructive = Boolean.TRUE.equals(context.policyConfig.get("blockDestructiveActions"));
+                boolean allowTestOverride = Boolean.TRUE.equals(context.policyConfig.get("allowTestModeOverride"));
+                
+                @SuppressWarnings("unchecked")
+                List<String> keywordsList = (List<String>) context.policyConfig.get("destructiveKeywords");
+                String[] keywords = keywordsList != null ? keywordsList.toArray(new String[0]) : null;
+                
+                executionService.setSafetyPolicy(blockDestructive, allowTestOverride, keywords);
+                
+                // Check if test mode is enabled (could come from request or environment)
+                boolean isTestMode = Boolean.TRUE.equals(context.policyConfig.get("testMode"));
+                executionService.setTestMode(isTestMode);
+                
+                System.out.println("Execution Safety Policy configured");
+            }
+        }
         System.out.println("Services created successfully");
         
         for (int i = 0; i < steps.size(); i++) {
@@ -267,7 +444,7 @@ public class TestExecutionService {
         System.out.println("Locator: " + locator);
         
         // Update step status to running
-        updateStepStatus(stepId, "running", null, null);
+        updateStepStatus(stepId, "running", null, null, null);
         
         StepResult result = null;
         boolean success = false;
@@ -302,6 +479,53 @@ public class TestExecutionService {
                     context.driver.get(url != null ? url : value);
                     System.out.println("Navigation completed");
                     success = true;
+                    break;
+                
+                case "api_setup":
+                    // Execute API test data setup before UI test
+                    System.out.println("Executing API test data setup");
+                    try {
+                        String setupId = null;
+                        @SuppressWarnings("unchecked")
+                        Map<String, Object> argsMap = (Map<String, Object>) step.get("args");
+                        if (argsMap != null) {
+                            setupId = (String) argsMap.get("setup_id");
+                        }
+                        if (setupId == null) {
+                            setupId = (String) step.get("setup_id");
+                        }
+                        
+                        if (setupId != null && !setupId.isEmpty()) {
+                            ApiTestDataService.TestDataConfig config = new ApiTestDataService.TestDataConfig();
+                            config.setupIds = java.util.Collections.singletonList(setupId);
+                            
+                            @SuppressWarnings("unchecked")
+                            Map<String, String> varOverrides = argsMap != null ? 
+                                (Map<String, String>) argsMap.get("variables") : null;
+                            if (varOverrides != null) {
+                                config.variableOverrides = varOverrides;
+                            }
+                            
+                            ApiTestDataService.TestDataResult apiResult = apiTestDataService.executeTestDataSetups(config, null);
+                            
+                            if (apiResult.success) {
+                                // Inject extracted variables for use in subsequent steps
+                                executionService.injectInitialVariables(apiResult.variables);
+                                System.out.println("API setup completed successfully. Extracted variables: " + apiResult.variables);
+                                success = true;
+                            } else {
+                                System.err.println("API setup failed: " + apiResult.errorMessage);
+                                success = false;
+                            }
+                        } else {
+                            System.err.println("api_setup action missing setup_id");
+                            success = false;
+                        }
+                    } catch (Exception e) {
+                        System.err.println("API setup execution failed: " + e.getMessage());
+                        success = false;
+                        stepException = e;
+                    }
                     break;
                     
                 case "click":
@@ -341,16 +565,18 @@ public class TestExecutionService {
         try {
             if (success) {
                 String status = "passed";
+                Boolean wasHealed = result != null ? result.isHealed() : false;
                 if (result != null && "HEALED".equals(result.getStatus())) {
                     status = "healed";  // Special status for healed steps
                 }
-                updateStepStatus(stepId, status, null, result != null ? result.getScreenshotPath() : null);
-                System.out.println("Updated step " + (stepIndex + 1) + " status to: " + status);
+                updateStepStatus(stepId, status, null, result != null ? result.getScreenshotPath() : null, wasHealed, result);
+                System.out.println("Updated step " + (stepIndex + 1) + " status to: " + status + (wasHealed ? " (healed)" : ""));
             } else {
                 String errorDetails = stepException != null ? stepException.getMessage() : 
                     (result != null ? result.getError() : "Unknown error");
-                updateStepStatus(stepId, "failed", errorDetails, result != null ? result.getScreenshotPath() : null);
-                System.out.println("Updated step " + (stepIndex + 1) + " status to failed: " + errorDetails);
+                Boolean wasHealed = result != null ? result.isHealed() : false;
+                updateStepStatus(stepId, "failed", errorDetails, result != null ? result.getScreenshotPath() : null, wasHealed, result);
+                System.out.println("Updated step " + (stepIndex + 1) + " status to failed: " + errorDetails + (wasHealed ? " (healing attempted)" : ""));
             }
         } catch (Exception e) {
             System.err.println("Failed to update step status in database: " + e.getMessage());
@@ -371,6 +597,8 @@ public class TestExecutionService {
         public final String authToken;
         public final WebDriver driver;
         public final Date startTime;
+        public Map<String, Object> policyConfig;  // Policy configuration
+        public Map<String, String> initialVariables;  // Variables from API test data setup
         
         public TestExecutionContext(String executionId, String promptId, String authToken, WebDriver driver) {
             this.executionId = executionId;
@@ -378,6 +606,8 @@ public class TestExecutionService {
             this.authToken = authToken;
             this.driver = driver;
             this.startTime = new Date();
+            this.policyConfig = null;  // Will be set if provided
+            this.initialVariables = new HashMap<>();  // Empty by default
         }
     }
 }

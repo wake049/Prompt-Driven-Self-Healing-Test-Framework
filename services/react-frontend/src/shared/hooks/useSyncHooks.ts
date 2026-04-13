@@ -46,6 +46,11 @@ export function useElementSelectorSync(elementId: string) {
         newSelector, 
         selectorType
       );
+      
+      // Wait for backend cascade to complete, then reinitialize to get fresh data from DB
+      await new Promise(resolve => setTimeout(resolve, 600));
+      await elementPromptSyncService.reinitialize();
+      
       // Reload relationships to reflect changes
       const updatedRel = await elementPromptSyncService.getElementRelationships(elementId);
       setRelationships(updatedRel);

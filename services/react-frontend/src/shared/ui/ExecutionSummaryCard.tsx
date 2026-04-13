@@ -1,5 +1,6 @@
 import React from 'react';
 import styled from 'styled-components';
+import { pulseKeyframes } from '../styles/keyframes';
 import { AlertTriangle, Wrench, CheckCircle, XCircle } from 'lucide-react';
 import EnhancedStatusBadge from './EnhancedStatusBadge';
 
@@ -38,12 +39,7 @@ const SummaryCard = styled.div<{ $needsReview: boolean }>`
       height: 12px;
       background: #ff8c00;
       border-radius: 50%;
-      animation: pulse 2s ease-in-out infinite;
-    }
-    
-    @keyframes pulse {
-      0%, 100% { opacity: 1; transform: scale(1); }
-      50% { opacity: 0.7; transform: scale(1.1); }
+      animation: ${pulseKeyframes} 2s ease-in-out infinite;
     }
   `}
   

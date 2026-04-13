@@ -69,7 +69,7 @@ class PageElement(BaseModel):
     selector_xpath: Optional[str] = Field(None, description="XPath selector")
     
     # Core attributes for ranking and selection
-    text: Optional[str] = Field(None, max_length=200, description="Visible text content (truncated)")
+    text: Optional[str] = Field(None, description="Visible text content (auto-truncated to 200 chars)")
     attributes: Dict[str, Any] = Field(default_factory=dict, description="Key HTML attributes")
     is_interactive: bool = Field(default=False, description="Whether element accepts user interaction")
     is_visible: bool = Field(default=True, description="Whether element is visible")
@@ -78,9 +78,9 @@ class PageElement(BaseModel):
     relevance_score: Optional[float] = Field(None, ge=0.0, le=1.0, description="Computed relevance score")
     page_location: Optional[Dict[str, int]] = Field(None, description="Element position (x, y, width, height)")
     
-    @validator('text')
+    @validator('text', pre=True)
     def truncate_text(cls, v):
-        """Truncate text to save payload size"""
+        """Truncate text to save payload size (runs before field validation)"""
         if v and len(v) > 200:
             return v[:197] + "..."
         return v
@@ -155,7 +155,7 @@ class PageContext(BaseModel):
 class PromptEnvelope(BaseEnterpriseModel):
     """Complete request envelope with enterprise features"""
     # Core request data
-    prompt: str = Field(..., min_length=10, max_length=2000, description="Natural language test description")
+    prompt: str = Field(..., min_length=10, max_length=20000, description="Natural language test description")
     prompt_id: Optional[str] = Field(None, description="Prompt ID to load existing bindings")
     tenant_id: str = Field(..., description="Tenant identifier for separation and billing")
     run_id: str = Field(default_factory=lambda: str(uuid4()), description="Unique run identifier")
@@ -176,7 +176,7 @@ class PromptEnvelope(BaseEnterpriseModel):
     
     # Enterprise features
     priority: str = Field(default="normal", description="Request priority (low/normal/high)")
-    timeout_ms: int = Field(default=30000, ge=1000, le=120000, description="Request timeout")
+    timeout_ms: int = Field(default=90000, ge=1000, le=120000, description="Request timeout")
     
     # Metadata
     created_at: datetime = Field(default_factory=datetime.utcnow)

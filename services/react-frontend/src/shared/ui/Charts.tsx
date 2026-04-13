@@ -76,7 +76,7 @@ export const ProgressRing: React.FC<ProgressRingProps> = ({
   percentage, 
   size = 120, 
   strokeWidth = 8,
-  color = '#667eea'
+  color = '#185FA5'
 }) => {
   const radius = (size - strokeWidth) / 2;
   const circumference = radius * 2 * Math.PI;
@@ -136,7 +136,7 @@ export const SimpleBarChart: React.FC<SimpleBarChartProps> = ({ data, height = 2
             <BarWrapper key={index}>
               <Bar
                 height={barHeight}
-                color={item.color || '#667eea'}
+                color={item.color || '#185FA5'}
                 title={`${item.label}: ${item.value}`}
               />
               <BarLabel>{item.label}</BarLabel>
@@ -149,7 +149,7 @@ export const SimpleBarChart: React.FC<SimpleBarChartProps> = ({ data, height = 2
 };
 export const MiniChart: React.FC<{ data: number[]; color?: string }> = ({ 
   data, 
-  color = '#667eea' 
+  color = '#185FA5' 
 }) => {
   const max = Math.max(...data);
   const points = data.map((value, index) => {

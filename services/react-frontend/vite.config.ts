@@ -48,14 +48,6 @@ export default defineConfig(({ mode }) => {
         "@": resolve(import.meta.dirname || __dirname, "src") 
       } 
     },
-    define: {
-      __API_URL__: isProduction 
-        ? JSON.stringify('https://testhelix.com/api')
-        : JSON.stringify('http://127.0.0.1:8000'),
-      __MCP_URL__: isProduction
-        ? JSON.stringify('wss://mcp.testhelix.com/mcp/ws')
-        : JSON.stringify('ws://127.0.0.1:8001')
-    },
     server: { 
       port: 3000, 
       open: true,

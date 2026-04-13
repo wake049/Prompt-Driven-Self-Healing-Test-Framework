@@ -6,7 +6,39 @@
  */
 
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import styled, { keyframes } from 'styled-components';
 import { MCPFrontendClient, MCPFrontendManager } from '../services/mcpFrontendClient';
+
+const loadingAnimation = keyframes`
+  0% { transform: translateX(-100%); }
+  50% { transform: translateX(100%); }
+  100% { transform: translateX(300%); }
+`;
+
+const LoadingContainer = styled.div`
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+`;
+
+const LoadingProgressBar = styled.div`
+  width: 200px;
+  height: 4px;
+  background: #e9ecef;
+  border-radius: 2px;
+  margin-top: 20px;
+  overflow: hidden;
+`;
+
+const LoadingProgressFill = styled.div`
+  width: 50%;
+  height: 100%;
+  background: linear-gradient(90deg, #007bff, #0056b3);
+  animation: ${loadingAnimation} 1.5s ease-in-out infinite;
+`;
 
 interface MCPContextType {
   client: MCPFrontendClient | null;
@@ -20,6 +52,7 @@ const MCPContext = createContext<MCPContextType | undefined>(undefined);
 
 interface MCPProviderProps {
   children: ReactNode;
+  autoConnect?: boolean;
 }
 
 /**
@@ -28,7 +61,7 @@ interface MCPProviderProps {
  * This provider ensures the entire application has access to MCP functionality.
  * The frontend cannot function without MCP connection.
  */
-export function MCPProvider({ children }: MCPProviderProps) {
+export function MCPProvider({ children, autoConnect = false }: MCPProviderProps) {
   const [client, setClient] = useState<MCPFrontendClient | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
@@ -74,8 +107,10 @@ export function MCPProvider({ children }: MCPProviderProps) {
   };
 
   useEffect(() => {
-    // Initialize MCP on mount
-    initializeMCP();
+    // Connect only when explicitly enabled.
+    if (autoConnect) {
+      initializeMCP();
+    }
 
     // Cleanup on unmount
     return () => {
@@ -84,128 +119,37 @@ export function MCPProvider({ children }: MCPProviderProps) {
       }
       MCPFrontendManager.disconnect();
     };
-  }, []);
+  }, [autoConnect]);
 
   // Show loading state while connecting
   if (isConnecting && !client) {
     return (
-      <div style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        height: '100vh',
-        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
-      }}>
+      <LoadingContainer>
         <div style={{ fontSize: '48px', marginBottom: '20px' }}>🔌</div>
         <h2 style={{ margin: '0 0 10px 0', color: '#007bff' }}>Connecting to MCP Server</h2>
         <p style={{ margin: '0', color: '#666', textAlign: 'center' }}>
           Establishing MCP protocol connection...<br/>
           This frontend requires an active MCP server to function.
         </p>
-        <div style={{
-          width: '200px',
-          height: '4px',
-          background: '#e9ecef',
-          borderRadius: '2px',
-          marginTop: '20px',
-          overflow: 'hidden'
-        }}>
-          <div style={{
-            width: '50%',
-            height: '100%',
-            background: 'linear-gradient(90deg, #007bff, #0056b3)',
-            animation: 'loading 1.5s ease-in-out infinite'
-          }} />
-        </div>
-        <style>{`
-          @keyframes loading {
-            0% { transform: translateX(-100%); }
-            50% { transform: translateX(100%); }
-            100% { transform: translateX(300%); }
-          }
-        `}</style>
-      </div>
+        <LoadingProgressBar>
+          <LoadingProgressFill />
+        </LoadingProgressBar>
+      </LoadingContainer>
     );
   }
 
-  // Show error state if connection failed
+  // Show error state if connection failed — allow degraded mode
   if (error && !isConnected && !isConnecting) {
     return (
-      <div style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        height: '100vh',
-        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-        padding: '20px',
-        textAlign: 'center'
+      <MCPContext.Provider value={{
+        client: null,
+        isConnected: false,
+        isConnecting: false,
+        error,
+        reconnect
       }}>
-        <div style={{ fontSize: '64px', marginBottom: '20px' }}>⚠️</div>
-        <h2 style={{ margin: '0 0 15px 0', color: '#dc3545' }}>
-          MCP Server Connection Required
-        </h2>
-        <div style={{
-          background: '#f8d7da',
-          border: '1px solid #f5c6cb',
-          borderRadius: '8px',
-          padding: '20px',
-          marginBottom: '20px',
-          maxWidth: '500px'
-        }}>
-          <p style={{ margin: '0 0 10px 0', color: '#721c24', fontWeight: 'bold' }}>
-            Frontend Disabled
-          </p>
-          <p style={{ margin: '0 0 10px 0', color: '#721c24' }}>
-            This React frontend requires an active MCP server connection to function.
-            No fallback modes are available.
-          </p>
-          <p style={{ margin: '0', color: '#721c24', fontSize: '14px' }}>
-            Error: {error}
-          </p>
-        </div>
-        <div style={{
-          background: '#d1ecf1',
-          border: '1px solid #bee5eb',
-          borderRadius: '8px',
-          padding: '15px',
-          marginBottom: '20px',
-          maxWidth: '500px'
-        }}>
-          <p style={{ margin: '0 0 10px 0', color: '#0c5460', fontWeight: 'bold' }}>
-            To start the MCP server:
-          </p>
-          <code style={{
-            display: 'block',
-            background: '#495057',
-            color: '#fff',
-            padding: '10px',
-            borderRadius: '4px',
-            fontSize: '14px',
-            margin: '0'
-          }}>
-            cd services/mcp-server<br/>
-            python main.py --ws
-          </code>
-        </div>
-        <button
-          onClick={reconnect}
-          disabled={isConnecting}
-          style={{
-            background: '#007bff',
-            color: 'white',
-            border: 'none',
-            padding: '12px 24px',
-            borderRadius: '6px',
-            fontSize: '16px',
-            cursor: isConnecting ? 'not-allowed' : 'pointer',
-            opacity: isConnecting ? 0.6 : 1
-          }}
-        >
-          {isConnecting ? '🔄 Connecting...' : '🔄 Retry Connection'}
-        </button>
-      </div>
+        {children}
+      </MCPContext.Provider>
     );
   }
 

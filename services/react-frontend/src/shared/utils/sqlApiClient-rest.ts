@@ -1,7 +1,7 @@
 /**
  * API Client for React Frontend to communicate with SQL Backend
  */
-const API_BASE_URL = import.meta.env.VITE_SQL_API_URL || 'https://testhelix.com/api/v1';
+const API_BASE_URL = import.meta.env.VITE_SQL_API_URL || 'https://fluxtest.io/api/v1';
 interface ApiResponse<T = any> {
   success: boolean;
   data?: T;

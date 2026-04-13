@@ -1,14 +1,16 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
+import { spinKeyframes } from '../../shared/styles/keyframes';
 import { useAuth } from '../../contexts/AuthContext';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useSearchParams } from 'react-router-dom';
+import { config } from '../../app/config';
 
 const RegisterContainer = styled.div`
   min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #185FA5;
 `;
 
 const RegisterCard = styled.div`
@@ -55,7 +57,7 @@ const Input = styled.input`
 
   &:focus {
     outline: none;
-    border-color: #667eea;
+    border-color: #185FA5;
   }
 
   &:disabled {
@@ -65,7 +67,7 @@ const Input = styled.input`
 `;
 
 const SubmitButton = styled.button`
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #185FA5;
   color: white;
   border: none;
   padding: 14px 20px;
@@ -106,12 +108,8 @@ const LoadingSpinner = styled.div`
   border: 2px solid #ffffff;
   border-radius: 50%;
   border-top-color: transparent;
-  animation: spin 1s ease-in-out infinite;
+  animation: ${spinKeyframes} 1s ease-in-out infinite;
   margin-right: 8px;
-
-  @keyframes spin {
-    to { transform: rotate(360deg); }
-  }
 `;
 
 const LoginLink = styled.div`
@@ -121,7 +119,7 @@ const LoginLink = styled.div`
   font-size: 14px;
 
   a {
-    color: #667eea;
+    color: #185FA5;
     text-decoration: none;
     font-weight: 500;
 
@@ -131,16 +129,150 @@ const LoginLink = styled.div`
   }
 `;
 
+const InvitationBanner = styled.div`
+  background: #185FA5;
+  color: white;
+  padding: 16px;
+  border-radius: 8px;
+  margin-bottom: 24px;
+  text-align: center;
+
+  h3 {
+    margin: 0 0 8px 0;
+    font-size: 18px;
+    font-weight: 600;
+  }
+
+  p {
+    margin: 0;
+    font-size: 14px;
+    opacity: 0.95;
+  }
+`;
+
+const RegistrationTypeSelector = styled.div`
+  display: flex;
+  gap: 12px;
+  margin-bottom: 24px;
+  border: 2px solid #e1e5e9;
+  border-radius: 8px;
+  padding: 4px;
+  background: #f9fafb;
+`;
+
+const TypeButton = styled.button<{ active: boolean }>`
+  flex: 1;
+  padding: 12px;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: ${props => props.active ? 'white' : 'transparent'};
+  color: ${props => props.active ? '#185FA5' : '#666'};
+  box-shadow: ${props => props.active ? '0 2px 4px rgba(0,0,0,0.1)' : 'none'};
+
+  &:hover {
+    color: #185FA5;
+  }
+`;
+
+const Subtitle = styled.p`
+  text-align: center;
+  color: #666;
+  margin: -15px 0 20px 0;
+  font-size: 14px;
+`;
+
+const TermsRow = styled.label`
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 13px;
+  color: #555;
+  line-height: 1.4;
+`;
+
+const TermsCheckbox = styled.input`
+  margin-top: 2px;
+`;
+
+const TermsLinks = styled.span`
+  a {
+    color: #185FA5;
+    text-decoration: none;
+
+    &:hover {
+      text-decoration: underline;
+    }
+  }
+`;
+
+interface InvitationDetails {
+  organization_name: string;
+  role: string;
+  expires_at: string;
+  email: string | null;
+}
+
 const Register: React.FC = () => {
+  const [searchParams] = useSearchParams();
+  const inviteToken = searchParams.get('invite');
+  
+  const [registrationType, setRegistrationType] = useState<'individual' | 'organization'>('individual');
+  const [invitationDetails, setInvitationDetails] = useState<InvitationDetails | null>(null);
+  const [loadingInvitation, setLoadingInvitation] = useState(false);
+  
   const [formData, setFormData] = useState({
     email: '',
     password: '',
     confirmPassword: '',
-    fullName: ''
+    fullName: '',
+    organizationName: '',
+    organizationSlug: '',
+    termsAccepted: false,
   });
   const [validationError, setValidationError] = useState('');
-  const { register, isLoading, error, clearError } = useAuth();
+  const { register, registerOrganization, isLoading, error, clearError } = useAuth();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!inviteToken) {
+      navigate('/onboarding', { replace: true });
+    }
+  }, [inviteToken, navigate]);
+
+  // Fetch invitation details if token present
+  useEffect(() => {
+    const fetchInvitationDetails = async () => {
+      if (!inviteToken) return;
+      
+      setLoadingInvitation(true);
+      try {
+        const response = await fetch(
+          `${config.apiBaseUrl}/api/v1/auth/invitation/${inviteToken}`
+        );
+        
+        if (response.ok) {
+          const details = await response.json();
+          setInvitationDetails(details);
+          // Pre-fill email if invitation is restricted
+          if (details.email) {
+            setFormData(prev => ({ ...prev, email: details.email }));
+          }
+        } else {
+          setValidationError('Invalid or expired invitation link');
+        }
+      } catch (err) {
+        setValidationError('Failed to load invitation details');
+      } finally {
+        setLoadingInvitation(false);
+      }
+    };
+
+    fetchInvitationDetails();
+  }, [inviteToken]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -157,13 +289,48 @@ const Register: React.FC = () => {
       return false;
     }
 
-    if (formData.password.length < 6) {
-      setValidationError('Password must be at least 6 characters');
+    if (registrationType === 'organization' && !formData.organizationName) {
+      setValidationError('Organization name is required');
+      return false;
+    }
+
+    if (formData.password.length < 10) {
+      setValidationError('Password must be at least 10 characters');
+      return false;
+    }
+
+    if (/\s/.test(formData.password)) {
+      setValidationError('Password cannot contain spaces');
+      return false;
+    }
+
+    if (!/[A-Z]/.test(formData.password)) {
+      setValidationError('Password must include at least one uppercase letter');
+      return false;
+    }
+
+    if (!/[a-z]/.test(formData.password)) {
+      setValidationError('Password must include at least one lowercase letter');
+      return false;
+    }
+
+    if (!/\d/.test(formData.password)) {
+      setValidationError('Password must include at least one number');
+      return false;
+    }
+
+    if (!/[^A-Za-z0-9]/.test(formData.password)) {
+      setValidationError('Password must include at least one special character');
       return false;
     }
 
     if (formData.password !== formData.confirmPassword) {
       setValidationError('Passwords do not match');
+      return false;
+    }
+
+    if (!formData.termsAccepted) {
+      setValidationError('You must accept the Terms of Service, Privacy Policy, and Licensing Agreement');
       return false;
     }
 
@@ -175,13 +342,41 @@ const Register: React.FC = () => {
     clearError();
     setValidationError('');
 
+    if (!inviteToken) {
+      navigate('/onboarding', { replace: true });
+      return;
+    }
+
     if (!validateForm()) {
       return;
     }
 
-    const success = await register(formData.email, formData.password, formData.fullName);
+    let success = false;
+    
+    if (registrationType === 'organization') {
+      // Organization registration
+      success = await registerOrganization(
+        formData.email,
+        formData.password,
+        formData.fullName,
+        formData.organizationName,
+        formData.termsAccepted,
+        formData.organizationSlug
+      );
+    } else {
+      // Individual registration (with optional invitation)
+      const result = await register(
+        formData.email,
+        formData.password,
+        formData.fullName,
+        formData.termsAccepted,
+        inviteToken || undefined
+      );
+      success = result.success;
+    }
+    
     if (success) {
-      navigate('/dashboard');
+      navigate('/app');
     }
   };
 
@@ -190,7 +385,45 @@ const Register: React.FC = () => {
   return (
     <RegisterContainer>
       <RegisterCard>
-        <Title> Join Test Framework</Title>
+        <Title>{invitationDetails ? 'Join Team' : 'Create Your Account'}</Title>
+        
+        {loadingInvitation && (
+          <div style={{ textAlign: 'center', padding: '20px', color: '#666' }}>
+            <LoadingSpinner /> Loading invitation details...
+          </div>
+        )}
+        
+        {invitationDetails && (
+          <InvitationBanner>
+            <h3>🎉 You're invited!</h3>
+            <p>
+              Join <strong>{invitationDetails.organization_name}</strong> as a{' '}
+              <strong>{invitationDetails.role}</strong>
+            </p>
+          </InvitationBanner>
+        )}
+        
+        {!invitationDetails && !loadingInvitation && (
+          <>
+            <Subtitle>Sign up as an individual or create an organization</Subtitle>
+            <RegistrationTypeSelector>
+              <TypeButton
+                type="button"
+                active={registrationType === 'individual'}
+                onClick={() => setRegistrationType('individual')}
+              >
+                👤 Individual
+              </TypeButton>
+              <TypeButton
+                type="button"
+                active={registrationType === 'organization'}
+                onClick={() => setRegistrationType('organization')}
+              >
+                🏢 Organization
+              </TypeButton>
+            </RegistrationTypeSelector>
+          </>
+        )}
         
         {displayError && <ErrorMessage>{displayError}</ErrorMessage>}
         
@@ -209,6 +442,37 @@ const Register: React.FC = () => {
             />
           </FormGroup>
 
+          {registrationType === 'organization' && (
+            <>
+              <FormGroup>
+                <Label htmlFor="organizationName">Organization Name</Label>
+                <Input
+                  id="organizationName"
+                  name="organizationName"
+                  type="text"
+                  value={formData.organizationName}
+                  onChange={handleChange}
+                  placeholder="e.g., Acme Corp"
+                  disabled={isLoading}
+                  required
+                />
+              </FormGroup>
+
+              <FormGroup>
+                <Label htmlFor="organizationSlug">Organization Slug (Optional)</Label>
+                <Input
+                  id="organizationSlug"
+                  name="organizationSlug"
+                  type="text"
+                  value={formData.organizationSlug}
+                  onChange={handleChange}
+                  placeholder="e.g., acme-corp (auto-generated if empty)"
+                  disabled={isLoading}
+                />
+              </FormGroup>
+            </>
+          )}
+
           <FormGroup>
             <Label htmlFor="email">Email</Label>
             <Input
@@ -218,7 +482,7 @@ const Register: React.FC = () => {
               value={formData.email}
               onChange={handleChange}
               placeholder="Enter your email"
-              disabled={isLoading}
+              disabled={isLoading || (!!invitationDetails?.email)}
               required
             />
           </FormGroup>
@@ -231,7 +495,7 @@ const Register: React.FC = () => {
               type="password"
               value={formData.password}
               onChange={handleChange}
-              placeholder="Create a password (min 6 chars)"
+              placeholder="Min 10 chars, upper/lower/number/special"
               disabled={isLoading}
               required
             />
@@ -250,10 +514,31 @@ const Register: React.FC = () => {
               required
             />
           </FormGroup>
+
+          <FormGroup>
+            <TermsRow htmlFor="termsAccepted">
+              <TermsCheckbox
+                id="termsAccepted"
+                name="termsAccepted"
+                type="checkbox"
+                checked={formData.termsAccepted}
+                onChange={(e) => {
+                  setFormData(prev => ({ ...prev, termsAccepted: e.target.checked }));
+                  setValidationError('');
+                }}
+                disabled={isLoading}
+              />
+              <TermsLinks>
+                I agree to the <Link to="/terms" target="_blank" rel="noopener noreferrer">Terms of Service</Link>, <Link to="/privacy" target="_blank" rel="noopener noreferrer">Privacy Policy</Link>, and <Link to="/licensing" target="_blank" rel="noopener noreferrer">Licensing Agreement</Link>.
+              </TermsLinks>
+            </TermsRow>
+          </FormGroup>
           
-          <SubmitButton type="submit" disabled={isLoading}>
+          <SubmitButton type="submit" disabled={isLoading || loadingInvitation}>
             {isLoading && <LoadingSpinner />}
-            {isLoading ? 'Creating Account...' : 'Sign Up'}
+            {isLoading ? 'Creating Account...' : 
+             invitationDetails ? 'Join Organization' :
+             registrationType === 'organization' ? 'Create Organization' : 'Sign Up'}
           </SubmitButton>
         </Form>
         

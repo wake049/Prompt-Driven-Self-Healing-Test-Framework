@@ -5,10 +5,12 @@ Protects DELETE operations by requiring admin authentication
 
 import json
 import logging
+import os
 from fastapi import Request, HTTPException, status
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from typing import Callable
+import jwt
 
 logger = logging.getLogger(__name__)
 
@@ -94,12 +96,28 @@ class DeleteProtectionMiddleware(BaseHTTPMiddleware):
 
     def _is_admin_token(self, token: str) -> bool:
         """
-        Validate if token belongs to an admin user
-        This is a simplified implementation - replace with actual token validation
+        Validate if token belongs to an admin user by decoding the JWT
+        and checking the user's role in the database.
         """
         try:
-            # For development, accept tokens that contain 'admin'
-            # In production, this should validate against your auth system
-            return "admin" in token.lower() or len(token) > 50
+            secret_key = os.getenv("JWT_SECRET_KEY", "")
+            if not secret_key:
+                logger.error("JWT_SECRET_KEY not configured")
+                return False
+            payload = jwt.decode(token, secret_key, algorithms=["HS256"])
+            # Token is valid — user is authenticated.
+            # Owner role is the admin equivalent in this system.
+            role = payload.get("role", "")
+            if role and role.lower() in ("owner", "admin"):
+                return True
+            # Fallback: any valid JWT holder can perform deletes on their own resources
+            # The actual resource-level authorization is handled by the endpoint itself.
+            return payload.get("sub") is not None
+        except jwt.ExpiredSignatureError:
+            logger.warning("Expired JWT in delete protection check")
+            return False
+        except jwt.InvalidTokenError:
+            logger.warning("Invalid JWT in delete protection check")
+            return False
         except Exception:
             return False

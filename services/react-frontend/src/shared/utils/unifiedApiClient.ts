@@ -3,9 +3,10 @@
  * Consolidates all MCP services into a single client
  */
 import { MCPFrontendManager } from '../../services/mcpFrontendClient';
+import { config } from '../../app/config';
 
 // API Base URL from environment or default
-const UNIFIED_API_BASE_URL = import.meta.env.VITE_UNIFIED_API_URL || 'https://testhelix.com';
+const UNIFIED_API_BASE_URL = config.apiBaseUrl;
 
 interface ApiResponse<T = any> {
   success: boolean;
@@ -156,7 +157,17 @@ class UnifiedApiClient {
           // Instead, show a more user-friendly error message
           throw new Error('Authentication error - please refresh the page or login again if needed');
         }
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+
+        let backendDetail = '';
+        try {
+          const errorBody = await response.json();
+          backendDetail = errorBody?.detail || errorBody?.message || errorBody?.error || '';
+        } catch {
+          // Ignore JSON parse issues and fall back to status text.
+        }
+
+        const suffix = backendDetail ? ` - ${backendDetail}` : '';
+        throw new Error(`HTTP ${response.status}: ${response.statusText}${suffix}`);
       }
       const data = await response.json();
       return data;
@@ -405,6 +416,9 @@ class UnifiedApiClient {
   async getDashboardOutcomeStatistics(): Promise<any> {
     return this.request('/api/v1/policy/dashboard/outcome-statistics');
   }
+  async getDashboardConfig(): Promise<any> {
+    return this.request('/api/v1/policy/dashboard/config');
+  }
   // Bindings API methods
   async getBindings(): Promise<any[]> {
     return this.request('/api/v1/bindings');
@@ -431,8 +445,12 @@ class UnifiedApiClient {
     });
   }
   // Test Execution API methods
-  async executePrompt(promptId: string): Promise<any> {
-    return this.request(`/api/v1/execution/execute-prompt/${promptId}`, {
+  async executePrompt(promptId: string, options?: { browser?: string; runner_id?: string }): Promise<any> {
+    const params = new URLSearchParams();
+    if (options?.browser) params.set('browser', options.browser);
+    if (options?.runner_id) params.set('runner_id', options.runner_id);
+    const qs = params.toString() ? `?${params.toString()}` : '';
+    return this.request(`/api/v1/execution/execute-prompt/${promptId}${qs}`, {
       method: 'POST'
     });
   }
@@ -443,7 +461,7 @@ class UnifiedApiClient {
     });
   }
   async getExecutionStatus(executionId: string): Promise<any> {
-    return this.request(`/api/v1/execution/execution/${executionId}`);
+    return this.request(`/api/execution-dashboard/execution/${executionId}`);
   }
   async getRecentExecutions(limit: number = 10): Promise<any> {
     return this.request(`/api/v1/execution/executions?limit=${limit}`);

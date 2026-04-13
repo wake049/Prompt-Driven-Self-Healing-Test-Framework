@@ -133,7 +133,7 @@ const FallbackIndicator = styled.div<{ available: boolean }>`
     if (props.available) {
       return isDark ? '#68d391' : '#065f46';
     } else {
-      return isDark ? '#fc8181' : '#991b1b';
+      return isDark ? '#d47070' : '#991b1b';
     }
   }};
   margin-top: 8px;

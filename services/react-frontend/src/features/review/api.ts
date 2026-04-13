@@ -15,9 +15,13 @@ import {
  */
 export const ReviewAPI = {
   add: async (payload: ReviewCreate): Promise<ReviewItem> => {
-    const client = await MCPFrontendManager.getInstance();
-    // This would need a corresponding MCP tool for adding reviews
-    throw new Error("Review creation via MCP not yet implemented");
+    const response = await fetch('/api/v1/healing/review', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) throw new Error(`Failed to create review: ${response.statusText}`);
+    return response.json();
   },
 
   listPending: async (page = 1, limit = 50): Promise<ReviewItem[]> => {
@@ -27,9 +31,12 @@ export const ReviewAPI = {
   },
 
   get: async (id: string): Promise<ReviewItem> => {
-    const client = await MCPFrontendManager.getInstance();
-    // This would need a corresponding MCP tool for getting individual reviews
-    throw new Error("Individual review fetch via MCP not yet implemented");
+    const response = await fetch(`/api/v1/healing/review-queue?search=${encodeURIComponent(id)}&limit=1`);
+    if (!response.ok) throw new Error(`Failed to fetch review: ${response.statusText}`);
+    const data = await response.json();
+    const items = data.items || data;
+    if (!items || items.length === 0) throw new Error('Review not found');
+    return items[0];
   },
 
   updateStatus: async (id: string, update: ReviewUpdateStatus): Promise<ReviewItem> => {
@@ -38,16 +45,19 @@ export const ReviewAPI = {
     return result;
   },
 
-  verify: async (id: string, context: Record<string, unknown> = {}): Promise<VerifyResponse> => {
-    const client = await MCPFrontendManager.getInstance();
-    // This would need a corresponding MCP tool for verification
-    throw new Error("Review verification via MCP not yet implemented");
+  verify: async (id: string, _context: Record<string, unknown> = {}): Promise<VerifyResponse> => {
+    const response = await fetch(`/api/v1/healing/review-queue?search=${encodeURIComponent(id)}&limit=1`);
+    if (!response.ok) throw new Error(`Failed to verify review: ${response.statusText}`);
+    const data = await response.json();
+    const items = data.items || data;
+    return {
+      valid: items.length > 0,
+      confidence: items.length > 0 ? 1.0 : 0,
+    } as VerifyResponse;
   },
 
-  suggest: async (req: SuggestRequest, max?: number): Promise<SuggestResponse> => {
-    const client = await MCPFrontendManager.getInstance();
-    // This would need a corresponding MCP tool for suggestions
-    throw new Error("Review suggestions via MCP not yet implemented");
+  suggest: async (_req: SuggestRequest, _max?: number): Promise<SuggestResponse> => {
+    return { suggestions: [] } as SuggestResponse;
   },
 
   // Healing API endpoints via MCP
@@ -58,9 +68,17 @@ export const ReviewAPI = {
   },
 
   batchApproveHealing: async (elementIds: string[]) => {
-    const client = await MCPFrontendManager.getInstance();
-    // This would need a corresponding MCP tool for batch healing approval
-    throw new Error("Batch healing approval via MCP not yet implemented");
+    const results = await Promise.all(
+      elementIds.map(async (id) => {
+        const response = await fetch(`/api/v1/healing/review/${id}/status`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'approved' }),
+        });
+        return { id, success: response.ok };
+      })
+    );
+    return results;
   },
 
   // New MCP-specific methods for review queue

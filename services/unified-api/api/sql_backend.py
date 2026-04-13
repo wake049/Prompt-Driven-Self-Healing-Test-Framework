@@ -4,16 +4,19 @@ Migrated from Node.js Express to FastAPI
 Handles database operations for test sessions, elements, and review queue
 """
 
-from fastapi import APIRouter, HTTPException, Query, Body, Depends
+from fastapi import APIRouter, HTTPException, Query, Body, Depends, Header
 from pydantic import BaseModel, ValidationError
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 import json
+import logging
+import copy
 
-from core.auth import get_current_active_user
+from core.auth import get_current_active_user, get_optional_current_user
 from models.auth_models import CurrentUser
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 # SQL Backend Models
 class ElementData(BaseModel):
@@ -70,15 +73,16 @@ class HealingSubmission(BaseModel):
     healing_attempts: List[HealingAttempt]
 
 @router.post("/record-element")
-async def record_element(request: RecordElementRequest):
+async def record_element(
+    request: RecordElementRequest,
+    project_id_header: Optional[str] = Header(None, alias="X-Project-ID"),
+    current_user: Optional[CurrentUser] = Depends(get_optional_current_user)
+):
     """
-    Record element data from Chrome Extension (no auth required for extension)
+    Record element data from Chrome Extension
     """
     try:
-        print(f"DEBUG: Received record-element request")
-        print(f"DEBUG: Full request body: {request}")
-        print(f"DEBUG: element_data: {request.element_data}")
-        print(f"DEBUG: session_info: {request.session_info}")
+        logger.debug("Received record-element request")
         
         # Validate required fields
         if not request.element_data:
@@ -96,38 +100,43 @@ async def record_element(request: RecordElementRequest):
         element_data = request.element_data
         session_info = request.session_info
         
-        # Get the most recent project (since extension doesn't have auth)
-        user_project = await db.fetchrow(
-            """
-            SELECT p.id, p.name 
-            FROM core.projects p 
-            WHERE p.is_active = true
-            ORDER BY p.created_at DESC 
-            LIMIT 1
-            """
-        )
+        # Prefer authenticated user's current project, then explicit header, then fallback project.
+        project_id = None
+        if current_user and current_user.project and current_user.project.id:
+            project_id = current_user.project.id
+        elif project_id_header:
+            project_id = project_id_header
+        else:
+            fallback_project = await db.fetchrow(
+                """
+                SELECT id
+                FROM core.projects
+                WHERE is_active = true
+                ORDER BY created_at DESC
+                LIMIT 1
+                """
+            )
+            if not fallback_project:
+                raise HTTPException(status_code=400, detail="No active project available for element recording")
+            project_id = fallback_project["id"]
         
-        if not user_project:
-            raise HTTPException(status_code=400, detail="No projects found in system")
-        
-        project_id = user_project["id"]
-        print(f"DEBUG: Using project: {user_project['name']} (ID: {project_id})")
+        logger.debug("Using project_id=%s for record-element", project_id)
         
         # First, ensure the page exists in repo.pages
-        tags_value = json.dumps([])  # Convert empty array to JSON string
-        print(f"DEBUG: About to insert page with values: page='{element_data.page}', route_hint='{element_data.page}', tags='{tags_value}' (type: {type(tags_value)})")
+        # Convert list to JSON string for JSONB column - asyncpg needs this
+        logger.debug("Ensuring page record exists for page=%s", element_data.page)
         
         page_result = await db.fetchrow(
             """
             INSERT INTO repo.pages (project_id, name, route_hint, tags)
-            VALUES ($1, $2, $3, $4)
+            VALUES ($1, $2, $3, $4::jsonb)
             ON CONFLICT (project_id, name) DO UPDATE SET updated_at = NOW()
             RETURNING id
             """,
             project_id,
             element_data.page,
             element_data.page,  # Use page name as route hint
-            tags_value
+            json.dumps([])  # Convert to JSON string for asyncpg JSONB
         )
         
         page_id = page_result["id"]
@@ -153,57 +162,55 @@ async def record_element(request: RecordElementRequest):
         attributes = element_data.attributes.copy()
         if element_data.text_content or element_data.text:
             attributes["text"] = element_data.text_content or element_data.text
+        # Add tag to attributes so it's available when reading elements
+        if element_data.tag:
+            attributes["tag"] = element_data.tag
         
         # Record the element in repo.elements
+        # Convert to JSON strings since columns appear to be TEXT type, not JSONB
         primary_selector_json = json.dumps(primary_selector)
         alt_selectors_json = json.dumps(alt_selectors)
         attributes_json = json.dumps(attributes)
         
-        # Map to actual database schema
-        element_name = element_data.id or element_data.element_id or f"element_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        element_type = element_data.tag or "unknown"
+        # Map to actual database schema - use element_key instead of name
+        element_key = element_data.id or element_data.element_id or f"element_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         
-        print(f"DEBUG: About to insert element with values: page_id={page_id}, name='{element_name}', element_type='{element_type}', primary_selector='{primary_selector_json}', fallback_selectors='{alt_selectors_json}', attributes='{attributes_json}'")
+        logger.debug("Inserting element for page_id=%s with element_key=%s", page_id, element_key)
         
         result = await db.fetchrow(
             """
             INSERT INTO repo.elements (
-                page_id, name, element_type, primary_selector, fallback_selectors, 
-                attributes, is_active, description
+                page_id, name, primary_selector, fallback_selectors, 
+                attributes, is_active
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            VALUES ($1, $2, $3::jsonb, $4::jsonb, $5::jsonb, $6)
             RETURNING *
             """,
             page_id,
-            element_name,
-            element_type,
+            element_key,
             primary_selector_json,
             alt_selectors_json,
             attributes_json,
-            True,
-            f"Element recorded from Chrome extension at {datetime.now()}"
+            True
         )
         return {
             "success": True,
             "data": {
                 "id": str(result["id"]),
-                "name": result["name"],
+                "element_key": result["name"],
                 "page_id": str(result["page_id"]),
                 "primary_selector": result["primary_selector"],
-                "fallback_selectors": result["fallback_selectors"],
+                "alt_selectors": result["fallback_selectors"],
                 "attributes": result["attributes"]
             },
             "action": "created"
         }
         
     except ValidationError as e:
-        print(f"VALIDATION ERROR in record_element: {str(e)}")
-        print(f"VALIDATION ERROR details: {e.errors()}")
+        logger.warning("Validation error in record_element: %s", e.errors())
         raise HTTPException(status_code=422, detail=f"Validation failed: {e.errors()}")
     except Exception as e:
-        print(f"ERROR in record_element: {str(e)}")
-        import traceback
-        print(f"ERROR traceback: {traceback.format_exc()}")
+        logger.exception("Unexpected error in record_element")
         raise HTTPException(status_code=500, detail=f"Failed to record element: {str(e)}")
 
 @router.post("/record-execution")
@@ -361,10 +368,10 @@ async def get_all_data():
                 "execution_count": test_case["execution_count"] or 0,
                 "elements": [{
                     "id": str(el["id"]),
-                    "element_key": el["element_key"],
+                    "element_key": el["name"],
                     "page_name": el["page_name"],
                     "primary_selector": el["primary_selector"],
-                    "alt_selectors": el["alt_selectors"],
+                    "alt_selectors": el["fallback_selectors"],
                     "attributes": el["attributes"],
                     "is_active": el["is_active"]
                 } for el in elements_result],
@@ -405,10 +412,10 @@ async def get_review_queue(
             f"""
             SELECT 
                 ri.*,
-                e.element_key,
+                e.name as element_key,
                 p.name as page_name,
                 e.primary_selector,
-                e.alt_selectors,
+                e.fallback_selectors,
                 e.attributes
             FROM healing.review_items ri
             LEFT JOIN repo.elements e ON ri.element_id = e.id
@@ -431,7 +438,7 @@ async def get_review_queue(
                 "created_at": row["created_at"].isoformat() if row["created_at"] else None,
                 "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
                 "current_primary_selector": row["primary_selector"],
-                "current_alt_selectors": row["alt_selectors"],
+                "current_alt_selectors": row["fallback_selectors"],
                 "current_attributes": row["attributes"]
             } for row in result],
             "count": len(result)
@@ -452,7 +459,7 @@ async def get_pending_reviews():
             """
             SELECT 
                 ri.id,
-                e.element_key as element_id,
+                e.name as element_id,
                 p.name as page,
                 ri.suggestion,
                 e.primary_selector as current_selectors,
@@ -481,7 +488,7 @@ async def get_pending_reviews():
                 try:
                     suggestion = row["suggestion"] if isinstance(row["suggestion"], dict) else json.loads(row["suggestion"])
                     suggested_locator = suggestion.get("suggestedSelector", "")
-                except:
+                except Exception:
                     suggested_locator = str(row["suggestion"])
             
             # Handle current selector
@@ -489,7 +496,7 @@ async def get_pending_reviews():
                 try:
                     current_sel = row["current_selectors"] if isinstance(row["current_selectors"], dict) else json.loads(row["current_selectors"])
                     old_locator = current_sel.get("css", "") or current_sel.get("xpath", "")
-                except:
+                except Exception:
                     old_locator = str(row["current_selectors"])
             
             review_items.append({
@@ -521,16 +528,21 @@ async def update_review_status(review_id: str, update: ReviewQueueUpdate):
         
         result = await db.fetchrow(
             """
-            UPDATE healing.review_items 
-            SET 
-                status = $1,
-                updated_at = NOW()
-            WHERE id = $2
-            RETURNING ri.*, e.element_key, p.name as page_name
-            FROM healing.review_items ri
-            LEFT JOIN repo.elements e ON ri.element_id = e.id
+            WITH updated AS (
+                UPDATE healing.review_items 
+                SET 
+                    status = $1,
+                    updated_at = NOW()
+                WHERE id = $2
+                RETURNING *
+            )
+            SELECT 
+                updated.*,
+                e.name as element_key,
+                p.name as page_name
+            FROM updated
+            LEFT JOIN repo.elements e ON updated.element_id = e.id
             LEFT JOIN repo.pages p ON e.page_id = p.id
-            WHERE ri.id = $2
             """,
             update.status,
             review_id
@@ -584,10 +596,10 @@ async def submit_healing_data(submission: HealingSubmission):
                 # Look up existing element in new schema
                 element_lookup = await db.fetchrow(
                     """
-                    SELECT e.id, e.element_key, p.name as page_name, p.id as page_id
+                    SELECT e.id, e.name as element_key, p.name as page_name, p.id as page_id
                     FROM repo.elements e
                     JOIN repo.pages p ON e.page_id = p.id
-                    WHERE e.element_key = $1 AND p.name = $2 AND e.is_active = true 
+                    WHERE e.name = $1 AND p.name = $2 AND e.is_active = true 
                     ORDER BY e.updated_at DESC 
                     LIMIT 1
                     """,
@@ -606,6 +618,82 @@ async def submit_healing_data(submission: HealingSubmission):
                     )
                     project_id = project_result["project_id"] if project_result else None
                 
+                # POLICY ENGINE: Evaluate healing suggestion
+                initial_status = "open"  # Default status
+                confidence = getattr(attempt, 'confidence', 85)  # Default confidence
+                
+                try:
+                    from services.policy_engine_enhanced import create_policy_engine
+                    
+                    if project_id:
+                        # Get default environment for project
+                        env_result = await db.fetchrow(
+                            """
+                            SELECT id FROM core.environments 
+                            WHERE project_id = $1 AND is_default = true
+                            LIMIT 1
+                            """,
+                            project_id
+                        )
+                        
+                        environment_id = env_result["id"] if env_result else None
+                        
+                        if environment_id:
+                            logger.info(f"🎯 Evaluating healing suggestion with policy engine (confidence: {confidence}%)")
+                            
+                            # Initialize policy engine
+                            policy_engine = await create_policy_engine(db, project_id, environment_id)
+                            
+                            # Check if healing can be auto-applied
+                            can_auto_apply = policy_engine.can_auto_heal(int(confidence))
+                            requires_review = policy_engine.requires_review(int(confidence))
+                            
+                            # Determine initial status based on policy
+                            if can_auto_apply:
+                                initial_status = "approved"
+                                logger.info(f"✅ Healing auto-approved by policy (confidence: {confidence}%)")
+                                
+                                # Log the auto-approval decision
+                                await policy_engine.log_decision(
+                                    "auto_heal",
+                                    {
+                                        "element_id": str(element_id) if element_id else None,
+                                        "element_key": attempt.elementId,
+                                        "original_selector": attempt.originalLocator,
+                                        "healed_selector": attempt.healedLocator,
+                                        "confidence": confidence
+                                    },
+                                    outcome="approved",
+                                    metadata={"healing_source": "java-framework"}
+                                )
+                                
+                            elif requires_review:
+                                initial_status = "open"
+                                logger.info(f"🔍 Healing requires review by policy (confidence: {confidence}%)")
+                                
+                                # Log the review requirement
+                                await policy_engine.log_decision(
+                                    "review_required",
+                                    {
+                                        "element_id": str(element_id) if element_id else None,
+                                        "element_key": attempt.elementId,
+                                        "original_selector": attempt.originalLocator,
+                                        "healed_selector": attempt.healedLocator,
+                                        "confidence": confidence
+                                    },
+                                    outcome="pending_review",
+                                    metadata={"healing_source": "java-framework"}
+                                )
+                            
+                            logger.debug(f"📊 Policy engine decision: status={initial_status}")
+                        else:
+                            logger.debug("ℹ️ No environment found for policy evaluation")
+                            
+                except ImportError:
+                    logger.debug("ℹ️ Policy engine not available, using default healing status")
+                except Exception as e:
+                    logger.error(f"❌ Policy engine evaluation failed for healing: {e}")
+                
                 # Create review item for successful healing
                 await db.execute(
                     """
@@ -619,16 +707,21 @@ async def submit_healing_data(submission: HealingSubmission):
                     """,
                     project_id,
                     element_id,
-                    "open",
+                    initial_status,  # Use policy-determined status
                     json.dumps({
                         "originalSelector": attempt.originalLocator,
                         "suggestedSelector": attempt.healedLocator,
                         "attemptedAlternatives": attempt.attemptedAlternatives,
                         "actionType": "update_primary_selector",
                         "timestamp": attempt.timestamp,
-                        "healingSource": "java-framework"
+                        "healingSource": "java-framework",
+                        "confidence": confidence,
+                        "autoApproved": initial_status == "approved",
+                        "policyEvaluated": True
                     }),
-                    f"Self-healing suggested new locator for element '{attempt.elementId}'. Original locator failed, but healing found a working alternative."
+                    f"Self-healing suggested new locator for element '{attempt.elementId}'. "
+                    f"Original locator failed, but healing found a working alternative. "
+                    f"Confidence: {confidence}%. Status: {initial_status}."
                 )
                 
                 created_reviews += 1
@@ -652,146 +745,163 @@ async def get_all_elements(
     current_user: CurrentUser = Depends(get_current_active_user)
 ):
     """
-    Get all recorded elements for the current user's project
+    Get all recorded elements for the current user's active project
     """
     try:
-        print(f"DEBUG: get_all_elements called with limit={limit}, offset={offset}, page={page}")
-        print(f"DEBUG: Current user: {current_user.user.email} (ID: {current_user.user.id})")
+        logger.debug(f"get_all_elements called with limit={limit}, offset={offset}, page={page}")
+        logger.debug(f"Current user: {current_user.user.email} (ID: {current_user.user.id})")
+        if current_user.project:
+            logger.debug(f"Current project: {current_user.project.name} (ID: {current_user.project.id})")
+        else:
+            logger.debug("No project set for user")
         
         from core.database import get_database
-        print("DEBUG: About to get database connection")
+        logger.debug("About to get database connection")
         
         db = await get_database()
-        print("DEBUG: Database connection established successfully")
+        logger.debug("Database connection established successfully")
         
-        # Get user's project ID through the user_tenant_roles relationship
-        user_project = await db.fetchrow(
+        # Use current user's active project
+        if not current_user.project or not current_user.project.id:
+            logger.debug("No project assigned to user, returning empty result")
+            return {
+                "success": True,
+                "data": [],
+                "count": 0,
+                "message": "No project assigned to user"
+            }
+        
+        project_id = current_user.project.id
+        project_name = current_user.project.name
+        logger.debug(f"Using current project: {project_name} (ID: {project_id})")
+
+        has_primary_selector = await db.fetchval(
             """
-            SELECT p.id, p.name 
-            FROM core.projects p 
-            JOIN core.tenants t ON p.tenant_id = t.id
-            JOIN core.user_tenant_roles utr ON t.id = utr.tenant_id
-            WHERE utr.user_id = $1 AND utr.is_active = true AND t.is_active = true AND p.is_active = true
-            ORDER BY p.created_at DESC 
-            LIMIT 1
-            """,
-            current_user.user.id
-        )
-        
-        if not user_project:
-            print("DEBUG: No project found for user, checking if user is admin or should get default project")
-            # Try to get the first available project as fallback (for admin users)
-            user_project = await db.fetchrow(
-                "SELECT id, name FROM core.projects WHERE is_active = true ORDER BY created_at DESC LIMIT 1"
+            SELECT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = 'repo' AND table_name = 'elements' AND column_name = 'primary_selector'
             )
-            
-            if not user_project:
-                print("DEBUG: No projects exist at all, returning empty result")
-                return {
-                    "success": True,
-                    "data": [],
-                    "count": 0,
-                    "message": "No projects found in the system"
-                }
-            
-            print(f"DEBUG: Using fallback project: {user_project['name']} (ID: {user_project['id']})")
-        
-        project_id = user_project["id"]
-        project_name = user_project["name"]
-        print(f"DEBUG: Using project: {project_name} (ID: {project_id})")
-        
-        where_clause = "WHERE e.is_active = true AND p.project_id = $1"
+            """
+        )
+
         params = [project_id]
-        
         if page:
-            where_clause += " AND p.name = $2"
             params.append(page)
-            print(f"DEBUG: Added page filter: {page}")
-        
-        # Add pagination
+            logger.debug(f"Added page filter: {page}")
         params.extend([limit, offset])
         limit_offset = f"LIMIT ${len(params)-1} OFFSET ${len(params)}"
+
+        if has_primary_selector:
+            where_clause = "WHERE e.is_active = true AND p.project_id = $1"
+            if page:
+                where_clause += " AND p.name = $2"
+
+            query = f"""
+                SELECT
+                    e.id,
+                    e.name as logical_key,
+                    p.name as page,
+                    p.project_id,
+                    e.primary_selector,
+                    e.fallback_selectors,
+                    e.attributes,
+                    e.is_active,
+                    e.created_at as timestamp_recorded,
+                    e.updated_at
+                FROM repo.elements e
+                JOIN repo.pages p ON e.page_id = p.id
+                {where_clause}
+                ORDER BY e.updated_at DESC
+                {limit_offset}
+                """
+        else:
+            where_clause = "WHERE e.is_active = true AND e.project_id = $1"
+            if page:
+                where_clause += " AND e.page_name = $2"
+
+            query = f"""
+                SELECT
+                    e.id,
+                    e.name as logical_key,
+                    COALESCE(e.page_name, 'unknown') as page,
+                    e.project_id,
+                    jsonb_build_object(
+                        'css', COALESCE(e.css_selector, ''),
+                        'xpath', COALESCE(e.xpath_selector, ''),
+                        'tag', COALESCE(e.element_type, '')
+                    ) as primary_selector,
+                    '[]'::jsonb as fallback_selectors,
+                    jsonb_build_object(
+                        'description', COALESCE(e.description, ''),
+                        'tag', COALESCE(e.element_type, '')
+                    ) as attributes,
+                    e.is_active,
+                    e.created_at as timestamp_recorded,
+                    e.updated_at
+                FROM repo.elements e
+                {where_clause}
+                ORDER BY e.updated_at DESC
+                {limit_offset}
+                """
+
+        logger.debug(f"Using elements query mode: {'enhanced' if has_primary_selector else 'legacy'}")
         
-        print(f"DEBUG: Final query params: {params}")
-        print(f"DEBUG: Where clause: {where_clause}")
-        print(f"DEBUG: Limit/offset: {limit_offset}")
-        
-        query = f"""
-            SELECT 
-                e.id,
-                e.name as logical_key,
-                e.element_type,
-                e.page_id,
-                p.name as page,
-                e.primary_selector,
-                e.fallback_selectors,
-                e.attributes,
-                e.is_active,
-                e.created_at as timestamp_recorded,
-                e.updated_at
-            FROM repo.elements e
-            JOIN repo.pages p ON e.page_id = p.id
-            {where_clause}
-            ORDER BY e.updated_at DESC
-            {limit_offset}
-            """
-        
-        print(f"DEBUG: About to execute query: {query}")
-        print(f"DEBUG: Query params: {params}")
+        logger.debug(f"About to execute query: {query}")
+        logger.debug(f"Query params: {params}")
         
         result = await db.fetch(query, *params)
-        print(f"DEBUG: Query executed successfully, result type: {type(result)}")
-        print(f"DEBUG: Result length/content: {len(result) if hasattr(result, '__len__') else 'N/A'}")
+        logger.debug(f"Query executed successfully, result type: {type(result)}")
+        logger.debug(f"Result length/content: {len(result) if hasattr(result, '__len__') else 'N/A'}")
         
         if hasattr(result, '__iter__'):
-            print(f"DEBUG: First few rows: {list(result)[:2] if result else 'No rows'}")
+            logger.debug(f"First few rows: {list(result)[:2] if result else 'No rows'}")
         else:
-            print(f"DEBUG: Result is not iterable: {result}")
+            logger.debug(f"Result is not iterable: {result}")
         
         # Convert to format expected by frontend
-        print(f"DEBUG: Starting to process {len(result) if hasattr(result, '__len__') else 'unknown'} rows")
+        logger.debug(f"Starting to process {len(result) if hasattr(result, '__len__') else 'unknown'} rows")
         elements = []
         
         for i, row in enumerate(result):
             try:
-                print(f"DEBUG: Processing row {i+1}: {dict(row) if hasattr(row, 'keys') else row}")
+                logger.debug(f"Processing row {i+1}: {dict(row) if hasattr(row, 'keys') else row}")
                 
                 # Parse selectors - handle potential JSON strings
                 primary_selector = row.get("primary_selector")
-                print(f"DEBUG: Raw primary_selector: {primary_selector} (type: {type(primary_selector)})")
+                logger.debug(f"Raw primary_selector: {primary_selector} (type: {type(primary_selector)})")
                 
                 if isinstance(primary_selector, str):
                     try:
                         primary_selector = json.loads(primary_selector)
-                        print(f"DEBUG: Parsed primary_selector from JSON: {primary_selector}")
+                        logger.debug(f"Parsed primary_selector from JSON: {primary_selector}")
                     except Exception as json_err:
-                        print(f"DEBUG: Failed to parse primary_selector JSON: {json_err}")
+                        logger.debug(f"Failed to parse primary_selector JSON: {json_err}")
                         primary_selector = {}
                 elif not primary_selector:
                     primary_selector = {}
                 
                 alt_selectors = row.get("fallback_selectors")
-                print(f"DEBUG: Raw fallback_selectors: {alt_selectors} (type: {type(alt_selectors)})")
+                logger.debug(f"Raw alt_selectors: {alt_selectors} (type: {type(alt_selectors)})")
                 
                 if isinstance(alt_selectors, str):
                     try:
                         alt_selectors = json.loads(alt_selectors)
-                        print(f"DEBUG: Parsed fallback_selectors from JSON: {alt_selectors}")
+                        logger.debug(f"Parsed alt_selectors from JSON: {alt_selectors}")
                     except Exception as json_err:
-                        print(f"DEBUG: Failed to parse fallback_selectors JSON: {json_err}")
+                        logger.debug(f"Failed to parse alt_selectors JSON: {json_err}")
                         alt_selectors = []
                 elif not alt_selectors:
                     alt_selectors = []
                 
                 attributes = row.get("attributes")
-                print(f"DEBUG: Raw attributes: {attributes} (type: {type(attributes)})")
+                logger.debug(f"Raw attributes: {attributes} (type: {type(attributes)})")
                 
                 if isinstance(attributes, str):
                     try:
                         attributes = json.loads(attributes)
-                        print(f"DEBUG: Parsed attributes from JSON: {attributes}")
+                        logger.debug(f"Parsed attributes from JSON: {attributes}")
                     except Exception as json_err:
-                        print(f"DEBUG: Failed to parse attributes JSON: {json_err}")
+                        logger.debug(f"Failed to parse attributes JSON: {json_err}")
                         attributes = {}
                 elif not attributes:
                     attributes = {}
@@ -800,12 +910,12 @@ async def get_all_elements(
                 css_selector = primary_selector.get("css_selector", primary_selector.get("css", "")) if primary_selector else ""
                 xpath = primary_selector.get("xpath", "") if primary_selector else ""
                 
-                # Get tag from element_type field first, then fallback to primary_selector
-                tag = row.get("element_type", "unknown")
+                # Get tag from attributes or primary_selector
+                tag = attributes.get("tag", "unknown") if attributes else "unknown"
                 if tag == "unknown" or not tag:
                     tag = primary_selector.get("tag", "unknown") if primary_selector else "unknown"
                 
-                print(f"DEBUG: Extracted - css_selector: {css_selector}, xpath: {xpath}, tag: {tag} (from element_type: {row.get('element_type')})")
+                logger.debug(f"Extracted - css_selector: {css_selector}, xpath: {xpath}, tag: {tag}")
                 
                 # Build selectors list
                 selectors = []
@@ -823,7 +933,7 @@ async def get_all_elements(
                             if alt_sel.get("xpath"):
                                 selectors.append(alt_sel["xpath"])
                 
-                print(f"DEBUG: Final selectors list: {selectors}")
+                logger.debug(f"Final selectors list: {selectors}")
                 
                 # Handle timestamp conversion
                 timestamp_recorded = row.get("timestamp_recorded")
@@ -831,7 +941,7 @@ async def get_all_elements(
                     try:
                         timestamp_iso = timestamp_recorded.isoformat() if hasattr(timestamp_recorded, 'isoformat') else str(timestamp_recorded)
                     except Exception as ts_err:
-                        print(f"DEBUG: Failed to convert timestamp: {ts_err}")
+                        logger.debug(f"Failed to convert timestamp: {ts_err}")
                         timestamp_iso = None
                 else:
                     timestamp_iso = None
@@ -850,20 +960,21 @@ async def get_all_elements(
                     "position_y": 0,  # Not stored in new schema
                     "selectors": selectors,
                     "page": row["page"],
+                    "project_id": str(row["project_id"]),  # Include for debugging
                     "timestamp_recorded": timestamp_iso,
                     "is_active": row["is_active"]
                 }
                 
-                print(f"DEBUG: Created element dict: {element_dict}")
+                logger.debug(f"Created element dict: {element_dict}")
                 elements.append(element_dict)
                 
             except Exception as row_err:
-                print(f"ERROR: Failed to process row {i+1}: {row_err}")
-                print(f"ERROR: Row data: {row}")
+                logger.error(f"Failed to process row {i+1}: {row_err}")
+                logger.error(f"Row data: {row}")
                 # Continue processing other rows
                 continue
         
-        print(f"DEBUG: Successfully processed {len(elements)} elements")
+        logger.debug(f"Successfully processed {len(elements)} elements")
         
         result_dict = {
             "success": True,
@@ -871,59 +982,459 @@ async def get_all_elements(
             "count": len(elements)
         }
         
-        print(f"DEBUG: Returning result: {result_dict}")
+        logger.debug(f"Returning result: {result_dict}")
         return result_dict
         
     except Exception as e:
-        print(f"ERROR: Exception in get_all_elements: {str(e)}")
-        print(f"ERROR: Exception type: {type(e).__name__}")
+        logger.error(f"Exception in get_all_elements: {str(e)}")
+        logger.error(f"Exception type: {type(e).__name__}")
         import traceback
-        print(f"ERROR: Full traceback: {traceback.format_exc()}")
+        logger.error(f"Full traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch elements: {str(e)}")
+
+async def _cascade_element_selector_update(db, element_uuid, new_primary_selector, old_primary_selector=None):
+    """
+    When an element's primary_selector changes, propagate the new locator to:
+      1. All planner.plans whose plan_json steps reference this element
+         (via planner.prompt_step_elements).
+      2. All pending exec.step_results whose test_step references this element
+         (via tests.test_steps.element_ref).
+    """
+    selector_obj = new_primary_selector if isinstance(new_primary_selector, dict) else json.loads(new_primary_selector)
+    new_css = selector_obj.get("css") or selector_obj.get("css_selector") or ""
+    new_xpath = selector_obj.get("xpath") or ""
+    # Prefer CSS; fall back to XPath
+    new_locator = new_css or new_xpath
+    if not new_locator:
+        return
+
+    old_locator_candidates = set()
+    if old_primary_selector:
+        try:
+            old_obj = old_primary_selector if isinstance(old_primary_selector, dict) else json.loads(old_primary_selector)
+            old_css = (old_obj.get("css") or old_obj.get("css_selector") or "").strip()
+            old_xpath = (old_obj.get("xpath") or "").strip()
+            if old_css:
+                old_locator_candidates.add(old_css)
+            if old_xpath:
+                old_locator_candidates.add(old_xpath)
+        except Exception:
+            pass
+
+    def _set_by_parameter_key(step: dict, parameter_key: str, value: str) -> bool:
+        """Set a value in step using supported key formats (selector, params.selector, args.selector, etc)."""
+        if not isinstance(step, dict) or not parameter_key:
+            return False
+
+        changed_local = False
+
+        # Direct top-level key
+        if parameter_key in step and step.get(parameter_key) != value:
+            step[parameter_key] = value
+            changed_local = True
+
+        # Nested dotted key support (e.g., args.selector, params.selector)
+        if "." in parameter_key:
+            parts = [p for p in parameter_key.split(".") if p]
+            target = step
+            for part in parts[:-1]:
+                if not isinstance(target, dict) or part not in target:
+                    target = None
+                    break
+                target = target.get(part)
+            if isinstance(target, dict):
+                last_key = parts[-1]
+                if target.get(last_key) != value:
+                    target[last_key] = value
+                    changed_local = True
+
+        # Common selector containers
+        params = step.get("params")
+        if isinstance(params, dict) and parameter_key in params and params.get(parameter_key) != value:
+            params[parameter_key] = value
+            changed_local = True
+
+        args = step.get("args")
+        if isinstance(args, dict) and parameter_key in args and args.get(parameter_key) != value:
+            args[parameter_key] = value
+            changed_local = True
+
+        # Also update canonical locator field when present
+        if "locator" in step and step.get("locator") != value:
+            step["locator"] = value
+            changed_local = True
+
+        return changed_local
+
+    # ── 1. Update plan_json in planner.plans ──
+    try:
+        refs = await db.fetch(
+            """
+            SELECT pse.prompt_id, pse.plan_id, pse.step_index, pse.parameter_key
+            FROM planner.prompt_step_elements pse
+            WHERE pse.element_id = $1
+            """,
+            element_uuid,
+        )
+    except Exception:
+        refs = []
+
+    # Group by plan_id so each plan is updated once
+    plans_to_patch: Dict[str, list] = {}
+    for ref in refs:
+        plan_id = str(ref["plan_id"])
+        plans_to_patch.setdefault(plan_id, []).append(ref)
+
+    for plan_id, step_refs in plans_to_patch.items():
+        try:
+            plan_row = await db.fetchrow(
+                "SELECT plan_json FROM planner.plans WHERE id = $1",
+                plan_id,
+            )
+            if not plan_row:
+                continue
+            plan_json = plan_row["plan_json"]
+            if isinstance(plan_json, str):
+                plan_json = json.loads(plan_json)
+            plan_json = copy.deepcopy(plan_json)
+            steps = plan_json.get("steps", [])
+            changed = False
+            for ref in step_refs:
+                idx = ref["step_index"]
+                param_key = ref["parameter_key"]
+                if idx < len(steps):
+                    step = steps[idx]
+                    if _set_by_parameter_key(step, param_key, new_locator):
+                        changed = True
+
+            if changed:
+                await db.execute(
+                    "UPDATE planner.plans SET plan_json = $1, updated_at = NOW() WHERE id = $2",
+                    json.dumps(plan_json),
+                    plan_id,
+                )
+                logger.info("Cascaded element selector to plan %s (%d steps patched)", plan_id, len(step_refs))
+        except Exception as e:
+            logger.warning("Failed to cascade element to plan %s: %s", plan_id, e)
+
+    # Fallback: if no relationship rows were found, patch plans by exact old selector match.
+    if not plans_to_patch and old_locator_candidates:
+        try:
+            all_plans = await db.fetch("SELECT id, plan_json FROM planner.plans")
+            selector_keys = {
+                "selector", "locator", "target", "css_selector", "xpath", "original_selector", "target_selector"
+            }
+            for plan_row in all_plans:
+                plan_id = str(plan_row["id"])
+                plan_json = plan_row["plan_json"]
+                if isinstance(plan_json, str):
+                    try:
+                        plan_json = json.loads(plan_json)
+                    except Exception:
+                        continue
+                if not isinstance(plan_json, dict):
+                    continue
+
+                plan_json = copy.deepcopy(plan_json)
+                steps = plan_json.get("steps", [])
+                if not isinstance(steps, list) or not steps:
+                    continue
+
+                changed = False
+                for step in steps:
+                    if not isinstance(step, dict):
+                        continue
+
+                    for key in selector_keys:
+                        val = step.get(key)
+                        if isinstance(val, str) and val.strip() in old_locator_candidates and val.strip() != new_locator:
+                            step[key] = new_locator
+                            changed = True
+
+                    for container_key in ("params", "args"):
+                        container = step.get(container_key)
+                        if not isinstance(container, dict):
+                            continue
+                        for key in selector_keys:
+                            val = container.get(key)
+                            if isinstance(val, str) and val.strip() in old_locator_candidates and val.strip() != new_locator:
+                                container[key] = new_locator
+                                changed = True
+
+                if changed:
+                    await db.execute(
+                        "UPDATE planner.plans SET plan_json = $1, updated_at = NOW() WHERE id = $2",
+                        json.dumps(plan_json),
+                        plan_id,
+                    )
+                    logger.info("Fallback-cascaded selector to plan %s", plan_id)
+        except Exception as e:
+            logger.warning("Fallback cascade by selector match failed: %s", e)
+
+    # ── 2. Update pending exec.step_results ──
+    try:
+        await db.execute(
+            """
+            UPDATE exec.step_results sr
+            SET action_data = jsonb_set(sr.action_data, '{locator}', to_jsonb($1::text)),
+                updated_at = NOW()
+            FROM tests.test_steps ts
+            WHERE ts.element_ref = $2
+              AND sr.test_step_id = ts.id
+              AND sr.status = 'pending'
+            """,
+            new_locator,
+            element_uuid,
+        )
+    except Exception as e:
+        logger.warning("Failed to cascade element to pending step_results: %s", e)
+
+    # ── 3. Update tests.test_steps parameters ──
+    try:
+        await db.execute(
+            """
+            UPDATE tests.test_steps
+            SET parameters = jsonb_set(
+                COALESCE(parameters, '{}'::jsonb),
+                '{locator}',
+                to_jsonb($1::text)
+            ),
+            updated_at = NOW()
+            WHERE element_ref = $2
+            """,
+            new_locator,
+            element_uuid,
+        )
+    except Exception as e:
+        logger.warning("Failed to cascade element to test_steps: %s", e)
+
+
+@router.put("/elements/{element_id}")
+async def update_element(
+    element_id: str,
+    updates: dict,
+    current_user: Optional[CurrentUser] = Depends(get_optional_current_user)
+):
+    """
+    Update an element by ID (can use logical key/name or UUID)
+    Supports updating: logical_key/name, primary_selector, fallback_selectors, attributes
+    """
+    try:
+        from core.database import get_database
+        
+        db = await get_database()
+        
+        # Detect table shape (legacy vs enhanced)
+        has_primary_selector = await db.fetchval(
+            """
+            SELECT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = 'repo' AND table_name = 'elements' AND column_name = 'primary_selector'
+            )
+            """
+        )
+        has_fallback_selectors = await db.fetchval(
+            """
+            SELECT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = 'repo' AND table_name = 'elements' AND column_name = 'fallback_selectors'
+            )
+            """
+        )
+        has_attributes = await db.fetchval(
+            """
+            SELECT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = 'repo' AND table_name = 'elements' AND column_name = 'attributes'
+            )
+            """
+        )
+
+        # Try to find element by logical key (name) first, then by UUID
+        if has_primary_selector:
+            element = await db.fetchrow(
+                "SELECT id, name, primary_selector FROM repo.elements WHERE name = $1 OR id::text = $1",
+                element_id
+            )
+        else:
+            element = await db.fetchrow(
+                "SELECT id, name FROM repo.elements WHERE name = $1 OR id::text = $1",
+                element_id
+            )
+        
+        if not element:
+            raise HTTPException(status_code=404, detail=f"Element '{element_id}' not found")
+        
+        element_uuid = element['id']
+        old_primary_selector = element['primary_selector'] if has_primary_selector else None
+        
+        # Build update query dynamically based on provided fields
+        update_fields = []
+        update_values = []
+        param_index = 1
+        
+        # Normalize incoming logical key
+        if 'logical_key' in updates:
+            updates['name'] = updates['logical_key']
+
+        # Accept flat css_selector / xpath from frontend and merge into primary_selector
+        if has_primary_selector and ('css_selector' in updates or 'xpath' in updates):
+            # Fetch current primary_selector to merge
+            cur_row = await db.fetchrow(
+                "SELECT primary_selector FROM repo.elements WHERE id = $1", element_uuid
+            )
+            cur_sel = cur_row["primary_selector"] if cur_row and cur_row["primary_selector"] else {}
+            if isinstance(cur_sel, str):
+                cur_sel = json.loads(cur_sel)
+            if 'css_selector' in updates:
+                cur_sel["css"] = updates["css_selector"]
+            if 'xpath' in updates:
+                cur_sel["xpath"] = updates["xpath"]
+            updates["primary_selector"] = cur_sel
+
+        # Accept either name or legacy element_key input; persist to name
+        if 'element_key' in updates and 'name' not in updates:
+            updates['name'] = updates['element_key']
+
+        if 'name' in updates:
+            update_fields.append(f"name = ${param_index}")
+            update_values.append(updates['name'])
+            param_index += 1
+        
+        if has_primary_selector and 'primary_selector' in updates:
+            update_fields.append(f"primary_selector = ${param_index}::jsonb")
+            update_values.append(json.dumps(updates['primary_selector']) if isinstance(updates['primary_selector'], dict) else updates['primary_selector'])
+            param_index += 1
+
+        if not has_primary_selector and 'css_selector' in updates:
+            update_fields.append(f"css_selector = ${param_index}")
+            update_values.append(updates['css_selector'])
+            param_index += 1
+
+        if not has_primary_selector and 'xpath' in updates:
+            update_fields.append(f"xpath_selector = ${param_index}")
+            update_values.append(updates['xpath'])
+            param_index += 1
+        
+        if has_fallback_selectors and 'alt_selectors' in updates:
+            update_fields.append(f"fallback_selectors = ${param_index}::jsonb")
+            update_values.append(json.dumps(updates['alt_selectors']) if isinstance(updates['alt_selectors'], list) else updates['alt_selectors'])
+            param_index += 1
+
+        if has_fallback_selectors and 'fallback_selectors' in updates:
+            update_fields.append(f"fallback_selectors = ${param_index}::jsonb")
+            update_values.append(json.dumps(updates['fallback_selectors']) if isinstance(updates['fallback_selectors'], list) else updates['fallback_selectors'])
+            param_index += 1
+        
+        if has_attributes and 'attributes' in updates:
+            update_fields.append(f"attributes = ${param_index}::jsonb")
+            update_values.append(json.dumps(updates['attributes']) if isinstance(updates['attributes'], dict) else updates['attributes'])
+            param_index += 1
+
+        if 'text_content' in updates:
+            if has_attributes:
+                update_fields.append(f"attributes = jsonb_set(COALESCE(attributes, '{{}}'::jsonb), '{{text_content}}', ${param_index}::jsonb)")
+                update_values.append(json.dumps(updates['text_content']))
+                param_index += 1
+            else:
+                update_fields.append(f"description = ${param_index}")
+                update_values.append(updates['text_content'])
+                param_index += 1
+        
+        if not update_fields:
+            raise HTTPException(status_code=400, detail="No valid update fields provided")
+        
+        # Add updated_at
+        update_fields.append("updated_at = NOW()")
+        
+        # Execute update
+        query = f"""
+            UPDATE repo.elements 
+            SET {', '.join(update_fields)}
+            WHERE id = ${param_index}
+            RETURNING *
+        """
+        update_values.append(element_uuid)
+        
+        result = await db.fetchrow(query, *update_values)
+        
+        # ── Cascade: propagate selector changes to all test plans & pending steps ──
+        cascaded = False
+        if has_primary_selector and 'primary_selector' in updates:
+            try:
+                await _cascade_element_selector_update(db, element_uuid, updates['primary_selector'], old_primary_selector)
+                cascaded = True
+            except Exception as cascade_err:
+                logger.warning("Element cascade propagation partially failed: %s", cascade_err)
+        
+        return {
+            "success": True,
+            "message": "Element updated successfully" + (" and cascaded to test plans" if cascaded else ""),
+            "cascaded": cascaded,
+            "data": {
+                "id": str(result['id']),
+                "element_key": result['name'],
+                "page_id": str(result['page_id']) if 'page_id' in result and result['page_id'] else None
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"updating element: {str(e)}")
+        import traceback
+        logger.error(f"traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Failed to update element: {str(e)}")
 
 @router.delete("/elements/{element_id}")
 async def delete_element(
     element_id: str,
-    current_user: CurrentUser = Depends(get_current_active_user)
+    current_user: Optional[CurrentUser] = Depends(get_optional_current_user)
 ):
     """
-    Delete an element by ID (hard delete from database)
-    ADMIN ONLY: This operation permanently removes element data.
+    Delete an element by ID (can use element_key or UUID)
     """
     try:
         from core.database import get_database
-        from core.delete_protection import DatabaseDeleteProtection
         
-        db = await get_database()# First, check if the element exists
-        check_result = await db.execute(
-            "SELECT id, element_key FROM repo.elements WHERE id = $1",
+        db = await get_database()
+        
+        # Try to find element by element_key first, then by UUID
+        element = await db.fetchrow(
+            "SELECT id, element_key FROM repo.elements WHERE element_key = $1 OR id::text = $1",
             element_id
         )
         
-        if not check_result or len(check_result) == 0:raise HTTPException(status_code=404, detail=f"Element with ID {element_id} not found")
+        if not element:
+            raise HTTPException(status_code=404, detail=f"Element '{element_id}' not found")
         
-        element_key = check_result[0]['element_key']# SAFETY: Use database-level delete protection
-        await DatabaseDeleteProtection.safe_delete(
-            user_id=str(current_user.user.id),
-            query="DELETE FROM repo.elements WHERE id = $1",
-            params=[element_id],
-            operation_description=f"delete element {element_key}"
+        element_key = element['element_key']
+        element_uuid = element['id']
+        
+        # Delete the element
+        await db.execute(
+            "DELETE FROM repo.elements WHERE id = $1",
+            element_uuid
         )
         
         return {
             "success": True,
-            "message": f"Element {element_key} deleted successfully",
-            "deleted_id": element_id,
-            "admin_user": current_user.user.email
+            "message": f"Element '{element_key}' deleted successfully",
+            "deleted_id": str(element_uuid),
+            "element_key": element_key
         }
         
     except HTTPException:
-        # Re-raise HTTP exceptions
         raise
-    except Exception as e:raise HTTPException(status_code=500, detail=f"Failed to delete element: {str(e)}")
+    except Exception as e:
+        logger.error(f"deleting element: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete element: {str(e)}")
 
 @router.get("/execution-stats")
-async def get_execution_stats():
+async def get_execution_stats(
+    test_case_id: Optional[str] = Query(None, description="Filter by test case ID"),
+    prompt_id: Optional[str] = Query(None, description="Filter by prompt ID (maps to test_case_id)")
+):
     """
     Get execution statistics for dashboard
     """
@@ -931,9 +1442,22 @@ async def get_execution_stats():
         from core.database import get_database
         db = await get_database()
         
+        # Build WHERE clause for filters
+        where_clauses = ["r.started_at >= NOW() - INTERVAL '30 days'"]
+        params = []
+        
+        if test_case_id:
+            params.append(test_case_id)
+            where_clauses.append(f"r.test_case_id = ${len(params)}")
+        elif prompt_id:
+            params.append(prompt_id)
+            where_clauses.append(f"r.test_case_id = ${len(params)}")
+        
+        where_clause = " AND ".join(where_clauses)
+        
         # Get overall execution statistics
         stats_result = await db.fetchrow(
-            """
+            f"""
             SELECT 
                 COUNT(*) as total_executions,
                 COUNT(CASE WHEN r.status IN ('completed', 'passed', 'success') THEN 1 END) as successful_executions,
@@ -951,8 +1475,9 @@ async def get_execution_stats():
                     ELSE NULL 
                 END), 0) as avg_execution_time
             FROM exec.runs r
-            WHERE r.started_at >= NOW() - INTERVAL '30 days'
-            """
+            WHERE {where_clause}
+            """,
+            *params
         )
         
         return {
@@ -973,7 +1498,9 @@ async def get_execution_stats():
 async def get_executions(
     limit: int = Query(20, description="Maximum number of executions to return"),
     offset: int = Query(0, description="Number of executions to skip"),
-    status: Optional[str] = Query(None, description="Filter by status")
+    status: Optional[str] = Query(None, description="Filter by status"),
+    test_case_id: Optional[str] = Query(None, description="Filter by test case ID"),
+    prompt_id: Optional[str] = Query(None, description="Filter by prompt ID (maps to test_case_id)")
 ):
     """
     Get execution data from the database
@@ -982,12 +1509,22 @@ async def get_executions(
         from core.database import get_database
         db = await get_database()
         
-        where_clause = ""
+        where_clauses = []
         params = []
         
         if status:
-            where_clause = "WHERE r.status = $1"
             params.append(status)
+            where_clauses.append(f"r.status = ${len(params)}")
+        
+        # Support filtering by test_case_id or prompt_id (they're the same)
+        if test_case_id:
+            params.append(test_case_id)
+            where_clauses.append(f"r.test_case_id = ${len(params)}")
+        elif prompt_id:
+            params.append(prompt_id)
+            where_clauses.append(f"r.test_case_id = ${len(params)}")
+        
+        where_clause = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
         
         # Add pagination
         params.extend([limit, offset])
@@ -1608,7 +2145,7 @@ async def get_analytics_trends(timeRange: str = "24h"):
                 trends.append({
                     "metric_name": row["metric_name"],
                     "current_value": float(row["current_value"]),
-                    "change_percent": 5.2,  # Mock improvement
+                    "change_percent": None,  # Requires historical comparison
                     "analysis": {
                         "trend": "increasing" if row["metric_name"] == "Execution Success Rate" else "decreasing",
                         "significance": "medium",

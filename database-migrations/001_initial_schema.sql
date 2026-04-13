@@ -20,12 +20,19 @@ CREATE SCHEMA IF NOT EXISTS analytics;     -- Performance analytics and reportin
 -- CORE SCHEMA - Core entities (users, tenants, projects, roles)
 -- =============================================================================
 
--- Create tenants table (for multi-tenancy support)
+-- Create tenants table (for multi-tenancy support and organization details)
 CREATE TABLE IF NOT EXISTS core.tenants (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name VARCHAR(255) NOT NULL,
     slug VARCHAR(255) UNIQUE NOT NULL,
     description TEXT,
+    
+    -- Organization-specific details
+    industry VARCHAR(100),
+    company_size VARCHAR(50),
+    website VARCHAR(255),
+    logo_url VARCHAR(500),
+    
     is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
@@ -82,7 +89,7 @@ CREATE TABLE IF NOT EXISTS core.projects (
 );
 
 -- Create elements table (for page elements and selectors)
-CREATE TABLE IF NOT EXISTS core.elements (
+CREATE TABLE IF NOT EXISTS repo.elements (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     project_id UUID NOT NULL REFERENCES core.projects(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
@@ -581,7 +588,7 @@ CREATE INDEX IF NOT EXISTS idx_core_tenants_slug ON core.tenants(slug);
 CREATE INDEX IF NOT EXISTS idx_core_user_tenant_roles_user ON core.user_tenant_roles(user_id);
 CREATE INDEX IF NOT EXISTS idx_core_user_tenant_roles_tenant ON core.user_tenant_roles(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_core_projects_tenant ON core.projects(tenant_id);
-CREATE INDEX IF NOT EXISTS idx_core_elements_project ON core.elements(project_id);
+CREATE INDEX IF NOT EXISTS idx_repo_elements_project ON repo.elements(project_id);
 CREATE INDEX IF NOT EXISTS idx_core_test_sessions_project ON core.test_sessions(project_id);
 CREATE INDEX IF NOT EXISTS idx_core_test_sessions_user ON core.test_sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_core_test_steps_session ON core.test_steps(session_id);

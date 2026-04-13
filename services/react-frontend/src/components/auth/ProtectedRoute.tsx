@@ -1,6 +1,7 @@
 import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import styled from 'styled-components';
+import { spinKeyframes } from '../../shared/styles/keyframes';
 import { useAuth } from '../../contexts/AuthContext';
 
 const LoadingContainer = styled.div`
@@ -16,12 +17,8 @@ const LoadingSpinner = styled.div`
   height: 40px;
   border: 4px solid #e1e5e9;
   border-radius: 50%;
-  border-top-color: #667eea;
-  animation: spin 1s ease-in-out infinite;
-
-  @keyframes spin {
-    to { transform: rotate(360deg); }
-  }
+  border-top-color: #185FA5;
+  animation: ${spinKeyframes} 1s ease-in-out infinite;
 `;
 
 const LoadingText = styled.div`

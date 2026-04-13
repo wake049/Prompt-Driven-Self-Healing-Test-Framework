@@ -1350,6 +1350,8 @@ class DOMActionExecutor {
   constructor() {
     this.elementFinder = new ElementFinder();
     this.setupRecording();
+    // Initialize page name immediately
+    this.declareCurrentPage();
   }
 
   public get recording(): boolean { return this.isRecording; }
@@ -1549,6 +1551,7 @@ class DOMActionExecutor {
 
       //  NEW: Also send to backend with logical_key (M4)
       try {
+        console.log('🔵 Starting API call to record element...');
         const sessionId = await ensureSessionId();
         const pageKey = location.hostname + location.pathname;
         const identity = extractIdentity(element);
@@ -1571,9 +1574,11 @@ class DOMActionExecutor {
           recorder: 'extension'
         };
 
+        console.log('🔵 Calling apiClient.recordElement with payload:', backendPayload);
         // This call should cause the server to enqueue a locator-change review
         // if another active element with the same logical_key has a different selector.
         const apiRes = await apiClient.recordElement(backendPayload, sessionId);
+        console.log('✅ API call successful:', apiRes);
         const data = (apiRes?.data as any) || apiRes;
         const action = data?.action || (data?.success ? 'created' : 'noop_seen_bumped');
 
@@ -1584,6 +1589,8 @@ class DOMActionExecutor {
         }
 
       } catch (e) {
+        console.error('❌ API call failed:', e);
+        console.error('Error details:', e instanceof Error ? e.message : String(e));
         // Continue with local recording if backend fails
       }
 
@@ -1698,63 +1705,103 @@ class DOMActionExecutor {
 
   private generateSuggestedIds(element: Element): string[] {
     const suggestions: string[] = [];
+    const page = location.hostname.replace(/[^a-z0-9]/g, '-') + location.pathname.replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+    
+    // Priority 1: Use unique identifiers first
     if ((element as HTMLElement).id) {
-      suggestions.push((element as HTMLElement).id);
+      const elemId = (element as HTMLElement).id;
+      suggestions.push(`${page}-${elemId}`);
       const text = element.textContent?.trim();
       if (text && text.length < 30) {
         const cleanText = text.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g,'-').replace(/^-|-$/g,'');
-        if (cleanText) suggestions.push(`${(element as HTMLElement).id}-${cleanText}`);
+        if (cleanText) suggestions.push(`${page}-${elemId}-${cleanText}`);
       }
-      const sameIdElements = document.querySelectorAll(`#${(element as HTMLElement).id}`);
-      if (sameIdElements.length > 1) suggestions.push(`${(element as HTMLElement).id}-${Array.from(sameIdElements).indexOf(element)+1}`);
+      const sameIdElements = document.querySelectorAll(`#${elemId}`);
+      if (sameIdElements.length > 1) suggestions.push(`${page}-${elemId}-${Array.from(sameIdElements).indexOf(element)+1}`);
     }
+    
+    // Priority 2: data-testid or data-test
+    const testId = (element as HTMLElement).getAttribute('data-testid') || (element as HTMLElement).getAttribute('data-test');
+    if (testId) {
+      const cleanTestId = testId.toLowerCase().replace(/[^a-z0-9]/g,'-').replace(/-+/g,'-').replace(/^-|-$/g,'');
+      suggestions.push(`${page}-${cleanTestId}`);
+      suggestions.push(`${element.tagName.toLowerCase()}-${cleanTestId}`);
+    }
+    
+    // Priority 3: name attribute
     const name = (element as HTMLElement).getAttribute('name');
-    if (name) { suggestions.push(name); suggestions.push(`${element.tagName.toLowerCase()}-${name}`); }
-    if ((element as HTMLElement).className && typeof (element as HTMLElement).className === 'string') {
-      const classes = (element as HTMLElement).className.trim().split(/\s+/).filter(c => c);
-      const text = element.textContent?.trim();
-      classes.forEach(cls => {
-        suggestions.push(cls); suggestions.push(`${element.tagName.toLowerCase()}-${cls}`);
-        if (text && text.length < 30) {
-          const cleanText = text.toLowerCase().replace(/[^a-z0-9]/g,'-').replace(/-+/g,'-').replace(/^-|-$/g,'');
-          if (cleanText) suggestions.push(`${cls}-${cleanText}`);
-        }
-      });
+    if (name) { 
+      const cleanName = name.toLowerCase().replace(/[^a-z0-9]/g,'-').replace(/-+/g,'-').replace(/^-|-$/g,'');
+      suggestions.push(`${page}-${element.tagName.toLowerCase()}-${cleanName}`); 
+      suggestions.push(`${element.tagName.toLowerCase()}-${cleanName}`); 
     }
+    
+    // Priority 4: aria-label
+    const ariaLabel = (element as HTMLElement).getAttribute('aria-label');
+    if (ariaLabel && ariaLabel.length < 50) {
+      const cleanLabel = ariaLabel.toLowerCase().replace(/[^a-z0-9]/g,'-').replace(/-+/g,'-').replace(/^-|-$/g,'');
+      if (cleanLabel) {
+        suggestions.push(`${page}-${element.tagName.toLowerCase()}-${cleanLabel}`);
+        suggestions.push(`${element.tagName.toLowerCase()}-${cleanLabel}`);
+      }
+    }
+    
+    // Priority 5: Text content (keep it short and meaningful)
     const text = element.textContent?.trim();
-    if (text && text.length < 50) {
+    if (text && text.length > 0 && text.length < 50) {
       const cleanText = text.toLowerCase().replace(/[^a-z0-9]/g,'-').replace(/-+/g,'-').replace(/^-|-$/g,'');
-      if (cleanText) {
-        suggestions.push(cleanText);
-        suggestions.push(`${element.tagName.toLowerCase()}-${cleanText}`);
-        const parentText = element.parentElement?.textContent?.trim();
-        if (parentText && parentText !== text && parentText.length < 50) {
-          const parentClean = parentText.substring(0,20).toLowerCase().replace(/[^a-z0-9]/g,'-').replace(/-+/g,'-').replace(/^-|-$/g,'');
-          if (parentClean) suggestions.push(`${parentClean}-${cleanText}`);
-        }
+      if (cleanText && cleanText.length >= 3) {
+        suggestions.push(`${page}-${element.tagName.toLowerCase()}-${cleanText.substring(0,30)}`);
+        suggestions.push(`${element.tagName.toLowerCase()}-${cleanText.substring(0,30)}`);
       }
     }
-    for (const attr of Array.from(element.attributes)) {
-      if (attr.name.startsWith('data-')) {
-        const v = attr.value.toLowerCase().replace(/[^a-z0-9]/g,'-').replace(/-+/g,'-').replace(/^-|-$/g,'');
-        if (v) { suggestions.push(v); suggestions.push(`${element.tagName.toLowerCase()}-${v}`); }
-      }
-    }
+    
+    // Priority 6: role and type combinations
     const role = (element as HTMLElement).getAttribute('role');
     const type = (element as HTMLElement).getAttribute('type');
     if (role) {
-      suggestions.push(`${element.tagName.toLowerCase()}-${role}`);
-      if (text) suggestions.push(`${role}-${text.substring(0,15).toLowerCase().replace(/[^a-z0-9]/g,'-').replace(/-+/g,'-').replace(/^-|-$/g,'')}`);
+      suggestions.push(`${page}-${element.tagName.toLowerCase()}-${role}`);
+      if (text && text.length < 30) {
+        const cleanText = text.substring(0,15).toLowerCase().replace(/[^a-z0-9]/g,'-').replace(/-+/g,'-').replace(/^-|-$/g,'');
+        if (cleanText) suggestions.push(`${page}-${role}-${cleanText}`);
+      }
     }
     if (type) {
-      suggestions.push(`${element.tagName.toLowerCase()}-${type}`);
-      if (text) suggestions.push(`${type}-${text.substring(0,15).toLowerCase().replace(/[^a-z0-9]/g,'-').replace(/-+/g,'-').replace(/^-|-$/g,'')}`);
+      suggestions.push(`${page}-${element.tagName.toLowerCase()}-${type}`);
+      if (text && text.length < 30) {
+        const cleanText = text.substring(0,15).toLowerCase().replace(/[^a-z0-9]/g,'-').replace(/-+/g,'-').replace(/^-|-$/g,'');
+        if (cleanText) suggestions.push(`${page}-${type}-${cleanText}`);
+      }
     }
+    
+    // Priority 7: Classes (but be selective, avoid generic classes)
+    if ((element as HTMLElement).className && typeof (element as HTMLElement).className === 'string') {
+      const classes = (element as HTMLElement).className.trim().split(/\s+/)
+        .filter(c => c && c.length > 2 && !c.match(/^[a-z0-9_-]{8,}$/)) // Filter out generated classes
+        .slice(0, 2); // Only use first 2 meaningful classes
+      
+      if (classes.length > 0 && text && text.length < 30) {
+        const cleanText = text.toLowerCase().replace(/[^a-z0-9]/g,'-').replace(/-+/g,'-').replace(/^-|-$/g,'');
+        if (cleanText) {
+          suggestions.push(`${page}-${classes[0]}-${cleanText}`);
+        }
+      }
+    }
+    
+    // Fallback: position-based naming
     if (suggestions.length === 0) {
       const siblings = Array.from(element.parentElement?.children || []).filter(s => s.tagName === element.tagName);
-      suggestions.push(`${element.tagName.toLowerCase()}-${siblings.indexOf(element)+1}`);
+      const position = siblings.indexOf(element) + 1;
+      suggestions.push(`${page}-${element.tagName.toLowerCase()}-${position}`);
     }
-    return [...new Set(suggestions)].slice(0,8);
+    
+    // Ensure uniqueness and add timestamp as final fallback
+    const uniqueSuggestions = [...new Set(suggestions)].slice(0,5);
+    
+    // Add a timestamp-based suggestion as final fallback to guarantee uniqueness
+    uniqueSuggestions.push(`${page}-${element.tagName.toLowerCase()}-${Date.now()}`);
+    
+    return uniqueSuggestions;
   }
 
   private createRecordingIndicator() {
@@ -1840,7 +1887,6 @@ class DOMActionExecutor {
 
       this.currentPageName = pageName;
       await safeSendMessage({ type: 'PAGE_DECLARE', payload: { page: pageName, url: currentUrl, timestamp: Date.now() } });
-      showTemporaryNotification(' Page Context Set', `Recording on: ${pageName}`, '#2196f3', 2000);
   }
 
   // DOM extraction + AI suggestion helpers (unchanged except tiny comments)
@@ -1895,7 +1941,6 @@ class DOMActionExecutor {
           const allCandidates = discoverElements(500);
           const removeOverlay = showOverlay(allCandidates);
           setTimeout(() => { try { removeOverlay(); } catch {} }, 5000);        if (allCandidates.length === 0) {
-          showTemporaryNotification(' No Elements Found','No interactive elements discovered on this page','#f44336',3000);
           return;
         }
 
@@ -1976,7 +2021,6 @@ class DOMActionExecutor {
       const removeOverlay = showOverlay(allCandidates);
       setTimeout(() => { try { removeOverlay(); } catch {} }, 5000);
       if (allCandidates.length === 0) {
-        showTemporaryNotification(' No Elements Found','No interactive elements discovered on this page','#f44336',3000);
         return;
       }
       let storedCount = 0; const batchSize = 100; const totalBatches = Math.ceil(allCandidates.length / batchSize);
@@ -2097,6 +2141,8 @@ const checkForPageChange = () => {
   if (window.location.href !== lastUrl) {
     lastUrl = window.location.href;
     (domActionExecutor as any).currentPageName = null;
+    // Re-declare page name after navigation
+    (domActionExecutor as any).declareCurrentPage();
   }
 };
 setInterval(checkForPageChange, 1000);

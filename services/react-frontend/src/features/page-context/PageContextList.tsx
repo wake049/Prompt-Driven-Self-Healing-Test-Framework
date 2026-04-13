@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import styled from 'styled-components';
+import { spinKeyframes } from '../../shared/styles/keyframes';
 import { Search, Filter, Eye, Edit, Trash2, Plus, Image, Globe, Calendar } from 'lucide-react';
 import { PageContextAPI } from './api';
 
@@ -292,13 +293,8 @@ const LoadingSpinner = styled.div`
     border: 2px solid #e9ecef;
     border-top: 2px solid #007bff;
     border-radius: 50%;
-    animation: spin 1s linear infinite;
+    animation: ${spinKeyframes} 1s linear infinite;
     margin-right: 12px;
-  }
-  
-  @keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
   }
 `;
 
@@ -488,7 +484,7 @@ export const PageContextList: React.FC<PageContextListProps> = ({
       <div style={{ 
         padding: '20px', 
         textAlign: 'center', 
-        color: '#ef4444',
+        color: '#A32D2D',
         backgroundColor: '#fef2f2',
         border: '1px solid #fecaca',
         borderRadius: '8px',

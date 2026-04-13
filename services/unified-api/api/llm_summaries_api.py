@@ -9,12 +9,14 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 import json
 import asyncio
+import logging
 from core.database import get_database_manager, DatabaseManager
 from core.auth import get_current_active_user
 from models.auth_models import CurrentUser
 from pydantic import BaseModel
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 class ExecutionSummaryRequest(BaseModel):
     execution_id: str
@@ -537,4 +539,4 @@ async def store_summary_cache(execution_id: str, summary_text: str, insights: Li
             json.dumps(overview)
         )
     except Exception as e:
-        pass
+        logger.warning("Failed to persist execution summary for execution_id=%s: %s", execution_id, e)

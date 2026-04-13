@@ -100,7 +100,7 @@ interface PerformanceMetrics {
 // ================================
 const Container = styled.div`
   padding: 24px;
-  background: ${props => props.theme.colors.background};
+  background: #f8fafc;
   min-height: 100vh;
 `;
 
@@ -116,7 +116,7 @@ const HeaderContent = styled.div`
 `;
 
 const Title = styled.h1`
-  color: ${props => props.theme.colors.text};
+  color: #111827 !important;
   font-size: 28px;
   font-weight: 600;
   margin-bottom: 8px;
@@ -126,7 +126,7 @@ const Title = styled.h1`
 `;
 
 const Subtitle = styled.p`
-  color: ${props => props.theme.colors.textSecondary};
+  color: #6b7280 !important;
   font-size: 16px;
   margin: 0;
 `;
@@ -138,22 +138,22 @@ const ControlsSection = styled.div`
 `;
 
 const TimeRangeSelector = styled.select`
-  background: ${props => props.theme.colors.surface};
-  border: 1px solid ${props => props.theme.colors.border};
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
   border-radius: 8px;
   padding: 8px 12px;
-  color: ${props => props.theme.colors.text};
+  color: #111827 !important;
   font-size: 14px;
   cursor: pointer;
   
   &:focus {
     outline: none;
-    border-color: ${props => props.theme.colors.primary};
+    border-color: #3b82f6;
   }
 `;
 
 const RefreshButton = styled.button`
-  background: ${props => props.theme.colors.primary};
+  background: #3b82f6;
   color: white;
   border: none;
   border-radius: 8px;
@@ -167,7 +167,7 @@ const RefreshButton = styled.button`
   transition: all 0.2s ease;
   
   &:hover {
-    background: ${props => props.theme.colors.primary}dd;
+    background: #3b82f6dd;
   }
   
   &:disabled {
@@ -191,10 +191,10 @@ const SummaryGrid = styled.div`
 `;
 
 const Card = styled.div`
-  background: ${props => props.theme.colors.surface};
+  background: #ffffff;
   border-radius: 12px;
   padding: 24px;
-  border: 1px solid ${props => props.theme.colors.border};
+  border: 1px solid #e5e7eb;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
 `;
 
@@ -205,13 +205,13 @@ const MetricCard = styled(Card)`
 const MetricValue = styled.div`
   font-size: 28px;
   font-weight: 700;
-  color: ${props => props.theme.colors.text};
+  color: #111827 !important;
   margin-bottom: 8px;
 `;
 
 const MetricLabel = styled.div`
   font-size: 12px;
-  color: ${props => props.theme.colors.textSecondary};
+  color: #6b7280 !important;
   text-transform: uppercase;
   letter-spacing: 0.5px;
 `;
@@ -222,11 +222,11 @@ const CardHeader = styled.div`
   gap: 12px;
   margin-bottom: 20px;
   padding-bottom: 16px;
-  border-bottom: 1px solid ${props => props.theme.colors.border};
+  border-bottom: 1px solid #e5e7eb;
 `;
 
 const CardTitle = styled.h3`
-  color: ${props => props.theme.colors.text};
+  color: #111827 !important;
   font-size: 18px;
   font-weight: 600;
   margin: 0;
@@ -240,8 +240,8 @@ const IconContainer = styled.div<{ $color?: string }>`
   width: 32px;
   height: 32px;
   border-radius: 8px;
-  background: ${props => props.$color || props.theme.colors.primary}20;
-  color: ${props => props.$color || props.theme.colors.primary};
+  background: ${props => props.$color || '#3b82f6'}20;
+  color: ${props => props.$color || '#3b82f6'};
 `;
 
 const StatusBadge = styled.span<{ $status: 'success' | 'warning' | 'error' | 'info' }>`
@@ -257,8 +257,8 @@ const StatusBadge = styled.span<{ $status: 'success' | 'warning' | 'error' | 'in
     switch (props.$status) {
       case 'success':
         return `
-          background: #10b98120;
-          color: #10b981;
+          background: #1D9E7520;
+          color: #1D9E75;
         `;
       case 'warning':
         return `
@@ -267,13 +267,13 @@ const StatusBadge = styled.span<{ $status: 'success' | 'warning' | 'error' | 'in
         `;
       case 'error':
         return `
-          background: #ef444420;
-          color: #ef4444;
+          background: #A32D2D20;
+          color: #A32D2D;
         `;
       default:
         return `
-          background: ${props.theme.colors.primary}20;
-          color: ${props.theme.colors.primary};
+          background: #3b82f620;
+          color: #3b82f6;
         `;
     }
   }}
@@ -282,7 +282,7 @@ const StatusBadge = styled.span<{ $status: 'success' | 'warning' | 'error' | 'in
 const ProgressBar = styled.div<{ $percentage: number; $color?: string }>`
   width: 100%;
   height: 8px;
-  background: ${props => props.theme.colors.border};
+  background: #e5e7eb;
   border-radius: 4px;
   overflow: hidden;
   margin: 8px 0;
@@ -292,7 +292,7 @@ const ProgressBar = styled.div<{ $percentage: number; $color?: string }>`
     display: block;
     height: 100%;
     width: ${props => props.$percentage}%;
-    background: ${props => props.$color || props.theme.colors.primary};
+    background: ${props => props.$color || '#3b82f6'};
     transition: width 0.3s ease;
   }
 `;
@@ -307,14 +307,14 @@ const TrendChart = styled.div`
 
 const TrendBar = styled.div<{ $height: number; $color?: string }>`
   flex: 1;
-  background: ${props => props.$color || props.theme.colors.primary}40;
+  background: ${props => props.$color || '#3b82f6'}40;
   border-radius: 2px 2px 0 0;
   height: ${props => props.$height}%;
   min-height: 2px;
   transition: all 0.2s ease;
   
   &:hover {
-    background: ${props => props.$color || props.theme.colors.primary};
+    background: ${props => props.$color || '#3b82f6'};
   }
 `;
 
@@ -323,7 +323,7 @@ const MetricRow = styled.div`
   justify-content: space-between;
   align-items: center;
   padding: 8px 0;
-  border-bottom: 1px solid ${props => props.theme.colors.border}40;
+  border-bottom: 1px solid #e5e7eb40;
   
   &:last-child {
     border-bottom: none;
@@ -331,12 +331,12 @@ const MetricRow = styled.div`
 `;
 
 const MetricName = styled.span`
-  color: ${props => props.theme.colors.textSecondary};
+  color: #6b7280 !important;
   font-size: 14px;
 `;
 
 const MetricValueSmall = styled.span`
-  color: ${props => props.theme.colors.text};
+  color: #111827 !important;
   font-weight: 500;
   font-size: 14px;
 `;
@@ -352,9 +352,9 @@ const AlertItem = styled.div`
   align-items: flex-start;
   gap: 12px;
   padding: 12px;
-  background: ${props => props.theme.colors.background};
+  background: #f8fafc;
   border-radius: 8px;
-  border-left: 3px solid ${props => props.theme.colors.primary};
+  border-left: 3px solid #3b82f6;
 `;
 
 const AlertContent = styled.div`
@@ -362,14 +362,14 @@ const AlertContent = styled.div`
 `;
 
 const AlertTitle = styled.div`
-  color: ${props => props.theme.colors.text};
+  color: #111827 !important;
   font-weight: 500;
   font-size: 14px;
   margin-bottom: 4px;
 `;
 
 const AlertDescription = styled.div`
-  color: ${props => props.theme.colors.textSecondary};
+  color: #6b7280 !important;
   font-size: 12px;
   line-height: 1.4;
 `;
@@ -381,16 +381,16 @@ const LoadingState = styled.div`
   flex-direction: column;
   gap: 16px;
   padding: 60px 20px;
-  color: ${props => props.theme.colors.textSecondary};
+  color: #6b7280 !important;
   font-size: 16px;
 `;
 
 const ErrorState = styled.div`
-  background: #ef444420;
-  color: #ef4444;
+  background: #A32D2D20;
+  color: #A32D2D;
   padding: 16px;
   border-radius: 8px;
-  border: 1px solid #ef444440;
+  border: 1px solid #A32D2D40;
   margin-bottom: 24px;
   display: flex;
   align-items: center;
@@ -654,7 +654,7 @@ const EnhancedAIInsightsDashboard: React.FC = () => {
         {/* Self-Healing Analytics */}
         <Card>
           <CardHeader>
-            <IconContainer $color="#10b981">
+            <IconContainer $color="#1D9E75">
               <Heart size={18} />
             </IconContainer>
             <CardTitle>Self-Healing Analytics</CardTitle>
@@ -682,7 +682,7 @@ const EnhancedAIInsightsDashboard: React.FC = () => {
               
               <ProgressBar 
                 $percentage={healingMetrics.success_rate} 
-                $color="#10b981"
+                $color="#1D9E75"
               />
               
               {healingMetrics.trend_data.length > 0 && (
@@ -691,7 +691,7 @@ const EnhancedAIInsightsDashboard: React.FC = () => {
                     <TrendBar 
                       key={index}
                       $height={(point.successful / Math.max(point.attempts, 1)) * 100}
-                      $color="#10b981"
+                      $color="#1D9E75"
                     />
                   ))}
                 </TrendChart>
@@ -720,7 +720,7 @@ const EnhancedAIInsightsDashboard: React.FC = () => {
             <AlertsList>
               {driftAnalyses.slice(0, 3).map((drift, index) => (
                 <AlertItem key={index}>
-                  <IconContainer $color={drift.drift_score > 0.7 ? '#ef4444' : drift.drift_score > 0.4 ? '#f59e0b' : '#10b981'}>
+                  <IconContainer $color={drift.drift_score > 0.7 ? '#A32D2D' : drift.drift_score > 0.4 ? '#f59e0b' : '#1D9E75'}>
                     <AlertTriangle size={14} />
                   </IconContainer>
                   <AlertContent>
@@ -750,7 +750,7 @@ const EnhancedAIInsightsDashboard: React.FC = () => {
         {/* Flaky Test Detection */}
         <Card>
           <CardHeader>
-            <IconContainer $color="#ef4444">
+            <IconContainer $color="#A32D2D">
               <Activity size={18} />
             </IconContainer>
             <CardTitle>Flaky Test Detection</CardTitle>
@@ -763,7 +763,7 @@ const EnhancedAIInsightsDashboard: React.FC = () => {
             <AlertsList>
               {flakinessPredictions.slice(0, 3).map((test, index) => (
                 <AlertItem key={index}>
-                  <IconContainer $color={test.flakiness_score > 0.6 ? '#ef4444' : '#f59e0b'}>
+                  <IconContainer $color={test.flakiness_score > 0.6 ? '#A32D2D' : '#f59e0b'}>
                     <AlertCircle size={14} />
                   </IconContainer>
                   <AlertContent>
@@ -784,7 +784,7 @@ const EnhancedAIInsightsDashboard: React.FC = () => {
               )}
             </AlertsList>
           ) : (
-            <div style={{ textAlign: 'center', padding: '20px', color: '#10b981' }}>
+            <div style={{ textAlign: 'center', padding: '20px', color: '#1D9E75' }}>
               ✓ No flaky tests detected
             </div>
           )}
@@ -839,7 +839,7 @@ const EnhancedAIInsightsDashboard: React.FC = () => {
         {/* Critical Alerts */}
         <Card>
           <CardHeader>
-            <IconContainer $color="#ef4444">
+            <IconContainer $color="#A32D2D">
               <AlertTriangle size={18} />
             </IconContainer>
             <CardTitle>Critical Alerts</CardTitle>
@@ -851,7 +851,7 @@ const EnhancedAIInsightsDashboard: React.FC = () => {
           <AlertsList>
             {insights.filter(i => i.severity === 'critical').slice(0, 3).map((insight, index) => (
               <AlertItem key={index}>
-                <IconContainer $color="#ef4444">
+                <IconContainer $color="#A32D2D">
                   <AlertTriangle size={14} />
                 </IconContainer>
                 <AlertContent>
@@ -862,7 +862,7 @@ const EnhancedAIInsightsDashboard: React.FC = () => {
             ))}
             
             {(!insights.length || !insights.some(i => i.severity === 'critical')) && (
-              <div style={{ textAlign: 'center', padding: '20px', color: '#10b981' }}>
+              <div style={{ textAlign: 'center', padding: '20px', color: '#1D9E75' }}>
                 ✓ No critical alerts
               </div>
             )}
@@ -926,12 +926,13 @@ const EnhancedAIInsightsDashboard: React.FC = () => {
                   style={{
                     padding: '20px',
                     border: `2px solid ${
-                      insight.severity === 'critical' ? '#ef4444' :
+                      insight.severity === 'critical' ? '#A32D2D' :
                       insight.severity === 'high' ? '#f59e0b' :
-                      insight.severity === 'medium' ? '#3b82f6' : '#10b981'
+                      insight.severity === 'medium' ? '#3b82f6' : '#1D9E75'
                     }`,
                     borderRadius: '12px',
-                    backgroundColor: 'rgba(255, 255, 255, 0.02)',
+                    backgroundColor: '#f8fafc',
+                    color: '#111827',
                   }}
                 >
                   <div style={{ 
@@ -941,9 +942,9 @@ const EnhancedAIInsightsDashboard: React.FC = () => {
                     marginBottom: '12px'
                   }}>
                     <IconContainer $color={
-                      insight.severity === 'critical' ? '#ef4444' :
+                      insight.severity === 'critical' ? '#A32D2D' :
                       insight.severity === 'high' ? '#f59e0b' :
-                      insight.severity === 'medium' ? '#3b82f6' : '#10b981'
+                      insight.severity === 'medium' ? '#3b82f6' : '#1D9E75'
                     }>
                       {insight.severity === 'critical' ? <AlertTriangle size={16} /> :
                        insight.severity === 'high' ? <AlertCircle size={16} /> :
@@ -961,24 +962,24 @@ const EnhancedAIInsightsDashboard: React.FC = () => {
                           margin: 0, 
                           fontSize: '18px', 
                           fontWeight: '600',
-                          color: '#ffffff',
+                          color: '#111827',
                           lineHeight: '1.3'
                         }}>
                           {insight.title}
                         </h3>
                         <span style={{ 
                           fontSize: '12px', 
-                          color: insight.severity === 'critical' ? '#ef4444' :
+                          color: insight.severity === 'critical' ? '#A32D2D' :
                                  insight.severity === 'high' ? '#f59e0b' :
-                                 insight.severity === 'medium' ? '#3b82f6' : '#10b981',
+                                 insight.severity === 'medium' ? '#3b82f6' : '#1D9E75',
                           textTransform: 'uppercase',
                           fontWeight: '700',
                           padding: '4px 8px',
                           borderRadius: '6px',
                           backgroundColor: `${
-                            insight.severity === 'critical' ? '#ef4444' :
+                            insight.severity === 'critical' ? '#A32D2D' :
                             insight.severity === 'high' ? '#f59e0b' :
-                            insight.severity === 'medium' ? '#3b82f6' : '#10b981'
+                            insight.severity === 'medium' ? '#3b82f6' : '#1D9E75'
                           }20`
                         }}>
                           {insight.severity}
@@ -988,7 +989,7 @@ const EnhancedAIInsightsDashboard: React.FC = () => {
                         margin: 0, 
                         fontSize: '14px', 
                         lineHeight: '1.5',
-                        color: '#d1d5db'
+                        color: '#374151'
                       }}>
                         {insight.description}
                       </p>
@@ -1001,14 +1002,14 @@ const EnhancedAIInsightsDashboard: React.FC = () => {
                         margin: '0 0 8px 0', 
                         fontSize: '14px', 
                         fontWeight: '600',
-                        color: '#ffffff'
+                        color: '#111827'
                       }}>
                         Recommendations:
                       </h4>
                       <ul style={{ 
                         margin: 0, 
                         padding: '0 0 0 20px',
-                        color: '#d1d5db',
+                        color: '#374151',
                         fontSize: '13px',
                         lineHeight: '1.4'
                       }}>
@@ -1025,14 +1026,14 @@ const EnhancedAIInsightsDashboard: React.FC = () => {
                         margin: '0 0 8px 0', 
                         fontSize: '14px', 
                         fontWeight: '600',
-                        color: '#ffffff'
+                        color: '#111827'
                       }}>
                         Evidence:
                       </h4>
                       <ul style={{ 
                         margin: 0, 
                         padding: '0 0 0 20px',
-                        color: '#9ca3af',
+                        color: '#4b5563',
                         fontSize: '13px',
                         lineHeight: '1.4'
                       }}>

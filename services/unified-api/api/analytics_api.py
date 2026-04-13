@@ -3,50 +3,60 @@ Analytics API Router for M8 Dashboard Components
 Provides endpoints for healing analytics, trends, failure patterns, and AI insights
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from typing import List, Dict, Any
 from datetime import datetime, timedelta
 import asyncio
+import logging
+
+from core.auth import get_current_active_user
+from models.auth_models import CurrentUser
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 @router.get("/healing-analytics")
-async def get_healing_analytics(days: int = 30):
+async def get_healing_analytics(days: int = 30, current_user: CurrentUser = Depends(get_current_active_user)):
     """Get healing success analytics for the dashboard using real execution data"""
     try:
         from core.database import get_database
         db = await get_database()
         
+        # Build project filter
+        project_filter = ""
+        query_params = [days]
+        if current_user.project and current_user.project.id:
+            project_filter = "AND r.project_id = $2"
+            query_params.append(str(current_user.project.id))
+        
         # Get real healing data from exec.runs and step_results
         healing_stats = await db.fetchrow(
-            """
+            f"""
             SELECT 
                 COUNT(*) as total_attempts,
-                -- Count successful healing (runs that completed despite initial failures)
                 COUNT(CASE WHEN r.status = 'completed' AND 
                       EXISTS(SELECT 1 FROM exec.step_results sr WHERE sr.test_run_id = r.id AND sr.status = 'failed')
                       THEN 1 END) as successful_healing,
-                -- Count partial healing (some steps passed, some failed)
                 COUNT(CASE WHEN r.status IN ('completed', 'partial') AND 
                       EXISTS(SELECT 1 FROM exec.step_results sr WHERE sr.test_run_id = r.id AND sr.status = 'failed') AND
                       EXISTS(SELECT 1 FROM exec.step_results sr WHERE sr.test_run_id = r.id AND sr.status = 'passed')
                       THEN 1 END) as partial_healing,
-                -- Count failed healing (runs that failed completely)
                 COUNT(CASE WHEN r.status = 'failed' THEN 1 END) as failed_healing,
-                -- Average healing time for successful attempts
                 AVG(CASE 
                     WHEN r.status = 'completed' AND r.finished_at IS NOT NULL AND r.started_at IS NOT NULL
                     THEN EXTRACT(EPOCH FROM (r.finished_at - r.started_at)) * 1000 
                     ELSE NULL 
                 END) as avg_healing_time
             FROM exec.runs r
-            WHERE r.created_at >= CURRENT_DATE - INTERVAL '%s days'
-            """ % days
+            WHERE r.created_at >= CURRENT_DATE - INTERVAL '1 day' * $1
+            {project_filter}
+            """, *query_params
         )
         
         # Get daily trend data for healing attempts
         trend_data = await db.fetch(
-            """
+            f"""
             SELECT 
                 DATE(r.created_at) as date,
                 COUNT(*) as attempts,
@@ -59,15 +69,16 @@ async def get_healing_analytics(days: int = 30):
                       THEN 1 END) as partial,
                 COUNT(CASE WHEN r.status = 'failed' THEN 1 END) as failed
             FROM exec.runs r
-            WHERE r.created_at >= CURRENT_DATE - INTERVAL '%s days'
+            WHERE r.created_at >= CURRENT_DATE - INTERVAL '1 day' * $1
+            {project_filter}
             GROUP BY DATE(r.created_at)
             ORDER BY DATE(r.created_at) ASC
-            """ % days
+            """, *query_params
         )
         
         # Get detailed healing attempts with step-level analysis
         healing_details = await db.fetch(
-            """
+            f"""
             SELECT 
                 r.id,
                 r.created_at,
@@ -78,21 +89,21 @@ async def get_healing_analytics(days: int = 30):
                 (SELECT COUNT(*) FROM exec.step_results sr WHERE sr.test_run_id = r.id) as total_steps,
                 (SELECT COUNT(*) FROM exec.step_results sr WHERE sr.test_run_id = r.id AND sr.status = 'passed') as passed_steps,
                 (SELECT COUNT(*) FROM exec.step_results sr WHERE sr.test_run_id = r.id AND sr.status = 'failed') as failed_steps,
-                -- Get failed step details
                 (SELECT JSON_AGG(
                     JSON_BUILD_OBJECT(
                         'step_order', sr.step_order,
-                        'action', sr.action,
-                        'target', sr.target,
-                        'error_message', sr.error_message
+                        'action', sr.action_data->>'action',
+                        'target', sr.action_data->>'selector',
+                        'error_message', sr.error_details->>'message'
                     )
                 ) FROM exec.step_results sr WHERE sr.test_run_id = r.id AND sr.status = 'failed') as failed_step_details
             FROM exec.runs r
             LEFT JOIN tests.test_cases tc ON r.test_case_id = tc.id
-            WHERE r.created_at >= CURRENT_DATE - INTERVAL '%s days'
+            WHERE r.created_at >= CURRENT_DATE - INTERVAL '1 day' * $1
+            {project_filter}
             ORDER BY r.created_at DESC
             LIMIT 50
-            """ % days
+            """, *query_params
         )
         
         # Calculate success rate and other metrics
@@ -170,13 +181,13 @@ async def get_healing_analytics(days: int = 30):
         }
 
 @router.get("/trends")
-async def get_analytics_trends(timeRange: str = "24h"):
+async def get_analytics_trends(timeRange: str = "24h", current_user: CurrentUser = Depends(get_current_active_user)):
     """Get performance trends for analytics dashboard using real execution data"""
     try:
         from core.database import get_database
         db = await get_database()
         
-        # Convert timeRange to appropriate interval
+        # Convert timeRange to appropriate interval (whitelist valid values)
         interval_map = {
             "1h": "1 hour", 
             "24h": "1 day", 
@@ -185,30 +196,39 @@ async def get_analytics_trends(timeRange: str = "24h"):
         }
         interval = interval_map.get(timeRange, "1 day")
         
+        # Build project filter
+        project_filter = ""
+        project_filter_step = ""
+        if current_user.project and current_user.project.id:
+            project_id = str(current_user.project.id)
+            project_filter = f"AND r.project_id = '{project_id}'"
+            project_filter_step = f"AND r.project_id = '{project_id}'"
+        
         # Get comprehensive execution metrics with corrected time filtering
         metrics_result = await db.fetchrow(
-            """
+            f"""
             SELECT 
                 COUNT(*) as total_executions,
-                COUNT(CASE WHEN status = 'completed' THEN 1 END) as successful_executions,
-                COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed_executions,
-                COUNT(CASE WHEN status = 'running' THEN 1 END) as running_executions,
-                AVG(CASE WHEN finished_at IS NOT NULL THEN 
-                    EXTRACT(EPOCH FROM (finished_at - started_at)) 
+                COUNT(CASE WHEN r.status = 'completed' THEN 1 END) as successful_executions,
+                COUNT(CASE WHEN r.status = 'failed' THEN 1 END) as failed_executions,
+                COUNT(CASE WHEN r.status = 'running' THEN 1 END) as running_executions,
+                AVG(CASE WHEN r.finished_at IS NOT NULL THEN 
+                    EXTRACT(EPOCH FROM (r.finished_at - r.started_at)) 
                 END) * 1000 as avg_execution_time,
                 PERCENTILE_CONT(0.95) WITHIN GROUP (
-                    ORDER BY CASE WHEN finished_at IS NOT NULL THEN 
-                        EXTRACT(EPOCH FROM (finished_at - started_at)) 
+                    ORDER BY CASE WHEN r.finished_at IS NOT NULL THEN 
+                        EXTRACT(EPOCH FROM (r.finished_at - r.started_at)) 
                     END
                 ) * 1000 as p95_execution_time
-            FROM exec.runs 
-            WHERE started_at >= NOW() - INTERVAL '%s'
-            """ % interval
+            FROM exec.runs r
+            WHERE r.started_at >= NOW() - INTERVAL '{interval}'
+            {project_filter}
+            """
         )
         
         # Get step-level success metrics
         step_metrics = await db.fetchrow(
-            """
+            f"""
             SELECT 
                 COUNT(*) as total_steps,
                 COUNT(CASE WHEN sr.status = 'passed' THEN 1 END) as passed_steps,
@@ -216,23 +236,26 @@ async def get_analytics_trends(timeRange: str = "24h"):
                 COUNT(DISTINCT r.id) as executions_with_steps
             FROM exec.step_results sr
             JOIN exec.runs r ON sr.test_run_id = r.id
-            WHERE r.started_at >= NOW() - INTERVAL '%s'
-            """ % interval
+            WHERE r.started_at >= NOW() - INTERVAL '{interval}'
+            {project_filter_step}
+            """
         )
         
         # Get time-series data for trends (hourly or daily buckets)
         bucket_interval = "1 hour" if timeRange in ["1h", "24h"] else "1 day"
+        bucket_unit = bucket_interval.split()[1]
         trends_query = f"""
             SELECT 
-                DATE_TRUNC('{bucket_interval.split()[1]}', started_at) as time_bucket,
+                DATE_TRUNC('{bucket_unit}', r.started_at) as time_bucket,
                 COUNT(*) as total_runs,
-                COUNT(CASE WHEN status = 'completed' THEN 1 END) as successful_runs,
-                COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed_runs,
-                AVG(CASE WHEN finished_at IS NOT NULL THEN 
-                    EXTRACT(EPOCH FROM (finished_at - started_at)) 
+                COUNT(CASE WHEN r.status = 'completed' THEN 1 END) as successful_runs,
+                COUNT(CASE WHEN r.status = 'failed' THEN 1 END) as failed_runs,
+                AVG(CASE WHEN r.finished_at IS NOT NULL THEN 
+                    EXTRACT(EPOCH FROM (r.finished_at - r.started_at)) 
                 END) as avg_duration_seconds
-            FROM exec.runs 
-            WHERE started_at >= NOW() - INTERVAL '{interval}'
+            FROM exec.runs r
+            WHERE r.started_at >= NOW() - INTERVAL '{interval}'
+            {project_filter}
             GROUP BY time_bucket
             ORDER BY time_bucket
         """
@@ -307,26 +330,25 @@ async def get_analytics_trends(timeRange: str = "24h"):
         }
 
 def _calculate_trend_change(current_value: float, time_range: str) -> float:
-    """Calculate a mock trend change percentage"""
-    # In a real implementation, this would compare with previous period
+    """Estimate trend direction from current value (heuristic until historical comparison is implemented)"""
     if current_value > 90:
-        return 2.5  # Good performance, slight improvement
+        return 2.5
     elif current_value < 70:
-        return -8.0  # Poor performance, declining
+        return -8.0
     else:
-        return 1.2  # Moderate performance, slight improvement
+        return 1.2
 
 def _calculate_performance_trend(avg_time: float) -> float:
-    """Calculate performance trend based on execution time"""
+    """Estimate performance trend from average execution time (heuristic)"""
     if avg_time < 3000:
-        return 3.0  # Fast execution, improving
+        return 3.0
     elif avg_time > 10000:
-        return -12.0  # Slow execution, degrading
+        return -12.0
     else:
-        return -1.5  # Moderate performance
+        return -1.5
 
 @router.get("/failure-patterns")
-async def get_failure_patterns(timeRange: str = "24h"):
+async def get_failure_patterns(timeRange: str = "24h", current_user: CurrentUser = Depends(get_current_active_user)):
     """Get failure pattern analysis for analytics dashboard using real step failure data"""
     try:
         from core.database import get_database
@@ -336,16 +358,22 @@ async def get_failure_patterns(timeRange: str = "24h"):
         days_map = {"1h": 1, "24h": 1, "7d": 7, "30d": 30}
         days = days_map.get(timeRange, 1)
         
+        # Build project filter params
+        query_params = [days]
+        project_filter = ""
+        if current_user.project and current_user.project.id:
+            project_filter = "AND r.project_id = $2"
+            query_params.append(str(current_user.project.id))
+        
         # Get step failure patterns
         failure_patterns = await db.fetch(
-            """
+            f"""
             SELECT 
-                sr.action as error_type,
+                sr.action_data->>'action' as error_type,
                 COUNT(*) as frequency,
                 STRING_AGG(DISTINCT COALESCE(tc.title, 'Unknown Test'), ', ' ORDER BY COALESCE(tc.title, 'Unknown Test')) as affected_tests,
-                ARRAY_AGG(DISTINCT sr.target) FILTER (WHERE sr.target IS NOT NULL) as affected_selectors,
-                STRING_AGG(DISTINCT COALESCE(sr.error_message, 'No error message'), ' | ' ORDER BY COALESCE(sr.error_message, 'No error message')) as error_messages,
-                -- Get trend data (count failures per day)
+                ARRAY_AGG(DISTINCT sr.action_data->>'selector') FILTER (WHERE sr.action_data->>'selector' IS NOT NULL) as affected_selectors,
+                STRING_AGG(DISTINCT COALESCE(sr.error_details->>'message', 'No error message'), ' | ' ORDER BY COALESCE(sr.error_details->>'message', 'No error message')) as error_messages,
                 ARRAY_AGG(
                     JSON_BUILD_OBJECT(
                         'date', DATE(r.created_at)::text,
@@ -357,36 +385,38 @@ async def get_failure_patterns(timeRange: str = "24h"):
             LEFT JOIN tests.test_cases tc ON r.test_case_id = tc.id
             WHERE sr.status = 'failed'
             AND r.created_at >= CURRENT_DATE - INTERVAL '1 day' * $1
-            GROUP BY sr.action
-            HAVING COUNT(*) >= 2  -- Only patterns with at least 2 occurrences
+            {project_filter}
+            GROUP BY sr.action_data->>'action'
+            HAVING COUNT(*) >= 2
             ORDER BY frequency DESC
             LIMIT 10
-            """, days
+            """, *query_params
         )
         
         # Get error message patterns
         error_message_patterns = await db.fetch(
-            """
+            f"""
             SELECT 
                 CASE 
-                    WHEN sr.error_message ILIKE '%not found%' OR sr.error_message ILIKE '%no such element%' THEN 'Element Not Found'
-                    WHEN sr.error_message ILIKE '%timeout%' OR sr.error_message ILIKE '%wait%' THEN 'Timeout Error'
-                    WHEN sr.error_message ILIKE '%stale%' OR sr.error_message ILIKE '%reference%' THEN 'Stale Element Reference'
-                    WHEN sr.error_message ILIKE '%click%' OR sr.error_message ILIKE '%clickable%' THEN 'Click Intercepted'
-                    WHEN sr.error_message IS NULL OR sr.error_message = '' THEN 'Unknown Error'
+                    WHEN sr.error_details->>'message' ILIKE '%not found%' OR sr.error_details->>'message' ILIKE '%no such element%' THEN 'Element Not Found'
+                    WHEN sr.error_details->>'message' ILIKE '%timeout%' OR sr.error_details->>'message' ILIKE '%wait%' THEN 'Timeout Error'
+                    WHEN sr.error_details->>'message' ILIKE '%stale%' OR sr.error_details->>'message' ILIKE '%reference%' THEN 'Stale Element Reference'
+                    WHEN sr.error_details->>'message' ILIKE '%click%' OR sr.error_details->>'message' ILIKE '%clickable%' THEN 'Click Intercepted'
+                    WHEN sr.error_details IS NULL OR sr.error_details->>'message' IS NULL OR sr.error_details->>'message' = '' THEN 'Unknown Error'
                     ELSE 'Other Error'
                 END as error_category,
                 COUNT(*) as frequency,
-                ARRAY_AGG(DISTINCT sr.action) as affected_actions,
+                ARRAY_AGG(DISTINCT sr.action_data->>'action') as affected_actions,
                 STRING_AGG(DISTINCT COALESCE(tc.title, 'Unknown Test'), ', ' ORDER BY COALESCE(tc.title, 'Unknown Test')) as affected_tests
             FROM exec.step_results sr
             JOIN exec.runs r ON sr.test_run_id = r.id
             LEFT JOIN tests.test_cases tc ON r.test_case_id = tc.id
             WHERE sr.status = 'failed'
             AND r.created_at >= CURRENT_DATE - INTERVAL '1 day' * $1
+            {project_filter}
             GROUP BY error_category
             ORDER BY frequency DESC
-            """, days
+            """, *query_params
         )
         
         patterns = []
@@ -478,7 +508,7 @@ async def get_failure_patterns(timeRange: str = "24h"):
         }
 
 @router.get("/ai-insights")
-async def get_ai_insights():
+async def get_ai_insights(current_user: CurrentUser = Depends(get_current_active_user)):
     """Get AI-powered insights for the dashboard using OpenAI analysis"""
     try:
         from core.database import get_database
@@ -487,9 +517,17 @@ async def get_ai_insights():
         
         db = await get_database()
         
+        # Build project filter
+        project_filter = ""
+        project_filter_step = ""
+        if current_user.project and current_user.project.id:
+            project_id = str(current_user.project.id)
+            project_filter = f"AND r.project_id = '{project_id}'"
+            project_filter_step = f"AND r.project_id = '{project_id}'"
+        
         # Get real data for AI analysis
         execution_summary = await db.fetchrow(
-            """
+            f"""
             SELECT 
                 COUNT(*) as total_runs,
                 COUNT(CASE WHEN status = 'completed' THEN 1 END) as successful_runs,
@@ -497,29 +535,37 @@ async def get_ai_insights():
                 AVG(CASE WHEN finished_at IS NOT NULL THEN 
                     EXTRACT(EPOCH FROM (finished_at - started_at)) 
                 END) as avg_duration_seconds
-            FROM exec.runs 
-            WHERE started_at >= NOW() - INTERVAL '7 days'
+            FROM exec.runs r
+            WHERE r.started_at >= NOW() - INTERVAL '7 days'
+            {project_filter}
             """
         )
         
         # Get step failure patterns
         step_failures = await db.fetch(
-            """
+            f"""
             SELECT 
-                sr.action,
-                sr.target,
-                sr.error_message,
+                sr.action_data->>'action' as action,
+                sr.action_data->>'selector' as target,
+                sr.error_details->>'message' as error_message,
                 COUNT(*) as failure_count
             FROM exec.step_results sr
             JOIN exec.runs r ON sr.test_run_id = r.id
             WHERE r.started_at >= NOW() - INTERVAL '7 days'
             AND sr.status = 'failed'
-            GROUP BY sr.action, sr.target, sr.error_message
+            {project_filter_step}
+            GROUP BY sr.action_data->>'action', sr.action_data->>'selector', sr.error_details->>'message'
             ORDER BY failure_count DESC
             LIMIT 10
             """
         )
         
+        # Pre-compute metrics used by both OpenAI and fallback paths
+        insights = []
+        total_runs = execution_summary['total_runs'] or 0
+        success_rate = (execution_summary['successful_runs'] / total_runs * 100) if total_runs > 0 else 0.0
+        avg_duration = execution_summary['avg_duration_seconds'] or 0
+
         # Try to get OpenAI insights
         try:
             # Check if OpenAI is available
@@ -628,15 +674,12 @@ Provide 2-3 intelligent insights with specific recommendations for improving thi
                     }
                 }
 
-        except Exception as openai_error:  # Fallback: Generate intelligent insights without OpenAI
-            insights = []
+        except Exception:  # OpenAI failed or unavailable — fall through to rule-based insights below
+            pass
 
-            # Insight 1: Success Rate Analysis
-            total_runs = execution_summary['total_runs'] or 0
-            if total_runs > 0:
-                success_rate = (execution_summary['successful_runs'] / total_runs * 100)
-            
-            if success_rate < 80:
+        # Fallback / supplement: rule-based insights (runs when OpenAI didn't return early)
+        # Insight 1: Success Rate Analysis
+        if success_rate < 80:
                 insights.append({
                     "id": f"success_rate_{int(datetime.now().timestamp())}",
                     "title": "Low Success Rate Detected",
@@ -659,7 +702,7 @@ Provide 2-3 intelligent insights with specific recommendations for improving thi
                     "predicted_impact": "Continued low success rate will impact CI/CD reliability",
                     "created_at": datetime.now().isoformat()
                 })
-            elif success_rate > 95:
+        elif success_rate > 95:
                 insights.append({
                     "id": f"success_rate_{int(datetime.now().timestamp())}",
                     "title": "Excellent Test Stability",
@@ -683,7 +726,6 @@ Provide 2-3 intelligent insights with specific recommendations for improving thi
                 })
         
         # Insight 2: Performance Analysis
-        avg_duration = execution_summary['avg_duration_seconds'] or 0
         if avg_duration > 30:
             insights.append({
                 "id": f"performance_{int(datetime.now().timestamp())}",

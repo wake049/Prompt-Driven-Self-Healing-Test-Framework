@@ -1,5 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import styled from 'styled-components';
+import { spinKeyframes } from '../../shared/styles/keyframes';
 import { Upload, Image, FileText, Plus, X, AlertCircle, CheckCircle } from 'lucide-react';
 
 // ================================
@@ -341,12 +342,7 @@ const LoadingSpinner = styled.div`
   border: 2px solid transparent;
   border-top: 2px solid currentColor;
   border-radius: 50%;
-  animation: spin 1s linear infinite;
-  
-  @keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
-  }
+  animation: ${spinKeyframes} 1s linear infinite;
 `;
 
 // ================================

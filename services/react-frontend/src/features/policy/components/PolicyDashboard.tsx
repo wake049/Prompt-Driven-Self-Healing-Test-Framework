@@ -3,16 +3,20 @@
  * Real-time visualization of policy execution and outcomes
  */
 import React, { useState, useEffect, useCallback } from 'react';
-import styled, { ThemeProvider, keyframes } from 'styled-components';
+import styled, { ThemeProvider } from 'styled-components';
+import { pulseKeyframes, spinKeyframes } from '../../../shared/styles/keyframes';
 import { useTheme } from '../../../contexts/ThemeContext';
 import mcpPolicyApiClient from '../../../shared/utils/mcpPolicyApiClient';
 import unifiedApiClient from '../../../shared/utils/unifiedApiClient';
+import { config as appConfig } from '../../../app/config';
 import type { 
   PolicyStats, 
   PolicyExecutionLog, 
   OutcomeStatistics,
   Policy
 } from '../../../shared/utils/mcpPolicyApiClient';
+
+const apiBase = appConfig.apiBaseUrl;
 
 // ================================
 // Types
@@ -361,17 +365,11 @@ const LiveDot = styled.div`
   height: 8px;
   background: #28a745;
   border-radius: 50%;
-  animation: pulse 2s infinite;
-  
-  @keyframes pulse {
-    0% { opacity: 1; }
-    50% { opacity: 0.5; }
-    100% { opacity: 1; }
-  }
+  animation: ${pulseKeyframes} 2s infinite;
 `;
 
 const AIConfigSection = styled.div`
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #185FA5;
   border-radius: 12px;
   padding: 24px;
   color: white;
@@ -536,7 +534,7 @@ const ErrorMessage = styled.div`
 `;
 
 const PolicyEngineCard = styled.div`
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #185FA5;
   border-radius: 12px;
   padding: 24px;
   color: white;
@@ -635,11 +633,7 @@ const LoadingSpinner = styled.div`
     animation: spin 1s linear infinite;
     margin-right: 12px;
   }
-  
-  @keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
-  }
+  animation: ${spinKeyframes} 1s linear infinite;
 `;
 
 export const PolicyDashboard: React.FC = () => {
@@ -723,10 +717,63 @@ export const PolicyDashboard: React.FC = () => {
 
       console.log(' Policy stats received:', policyStatsResponse);
       
-      // Convert to local format
+      // Fetch the actual saved policy configuration to count configured policies
+      let configuredPoliciesCount = 0;
+      let configuredPoliciesList: ActivePolicy[] = [];
+      try {
+        const configResponse = await unifiedApiClient.getDashboardConfig();
+        if (configResponse && configResponse.success && configResponse.data) {
+          const config = configResponse.data;
+          // Count active policy sections from configuration
+          if (config.locatorHealing?.active) {
+            configuredPoliciesCount++;
+            configuredPoliciesList.push({
+              id: 'locator-healing',
+              name: 'Locator Healing & Retry',
+              status: 'active',
+              executions_count: 0,
+              last_executed: new Date().toISOString()
+            });
+          }
+          if (config.executionSafety?.active) {
+            configuredPoliciesCount++;
+            configuredPoliciesList.push({
+              id: 'execution-safety',
+              name: 'Execution Safety & Validation',
+              status: 'active',
+              executions_count: 0,
+              last_executed: new Date().toISOString()
+            });
+          }
+          if (config.multiOutcomeHandling?.active) {
+            configuredPoliciesCount++;
+            configuredPoliciesList.push({
+              id: 'multi-outcome',
+              name: 'Multi-Outcome Handling',
+              status: 'active',
+              executions_count: 0,
+              last_executed: new Date().toISOString()
+            });
+          }
+          if (config.auditReview?.active) {
+            configuredPoliciesCount++;
+            configuredPoliciesList.push({
+              id: 'audit-review',
+              name: 'Audit & Review Integration',
+              status: 'active',
+              executions_count: 0,
+              last_executed: new Date().toISOString()
+            });
+          }
+        }
+      } catch (err) {
+        console.log('Could not fetch policy configuration:', err);
+      }
+      
+      // Convert to local format, using configured policies count if no DB policies exist
       const localStats: PolicyStatsLocal = {
-        total_policies: policyStatsResponse.total_policies,
-        active_policies: policyStatsResponse.active_policies,
+        total_policies: policyStatsResponse.total_policies || configuredPoliciesCount,
+        active_policies: policyStatsResponse.active_policies || configuredPoliciesCount,
         total_executions: policyStatsResponse.total_executions,
         recent_executions_24h: policyStatsResponse.recent_executions_24h,
         avg_evaluation_time_ms: policyStatsResponse.avg_evaluation_time_ms,
@@ -762,7 +809,8 @@ export const PolicyDashboard: React.FC = () => {
         last_executed: policy.updated_at || new Date().toISOString(),
       }));
       
-      setActivePolicies(formattedPolicies);
+      // If no policies from DB, use the configured policies list
+      setActivePolicies(formattedPolicies.length > 0 ? formattedPolicies : configuredPoliciesList);
 
       // Fetch real execution logs
       console.log('📝 Execution logs received:', executionLogsResponse);
@@ -850,40 +898,68 @@ export const PolicyDashboard: React.FC = () => {
       const avgTime = localStats.avg_evaluation_time_ms || 0;
       const totalExecutions = localStats.total_executions || 0;
       
-      if (totalExecutions === 0) {
-        // No executions - show empty/default state
-        setPolicyEngineConfig({
-          activePack: 'No Active Pack',
-          locatorHealing: { confidenceThreshold: 0, maxRetries: 0 },
-          executionSafety: { blockDestructive: false },
-          multiOutcome: { confidenceThreshold: 0, maxCandidates: 0 },
-          auditReview: { retentionDays: 0 }
-        });
-      } else {
-        // Has real data - derive configuration
-        let activePack = 'Balanced';
-        if (avgTime < 30 && successRate > 85) activePack = 'Lenient';
-        else if (avgTime > 80 || successRate < 75) activePack = 'Strict';
-        else if (successRate > 95) activePack = 'Balanced';
-        else activePack = 'Dev';
+      // Fetch the actual saved policy configuration
+      try {
+        const configResponse = await unifiedApiClient.getDashboardConfig();
+        if (configResponse && configResponse.success && configResponse.data) {
+          const config = configResponse.data;
+          setPolicyEngineConfig({
+            activePack: totalExecutions === 0 ? 'No Active Pack' : 'Balanced',
+            locatorHealing: { 
+              confidenceThreshold: Math.round((config.locatorHealing?.confidenceThreshold || 0) * 100),
+              maxRetries: config.locatorHealing?.maxRetries || 0
+            },
+            executionSafety: { 
+              blockDestructive: config.executionSafety?.blockDestructiveActions || false
+            },
+            multiOutcome: { 
+              confidenceThreshold: Math.round((config.multiOutcomeHandling?.confidenceThreshold || 0) * 100),
+              maxCandidates: config.multiOutcomeHandling?.maxCandidates || 0
+            },
+            auditReview: { 
+              retentionDays: config.auditReview?.executionRetentionDays || 0
+            }
+          });
+        } else {
+          throw new Error('No config data');
+        }
+      } catch (configError) {
+        // Fallback to derived config if fetch fails
+        if (totalExecutions === 0) {
+          // No executions - show empty/default state
+          setPolicyEngineConfig({
+            activePack: 'No Active Pack',
+            locatorHealing: { confidenceThreshold: 0, maxRetries: 0 },
+            executionSafety: { blockDestructive: false },
+            multiOutcome: { confidenceThreshold: 0, maxCandidates: 0 },
+            auditReview: { retentionDays: 0 }
+          });
+        } else {
+          // Has real data - derive configuration
+          let activePack = 'Balanced';
+          if (avgTime < 30 && successRate > 85) activePack = 'Lenient';
+          else if (avgTime > 80 || successRate < 75) activePack = 'Strict';
+          else if (successRate > 95) activePack = 'Balanced';
+          else activePack = 'Dev';
 
-        setPolicyEngineConfig({
-          activePack,
-          locatorHealing: { 
-            confidenceThreshold: Math.round(successRate || 0), 
-            maxRetries: avgTime > 50 ? 1 : 2 
-          },
-          executionSafety: { 
-            blockDestructive: successRate > 90 
-          },
-          multiOutcome: { 
-            confidenceThreshold: Math.round((successRate || 0) * 0.9), 
-            maxCandidates: avgTime < 50 ? 8 : 5 
-          },
-          auditReview: { 
-            retentionDays: totalExecutions > 1000 ? 90 : 60 
-          }
-        });
+          setPolicyEngineConfig({
+            activePack,
+            locatorHealing: { 
+              confidenceThreshold: Math.round(successRate || 0), 
+              maxRetries: avgTime > 50 ? 1 : 2 
+            },
+            executionSafety: { 
+              blockDestructive: successRate > 90 
+            },
+            multiOutcome: { 
+              confidenceThreshold: Math.round((successRate || 0) * 0.9), 
+              maxCandidates: avgTime < 50 ? 8 : 5 
+            },
+            auditReview: { 
+              retentionDays: totalExecutions > 1000 ? 90 : 60 
+            }
+          });
+        }
       }
 
       // Fetch outcome statistics
@@ -966,7 +1042,7 @@ export const PolicyDashboard: React.FC = () => {
       setAiConfigLoading(true);
       setAiConfigError(null);
       
-      const response = await fetch('/api/v1/ai-config/config');
+      const response = await fetch(`${apiBase}/api/v1/ai-config/config`);
       if (!response.ok) {
         throw new Error(`Failed to load AI configuration: ${response.statusText}`);
       }
@@ -985,7 +1061,7 @@ export const PolicyDashboard: React.FC = () => {
       setTestingProvider(provider.provider);
       setAiConfigError(null);
 
-      const response = await fetch('/api/v1/ai-config/test-provider', {
+      const response = await fetch(`${apiBase}/api/v1/ai-config/test-provider`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1021,7 +1097,7 @@ export const PolicyDashboard: React.FC = () => {
 
   const switchActiveProvider = async (providerName: string) => {
     try {
-      const response = await fetch('/api/v1/ai-config/switch-provider', {
+      const response = await fetch(`${apiBase}/api/v1/ai-config/switch-provider`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1049,6 +1125,10 @@ export const PolicyDashboard: React.FC = () => {
         return '';
       case 'azure':
         return '☁️';
+      case 'ollama':
+        return '🦙';
+      case 'google':
+        return '';
       case 'local':
         return '🖥️';
       default:
@@ -1158,7 +1238,7 @@ export const PolicyDashboard: React.FC = () => {
                 <PolicyPackStatus>
                   Active Pack: {policyEngineConfig.activePack}
                 </PolicyPackStatus>
-                <PolicyEngineButton href="/policy-engine">
+                <PolicyEngineButton href="/app/policy-engine">
                   Configure Policies
                 </PolicyEngineButton>
               </PolicyEngineActions>
@@ -1316,38 +1396,54 @@ export const PolicyDashboard: React.FC = () => {
           <ChartsGrid>
             <ChartCard>
               <ChartTitle>Healing Success by Policy Type</ChartTitle>
-              <BarChart>
-                {effectivenessMetrics.map((item, index) => (
-                  <BarItem key={index}>
-                    <BarLabel>{item.name}</BarLabel>
-                    <BarTrack>
-                      <BarFill 
-                        percentage={item.value} 
-                        color={item.color}
-                      />
-                    </BarTrack>
-                    <BarValue>{item.value}%</BarValue>
-                  </BarItem>
-                ))}
-              </BarChart>
+              {effectivenessMetrics.length > 0 ? (
+                <BarChart>
+                  {effectivenessMetrics.map((item, index) => (
+                    <BarItem key={index}>
+                      <BarLabel>{item.name}</BarLabel>
+                      <BarTrack>
+                        <BarFill 
+                          percentage={item.value} 
+                          color={item.color}
+                        />
+                      </BarTrack>
+                      <BarValue>{item.value}%</BarValue>
+                    </BarItem>
+                  ))}
+                </BarChart>
+              ) : (
+                <div style={{ padding: '40px', textAlign: 'center', color: '#6c757d' }}>
+                  <div style={{ fontSize: '2rem', marginBottom: '10px' }}>📊</div>
+                  <div style={{ fontWeight: '600', marginBottom: '5px' }}>No Execution Data</div>
+                  <div style={{ fontSize: '0.9rem' }}>Policy effectiveness metrics will appear after test executions</div>
+                </div>
+              )}
             </ChartCard>
 
             <ChartCard>
               <ChartTitle>Governance Compliance</ChartTitle>
-              <BarChart>
-                {complianceMetrics.map((item, index) => (
-                  <BarItem key={index}>
-                    <BarLabel>{item.name}</BarLabel>
-                    <BarTrack>
-                      <BarFill 
-                        percentage={item.value} 
-                        color={item.color}
-                      />
-                    </BarTrack>
-                    <BarValue>{item.value}%</BarValue>
-                  </BarItem>
-                ))}
-              </BarChart>
+              {complianceMetrics.length > 0 ? (
+                <BarChart>
+                  {complianceMetrics.map((item, index) => (
+                    <BarItem key={index}>
+                      <BarLabel>{item.name}</BarLabel>
+                      <BarTrack>
+                        <BarFill 
+                          percentage={item.value} 
+                          color={item.color}
+                        />
+                      </BarTrack>
+                      <BarValue>{item.value}%</BarValue>
+                    </BarItem>
+                  ))}
+                </BarChart>
+              ) : (
+                <div style={{ padding: '40px', textAlign: 'center', color: '#6c757d' }}>
+                  <div style={{ fontSize: '2rem', marginBottom: '10px' }}>✓</div>
+                  <div style={{ fontWeight: '600', marginBottom: '5px' }}>No Compliance Data</div>
+                  <div style={{ fontSize: '0.9rem' }}>Governance compliance metrics will appear after test executions</div>
+                </div>
+              )}
             </ChartCard>
           </ChartsGrid>
 
@@ -1356,21 +1452,29 @@ export const PolicyDashboard: React.FC = () => {
           {/* Recent Executions */}
           <SectionTitle>Recent Policy Executions</SectionTitle>
           <ChartCard>
-            <ExecutionList>
-              {recentExecutions.map((execution, index) => (
-                <ExecutionItem key={execution.id}>
-                  <ExecutionDetails>
-                    <ExecutionPolicy>{execution.policy_name}</ExecutionPolicy>
-                    <ExecutionTime>
-                      {formatTimestamp(execution.executed_at)} • {execution.confidence_score}% confidence • {execution.execution_time_ms}ms
-                    </ExecutionTime>
-                  </ExecutionDetails>
-                  <ExecutionResult success={execution.success}>
-                    {execution.success ? 'Success' : 'Failed'}
-                  </ExecutionResult>
-                </ExecutionItem>
-              ))}
-            </ExecutionList>
+            {recentExecutions.length > 0 ? (
+              <ExecutionList>
+                {recentExecutions.map((execution, index) => (
+                  <ExecutionItem key={execution.id}>
+                    <ExecutionDetails>
+                      <ExecutionPolicy>{execution.policy_name}</ExecutionPolicy>
+                      <ExecutionTime>
+                        {formatTimestamp(execution.executed_at)} • {execution.confidence_score}% confidence • {execution.execution_time_ms}ms
+                      </ExecutionTime>
+                    </ExecutionDetails>
+                    <ExecutionResult success={execution.success}>
+                      {execution.success ? 'Success' : 'Failed'}
+                    </ExecutionResult>
+                  </ExecutionItem>
+                ))}
+              </ExecutionList>
+            ) : (
+              <div style={{ padding: '40px', textAlign: 'center', color: '#6c757d' }}>
+                <div style={{ fontSize: '2rem', marginBottom: '10px' }}>🔄</div>
+                <div style={{ fontWeight: '600', marginBottom: '5px' }}>No Recent Executions</div>
+                <div style={{ fontSize: '0.9rem' }}>Policy execution history will appear here after running tests</div>
+              </div>
+            )}
           </ChartCard>
             </>
           )}

@@ -47,11 +47,11 @@ const TestInput = styled.input`
   font-family: 'Monaco', 'Cascadia Code', 'Roboto Mono', monospace;
   &:focus {
     outline: none;
-    border-color: #667eea;
+    border-color: #185FA5;
     box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
   }
   &.synced {
-    border-color: #48bb78;
+    border-color: #1D9E75;
     background-color: #f0fff4;
   }
   &.syncing {
@@ -61,7 +61,7 @@ const TestInput = styled.input`
 `;
 const TestButton = styled.button`
   padding: 10px 20px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #185FA5;
   color: white;
   border: none;
   border-radius: 8px;
@@ -90,7 +90,7 @@ const TestResult = styled.div<{ success?: boolean; error?: boolean }>`
   `}
   ${props => props.error && `
     background: #fef2f2;
-    border: 1px solid #dc2626;
+    border: 1px solid #8a2222;
     color: #991b1b;
   `}
   ${props => !props.success && !props.error && `
@@ -285,7 +285,7 @@ const SyncBidirectionalTest: React.FC = () => {
       <TestGrid>
         {/* Element to Prompt Sync */}
         <TestSection>
-          <h3 style={{ marginBottom: '16px', color: '#059669' }}>
+          <h3 style={{ marginBottom: '16px', color: '#0F6E56' }}>
             🔧 Element → Prompt Sync
           </h3>
           <div style={{ marginBottom: '12px' }}>
@@ -342,7 +342,7 @@ const SyncBidirectionalTest: React.FC = () => {
       </TestGrid>
       {/* Bulk Operations */}
       <TestSection>
-        <h3 style={{ marginBottom: '16px', color: '#dc2626' }}>
+        <h3 style={{ marginBottom: '16px', color: '#8a2222' }}>
           ⚡ Bulk Synchronization Test
         </h3>
         <p style={{ marginBottom: '16px', color: '#64748b' }}>

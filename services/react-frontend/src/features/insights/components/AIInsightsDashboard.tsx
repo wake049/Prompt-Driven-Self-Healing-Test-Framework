@@ -45,7 +45,7 @@ interface InsightSummary {
 // ================================
 const Container = styled.div`
   padding: 24px;
-  background: ${props => props.theme.colors.background};
+  background: #f8fafc;
   min-height: 100vh;
 `;
 
@@ -54,7 +54,7 @@ const Header = styled.div`
 `;
 
 const Title = styled.h1`
-  color: ${props => props.theme.colors.text};
+  color: #1a1a2e !important;
   font-size: 28px;
   font-weight: 600;
   margin-bottom: 8px;
@@ -64,7 +64,7 @@ const Title = styled.h1`
 `;
 
 const Subtitle = styled.p`
-  color: ${props => props.theme.colors.textSecondary};
+  color: #6b7280 !important;
   font-size: 16px;
   margin: 0;
 `;
@@ -77,23 +77,24 @@ const SummaryGrid = styled.div`
 `;
 
 const SummaryCard = styled.div`
-  background: ${props => props.theme.colors.surface};
+  background: #ffffff;
+  color: #111827;
   border-radius: 12px;
   padding: 24px;
-  border: 1px solid ${props => props.theme.colors.border};
+  border: 1px solid #e5e7eb;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
 `;
 
 const MetricValue = styled.div`
   font-size: 32px;
   font-weight: 700;
-  color: ${props => props.theme.colors.text};
+  color: #1a1a2e !important;
   margin-bottom: 8px;
 `;
 
 const MetricLabel = styled.div`
   font-size: 14px;
-  color: ${props => props.theme.colors.textSecondary};
+  color: #6b7280 !important;
   text-transform: uppercase;
   letter-spacing: 0.5px;
 `;
@@ -104,14 +105,15 @@ const InsightsContainer = styled.div`
 `;
 
 const InsightCard = styled.div<{ severity: string }>`
-  background: ${props => props.theme.colors.surface};
+  background: #ffffff;
+  color: #111827;
   border-radius: 12px;
   border-left: 4px solid ${props => {
     switch (props.severity) {
-      case 'critical': return '#ef4444';
+      case 'critical': return '#A32D2D';
       case 'high': return '#f59e0b';
       case 'medium': return '#3b82f6';
-      default: return '#10b981';
+      default: return '#1D9E75';
     }
   }};
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
@@ -126,11 +128,11 @@ const InsightCard = styled.div<{ severity: string }>`
 
 const CardHeader = styled.div`
   padding: 24px 24px 16px;
-  border-bottom: 1px solid ${props => props.theme.colors.border};
+  border-bottom: 1px solid #e5e7eb;
 `;
 
 const CardTitle = styled.h3`
-  color: ${props => props.theme.colors.text};
+  color: #1a1a2e !important;
   font-size: 18px;
   font-weight: 600;
   margin-bottom: 8px;
@@ -147,18 +149,18 @@ const SeverityBadge = styled.span<{ severity: string }>`
   text-transform: uppercase;
   background: ${props => {
     switch (props.severity) {
-      case 'critical': return '#ef444420';
+      case 'critical': return '#A32D2D20';
       case 'high': return '#f59e0b20';
       case 'medium': return '#3b82f620';
-      default: return '#10b98120';
+      default: return '#1D9E7520';
     }
   }};
   color: ${props => {
     switch (props.severity) {
-      case 'critical': return '#ef4444';
+      case 'critical': return '#A32D2D';
       case 'high': return '#f59e0b';
       case 'medium': return '#3b82f6';
-      default: return '#10b981';
+      default: return '#1D9E75';
     }
   }};
 `;
@@ -168,8 +170,8 @@ const ConfidenceBadge = styled.span`
   border-radius: 12px;
   font-size: 11px;
   font-weight: 600;
-  background: ${props => props.theme.colors.primary}20;
-  color: ${props => props.theme.colors.primary};
+  background: #e0f2fe;
+  color: #0369a1;
 `;
 
 const CardContent = styled.div`
@@ -177,7 +179,7 @@ const CardContent = styled.div`
 `;
 
 const Description = styled.p`
-  color: ${props => props.theme.colors.text};
+  color: #374151 !important;
   font-size: 14px;
   line-height: 1.6;
   margin-bottom: 20px;
@@ -192,7 +194,7 @@ const Section = styled.div`
 `;
 
 const SectionTitle = styled.h4`
-  color: ${props => props.theme.colors.text};
+  color: #1a1a2e !important;
   font-size: 13px;
   font-weight: 600;
   text-transform: uppercase;
@@ -207,7 +209,7 @@ const EvidenceList = styled.ul`
 `;
 
 const EvidenceItem = styled.li`
-  color: ${props => props.theme.colors.textSecondary};
+  color: #6b7280 !important;
   font-size: 13px;
   line-height: 1.5;
   margin-bottom: 6px;
@@ -216,7 +218,7 @@ const EvidenceItem = styled.li`
   
   &:before {
     content: '•';
-    color: ${props => props.theme.colors.primary};
+    color: #3b82f6;
     position: absolute;
     left: 0;
   }
@@ -230,7 +232,7 @@ const RecommendationsList = styled.ol`
 `;
 
 const RecommendationItem = styled.li`
-  color: ${props => props.theme.colors.text};
+  color: #374151 !important;
   font-size: 13px;
   line-height: 1.5;
   margin-bottom: 8px;
@@ -245,7 +247,7 @@ const RecommendationItem = styled.li`
     top: 0;
     width: 16px;
     height: 16px;
-    background: ${props => props.theme.colors.primary};
+    background: #3b82f6;
     color: white;
     border-radius: 50%;
     font-size: 10px;
@@ -264,10 +266,10 @@ const ComponentTags = styled.div`
 
 const ComponentTag = styled.span`
   padding: 4px 8px;
-  background: ${props => props.theme.colors.border};
+  background: #f1f5f9;
   border-radius: 12px;
   font-size: 11px;
-  color: ${props => props.theme.colors.textSecondary};
+  color: #475569;
   font-weight: 500;
 `;
 
@@ -277,7 +279,7 @@ const LoadingState = styled.div`
   align-items: center;
   justify-content: center;
   padding: 60px 20px;
-  color: ${props => props.theme.colors.textSecondary};
+  color: #6b7280;
   font-size: 16px;
   gap: 16px;
 `;
@@ -288,20 +290,20 @@ const EmptyState = styled.div`
   align-items: center;
   justify-content: center;
   padding: 60px 20px;
-  color: ${props => props.theme.colors.textSecondary};
+  color: #6b7280;
   text-align: center;
 `;
 
 const EmptyStateIcon = styled.div`
-  background: ${props => props.theme.colors.border};
+  background: #f1f5f9;
   border-radius: 50%;
   padding: 20px;
   margin-bottom: 16px;
-  color: ${props => props.theme.colors.textSecondary};
+  color: #6b7280;
 `;
 
 const EmptyStateTitle = styled.h3`
-  color: ${props => props.theme.colors.text};
+  color: #1a1a2e;
   font-size: 18px;
   margin-bottom: 8px;
 `;
@@ -313,16 +315,16 @@ const EmptyStateMessage = styled.p`
 `;
 
 const ErrorState = styled.div`
-  background: ${props => props.theme.colors.error}20;
-  border: 1px solid ${props => props.theme.colors.error};
-  color: ${props => props.theme.colors.error};
+  background: #fee2e2;
+  border: 1px solid #ef4444;
+  color: #dc2626 !important;
   padding: 16px;
   border-radius: 8px;
   margin-bottom: 24px;
 `;
 
 const RefreshButton = styled.button`
-  background: ${props => props.theme.colors.primary};
+  background: #3b82f6;
   color: white;
   border: none;
   border-radius: 8px;
@@ -336,7 +338,7 @@ const RefreshButton = styled.button`
   transition: all 0.2s ease;
   
   &:hover {
-    background: ${props => props.theme.colors.primary}dd;
+    background: #2563eb;
     transform: translateY(-1px);
   }
   
@@ -507,7 +509,7 @@ const AIInsightsDashboard: React.FC = () => {
       ) : (
         <InsightsContainer>
           {insights.map((insight) => (
-            <InsightCard key={insight.id} severity={insight.severity}>
+            <InsightCard key={insight.id} severity={insight.severity} style={{ color: '#111827' }}>
               <CardHeader>
                 <CardTitle>
                   {getCategoryIcon(insight.category)}

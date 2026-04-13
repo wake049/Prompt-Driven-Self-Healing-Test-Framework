@@ -6,7 +6,7 @@
  * synchronization operations occur.
  */
 import React, { useState, useEffect } from 'react';
-import styled, { keyframes } from 'styled-components';
+import styled, { keyframes, css } from 'styled-components';
 import { Link, RefreshCw, CheckCircle, AlertTriangle, XCircle } from 'lucide-react';
 // Animation keyframes
 const pulse = keyframes`
@@ -35,15 +35,15 @@ const fadeIn = keyframes`
 `;
 // Styled Components
 const SyncIndicatorBadge = styled.div<{ 
-  status: 'linked' | 'unlinked' | 'syncing' | 'error'; 
-  size?: 'small' | 'medium' | 'large';
-  animated?: boolean;
+  $status: 'linked' | 'unlinked' | 'syncing' | 'error'; 
+  $size?: 'small' | 'medium' | 'large';
+  $animated?: boolean;
 }>`
   display: inline-flex;
   align-items: center;
   gap: 4px;
   padding: ${props => {
-    switch (props.size) {
+    switch (props.$size) {
       case 'small': return '2px 6px';
       case 'large': return '8px 12px';
       default: return '4px 8px';
@@ -51,7 +51,7 @@ const SyncIndicatorBadge = styled.div<{
   }};
   border-radius: 12px;
   font-size: ${props => {
-    switch (props.size) {
+    switch (props.$size) {
       case 'small': return '10px';
       case 'large': return '14px';
       default: return '12px';
@@ -59,11 +59,12 @@ const SyncIndicatorBadge = styled.div<{
   }};
   font-weight: 600;
   transition: all 0.3s ease;
+  
   ${props => {
-    switch (props.status) {
+    switch (props.$status) {
       case 'linked':
         return `
-          background: linear-gradient(135deg, #48bb78 0%, #38b2ac 100%);
+          background: linear-gradient(135deg, #1D9E75 0%, #38b2ac 100%);
           color: white;
           box-shadow: 0 2px 8px rgba(72, 187, 120, 0.3);
         `;
@@ -72,11 +73,10 @@ const SyncIndicatorBadge = styled.div<{
           background: linear-gradient(135deg, #4299e1 0%, #3182ce 100%);
           color: white;
           box-shadow: 0 2px 8px rgba(66, 153, 225, 0.3);
-          animation: ${pulse} 2s infinite;
         `;
       case 'error':
         return `
-          background: linear-gradient(135deg, #f56565 0%, #e53e3e 100%);
+          background: linear-gradient(135deg, #c85050 0%, #A32D2D 100%);
           color: white;
           box-shadow: 0 2px 8px rgba(245, 101, 101, 0.3);
         `;
@@ -88,9 +88,10 @@ const SyncIndicatorBadge = styled.div<{
         `;
     }
   }}
-  ${props => props.animated && `
-    animation: ${bounce} 2s ease-in-out;
-  `}
+  
+  /* Animations applied directly without backtick strings */
+  ${props => props.$status === 'syncing' ? css`animation: ${pulse} 2s infinite;` : ''}
+  ${props => props.$animated ? css`animation: ${bounce} 2s ease-in-out;` : ''}
 `;
 const SyncStatusPanel = styled.div`
   background: rgba(255, 255, 255, 0.95);
@@ -130,8 +131,8 @@ const SyncNotificationOverlay = styled.div<{ type: 'success' | 'error' | 'info' 
   animation: ${slideIn} 0.3s ease-out;
   background: ${props => {
     switch (props.type) {
-      case 'success': return 'linear-gradient(135deg, #48bb78 0%, #38b2ac 100%)';
-      case 'error': return 'linear-gradient(135deg, #f56565 0%, #e53e3e 100%)';
+      case 'success': return 'linear-gradient(135deg, #1D9E75 0%, #38b2ac 100%)';
+      case 'error': return 'linear-gradient(135deg, #c85050 0%, #A32D2D 100%)';
       case 'info': return 'linear-gradient(135deg, #4299e1 0%, #3182ce 100%)';
       default: return 'linear-gradient(135deg, #4299e1 0%, #3182ce 100%)';
     }
@@ -228,9 +229,9 @@ export const SyncIndicator: React.FC<SyncIndicatorProps> = ({
   };
   return (
     <SyncIndicatorBadge 
-      status={status} 
-      size={size} 
-      animated={animated}
+      $status={status} 
+      $size={size} 
+      $animated={animated}
       onClick={onClick}
       style={{ cursor: onClick ? 'pointer' : 'default' }}
     >
@@ -323,11 +324,11 @@ export const SyncStatusDisplay: React.FC<SyncStatusProps> = ({
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
         <div style={{ textAlign: 'center', padding: '12px', background: 'rgba(72, 187, 120, 0.1)', borderRadius: '8px' }}>
-          <div style={{ fontSize: '24px', fontWeight: '700', color: '#48bb78' }}>{elementCount}</div>
+          <div style={{ fontSize: '24px', fontWeight: '700', color: '#1D9E75' }}>{elementCount}</div>
           <div style={{ fontSize: '12px', color: '#666' }}>Linked Elements</div>
         </div>
         <div style={{ textAlign: 'center', padding: '12px', background: 'rgba(102, 126, 234, 0.1)', borderRadius: '8px' }}>
-          <div style={{ fontSize: '24px', fontWeight: '700', color: '#667eea' }}>{promptCount}</div>
+          <div style={{ fontSize: '24px', fontWeight: '700', color: '#185FA5' }}>{promptCount}</div>
           <div style={{ fontSize: '12px', color: '#666' }}>Linked Prompts</div>
         </div>
       </div>

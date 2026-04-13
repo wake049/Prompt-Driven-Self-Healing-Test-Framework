@@ -94,6 +94,8 @@ services/sql-backend/uploads/
 .env.test.local
 .env.production.local
 .env.production
+!.env.template
+!.env.selfhost.template
 services/*/.env
 services/*/.env.*
 
@@ -256,6 +258,7 @@ test-reports/
 allure-results/
 
 # Security files
+services/unified-api/config/ai_providers.json
 *.pem
 *.key
 *.crt

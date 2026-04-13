@@ -241,6 +241,9 @@ class EnterpriseAIService:
         # Store constant bindings (for login credentials, etc.)
         self.constant_bindings = {}  # {variable_name: value}
         
+        # Store API test data context for step generation
+        self.api_test_data_setups = []  # Available API test data setups
+        
         # Initialize AI clients
         self.client = None
         self.anthropic_client = None
@@ -251,6 +254,36 @@ class EnterpriseAIService:
         self.last_openai_call = 0
         self.min_call_interval = 2.0  # Minimum 2 seconds between AI calls
 
+    async def _load_provider_config_from_db(self, tenant_id: Optional[str] = None, project_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """
+        Load provider configuration from database for a specific tenant/project.
+        
+        This enables BYOK (Bring Your Own Key) functionality where tenants can
+        configure their own AI provider preferences.
+        """
+        if not tenant_id:
+            return None
+            
+        try:
+            from core.database import get_database_manager
+            from services.ai_provider_service import AIProviderService
+
+            db = await get_database_manager()
+            if not db or not db.pool:
+                return None
+
+            async with db.pool.acquire() as conn:
+                provider_config = await AIProviderService.get_active_provider(conn, tenant_id, project_id)
+                
+                if provider_config:
+                    logger.info(f"✅ Loaded provider '{provider_config['provider']}' from database for tenant {tenant_id}")
+                    return provider_config
+                    
+        except Exception as e:
+            logger.debug(f"Could not load provider from database: {e}")
+            
+        return None
+    
     def _load_config(self) -> Dict[str, Any]:
         """Load configuration for AI services - supports dynamic configuration"""
         try:
@@ -270,6 +303,21 @@ class EnterpriseAIService:
                 
                 if active_config:
                     logger.info(f"🔄 Loading dynamic AI config - Active provider: {active_provider}")
+
+                    # If config file has an empty key, fallback to environment variable for that provider.
+                    provider_env_map = {
+                        "openai": "OPENAI_API_KEY",
+                        "anthropic": "ANTHROPIC_API_KEY",
+                        "google": "GOOGLE_API_KEY",
+                    }
+                    provider_env_var = provider_env_map.get(active_provider)
+                    env_api_key = os.getenv(provider_env_var, "") if provider_env_var else ""
+                    if not active_config.get("api_key") and env_api_key:
+                        logger.info(
+                            "Using %s from environment because dynamic config has no key",
+                            provider_env_var,
+                        )
+                        active_config["api_key"] = env_api_key
                     
                     # Map provider config to expected format
                     config = {
@@ -301,15 +349,30 @@ class EnterpriseAIService:
                             "temperature": active_config.get("temperature", 0.1),
                             "maxTokens": active_config.get("max_tokens", 4000),
                         }
-                    
-                    return config
+
+                    # If key is still missing for key-based providers, fallback to env-based config block.
+                    if active_provider in ("openai", "anthropic", "google") and not config[active_provider].get("apiKey"):
+                        logger.warning(
+                            "Active provider '%s' has no API key in dynamic config or environment; falling back to env-based provider selection",
+                            active_provider,
+                        )
+                    else:
+                        return config
         
         except Exception as e:
             logger.warning(f"⚠️  Failed to load dynamic AI config: {e} - falling back to environment variables")
         
         # Fallback to environment variables (backward compatibility)
+        # Determine default provider based on what's configured
+        if os.getenv("OLLAMA_ENABLED", "").lower() == "true":
+            default_provider = "ollama"
+        elif os.getenv("ANTHROPIC_API_KEY"):
+            default_provider = "anthropic"
+        else:
+            default_provider = "openai"
+        
         return {
-            "current_provider": "openai",  # Default to OpenAI
+            "current_provider": os.getenv("AI_PROVIDER", default_provider),
             "openai": {
                 "apiKey": os.getenv("OPENAI_API_KEY", ""),
                 "enabled": _bool_env("OPENAI_ENABLED", True),
@@ -327,17 +390,27 @@ class EnterpriseAIService:
                 "model": os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022"),
                 "temperature": float(os.getenv("ANTHROPIC_TEMPERATURE", "0.1")),
                 "maxTokens": int(os.getenv("ANTHROPIC_MAX_TOKENS", "4000")),
+            },
+            "ollama": {
+                "baseUrl": os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
+                "enabled": _bool_env("OLLAMA_ENABLED", False),
+                "timeout": int(os.getenv("OLLAMA_TIMEOUT_MS", "60000")),  # Longer timeout for local inference
+                "maxRetries": int(os.getenv("OLLAMA_MAX_RETRIES", "2")),
+                "model": os.getenv("OLLAMA_MODEL", "llama3.1:8b"),
+                "temperature": float(os.getenv("OLLAMA_TEMPERATURE", "0.1")),
+                "maxTokens": int(os.getenv("OLLAMA_MAX_TOKENS", "4000")),
             }
         }
 
     def _initialize_openai(self) -> None:
-        """Initialize AI clients based on configuration"""
+        """Initialize AI clients based on configuration (OpenAI, Anthropic, Ollama)"""
         current_provider = self.config.get("current_provider", "openai")
         logger.info(f" Initializing AI service - Current provider: {current_provider}")
         
         # Initialize clients
         self.client = None
         self.anthropic_client = None
+        self.ollama_client = None
         
         try:
             # Initialize OpenAI if configured
@@ -348,8 +421,12 @@ class EnterpriseAIService:
                 else:
                     api_key = openai_config["apiKey"]
                     if api_key.startswith('sk-'):
-                        self.client = OpenAI(api_key=api_key)
-                        logger.info("✅ OpenAI client initialized successfully")
+                        # Disable internal retries to let our retry logic handle failures
+                        self.client = OpenAI(
+                            api_key=api_key,
+                            max_retries=0  # Disable OpenAI SDK's internal retry mechanism
+                        )
+                        logger.info("✅ OpenAI client initialized successfully (internal retries disabled)")
                     else:
                         logger.error("❌ Invalid OpenAI API key format (should start with 'sk-')")
             
@@ -367,8 +444,31 @@ class EnterpriseAIService:
                 except ImportError:
                     logger.warning("⚠️  Anthropic library not available")
             
+            # Initialize Ollama if configured (uses OpenAI-compatible API)
+            ollama_config = self.config.get("ollama", {})
+            if ollama_config.get("enabled"):
+                if OpenAI is None:
+                    logger.warning("⚠️  OpenAI library not available (required for Ollama client)")
+                else:
+                    try:
+                        base_url = ollama_config.get("baseUrl", "http://localhost:11434")
+                        # Ollama uses OpenAI-compatible API at /v1 endpoint
+                        # Note: Client creation doesn't connect - connection happens on first request
+                        self.ollama_client = OpenAI(
+                            base_url=f"{base_url}/v1",
+                            api_key="ollama",  # Ollama doesn't require a real API key
+                            max_retries=0,
+                            timeout=5.0  # Short timeout for client creation
+                        )
+                        logger.info(f"✅ Ollama client initialized (base_url: {base_url}) - connection will be tested on first request")
+                    except Exception as ollama_err:
+                        logger.warning(f"⚠️ Could not initialize Ollama client: {ollama_err}")
+                        self.ollama_client = None
+            
             # Set active client based on current provider
-            if current_provider == "anthropic" and self.anthropic_client:
+            if current_provider == "ollama" and self.ollama_client:
+                logger.info(" Using Ollama as active provider")
+            elif current_provider == "anthropic" and self.anthropic_client:
                 logger.info(" Using Anthropic as active provider")
             elif current_provider == "openai" and self.client:
                 logger.info(" Using OpenAI as active provider")
@@ -381,6 +481,7 @@ class EnterpriseAIService:
             logger.error(f"❌ Error initializing AI clients: {e}")
             self.client = None
             self.anthropic_client = None
+            self.ollama_client = None
 
     def _get_current_provider_config(self) -> Dict[str, Any]:
         """Get configuration for the currently active provider"""
@@ -431,6 +532,150 @@ class EnterpriseAIService:
         value = self.constant_bindings.get(variable_name, default)
         logger.debug(f"🔑 get_constant_value('{variable_name}') -> '{value}' (available: {list(self.constant_bindings.keys())})")
         return value
+
+    def _extract_prompt_credentials(self, prompt_text: str) -> Dict[str, str]:
+        """Extract explicit credentials from prompt text."""
+        if not prompt_text:
+            return {}
+
+        credentials: Dict[str, str] = {}
+        patterns = {
+            "username": [
+                r"(?:username|user\s*name|email)\s*(?:is|=|:)?\s*['\"]?([^\s,'\"\n]+)",
+            ],
+            "password": [
+                r"(?:password|pass(?:word)?)\s*(?:is|=|:)?\s*['\"]?([^\s,'\"\n]+)",
+            ],
+        }
+
+        for field, field_patterns in patterns.items():
+            for pattern in field_patterns:
+                match = re.search(pattern, prompt_text, re.IGNORECASE)
+                if match and match.group(1):
+                    credentials[field] = match.group(1).strip()
+                    break
+
+        return credentials
+
+    def _resolve_credential_value(self, field: str, prompt_text: str) -> Optional[str]:
+        """Resolve credential value from prompt first, then data bindings (constant or variable)."""
+        aliases = {
+            "username": ["username", "userName", "user_name", "email", "login"],
+            "password": ["password", "pass", "pwd"],
+        }
+
+        field_aliases = aliases.get(field, [field])
+
+        # Check explicit constant bindings first — they are authoritative
+        for alias in field_aliases:
+            if alias in self.constant_bindings and self.constant_bindings.get(alias):
+                return str(self.constant_bindings.get(alias)).strip()
+
+        # Fall back to heuristic extraction from prompt text
+        prompt_credentials = self._extract_prompt_credentials(prompt_text)
+
+        if field in prompt_credentials and prompt_credentials[field]:
+            return prompt_credentials[field]
+
+        allowed_variables = getattr(self.variable_validator, "allowed_variables", set())
+        normalized_aliases = {alias.lower().replace("_", "") for alias in field_aliases}
+        for var_name in allowed_variables:
+            normalized_var = str(var_name).lower().replace("_", "")
+            if any(alias in normalized_var for alias in normalized_aliases):
+                return f"${{{var_name}}}"
+
+        return None
+
+    def _get_credential_field_for_step(self, step: PlanStep) -> Optional[str]:
+        """Classify a type step as username/password credential input when possible."""
+        if step.action != "type":
+            return None
+
+        selector = str(step.args.get("selector", "") or "").lower()
+        target = str(step.target or "").lower()
+        description = str(step.description or "").lower()
+        element_type = str(step.args.get("element_type", "") or "").lower()
+        combined = f"{selector} {target} {description} {element_type}"
+
+        if any(token in combined for token in ["password", "pwd", "pass"]):
+            return "password"
+        if any(token in combined for token in ["username", "user-name", "user_name", "email", "login", "userid"]):
+            return "username"
+
+        return None
+
+    def _is_allowed_binding_placeholder(self, text_value: str) -> bool:
+        """Check if value is a ${variable} placeholder mapped to allowed data binding variables."""
+        if not text_value:
+            return False
+
+        match = re.match(r"^\$\{([^}]+)\}$", text_value.strip())
+        if not match:
+            return False
+
+        variable_name = match.group(1)
+        allowed_variables = getattr(self.variable_validator, "allowed_variables", set())
+        return variable_name in allowed_variables
+
+    def _apply_credential_source_guardrail(
+        self,
+        prompt_envelope: PromptEnvelope,
+        ranked_elements: List[Any],
+        steps: List[PlanStep],
+    ) -> Tuple[List[PlanStep], List[str]]:
+        """Ensure credential inputs come only from prompt text or data bindings."""
+        if not steps:
+            return steps, []
+
+        prompt_text = getattr(prompt_envelope, "prompt", "") or ""
+        allowed_username = self._resolve_credential_value("username", prompt_text)
+        allowed_password = self._resolve_credential_value("password", prompt_text)
+
+        sanitized_steps: List[PlanStep] = []
+        removed_count = 0
+        missing_credential_fields: List[str] = []
+
+        for step in steps:
+            field = self._get_credential_field_for_step(step)
+            if not field:
+                sanitized_steps.append(step)
+                continue
+
+            allowed_value = allowed_username if field == "username" else allowed_password
+            current_text = str(step.args.get("text", "") or "").strip()
+            is_allowed_placeholder = self._is_allowed_binding_placeholder(current_text)
+            normalized_text = current_text.lower()
+
+            if allowed_value:
+                if current_text != allowed_value:
+                    logger.warning(
+                        f"🔒 Credential guardrail replaced {field} value '{current_text}' with approved source"
+                    )
+                    step.args["text"] = allowed_value
+                sanitized_steps.append(step)
+                continue
+
+            if is_allowed_placeholder:
+                sanitized_steps.append(step)
+                continue
+
+            if current_text:
+                removed_count += 1
+                if field not in missing_credential_fields:
+                    missing_credential_fields.append(field)
+                logger.warning(
+                    f"🔒 Credential guardrail removed {field} step with unsupported value '{current_text}'"
+                )
+                continue
+
+            sanitized_steps.append(step)
+
+        if removed_count:
+            logger.warning(
+                f"🔒 Credential guardrail removed {removed_count} credential step(s); provide credentials via prompt or data bindings"
+            )
+
+        return sanitized_steps, missing_credential_fields
 
     def _enforce_rate_limit(self) -> None:
         """Enforce rate limiting between OpenAI API calls"""
@@ -498,6 +743,91 @@ class EnterpriseAIService:
         return variables
 
     # =========================
+    # API TEST DATA INTEGRATION
+    # =========================
+    
+    async def load_api_test_data_for_prompt(self, prompt_id: str = None, project_id: str = None) -> list:
+        """
+        Load available API test data setups that can be used to create precondition data.
+        
+        This allows the AI to suggest API calls to create test data before UI tests.
+        For example: Creating a booking via API before testing "change booking" flow.
+        
+        Returns list of available setups with their details.
+        """
+        try:
+            from core.database import get_database_manager
+            db = await get_database_manager()
+            
+            setups = []
+
+            prompt_setup_table_exists = await db.fetchval(
+                "SELECT to_regclass('api_tests.prompt_data_setups') IS NOT NULL"
+            )
+            
+            if prompt_id and prompt_setup_table_exists:
+                # Load setups linked to this specific prompt
+                query = """
+                    SELECT 
+                        tds.id,
+                        tds.name,
+                        tds.description,
+                        tds.execution_order,
+                        dt.name as template_name,
+                        dt.category,
+                        dt.http_method,
+                        dt.path,
+                        dt.response_extractors,
+                        ae.name as endpoint_name,
+                        ae.base_url
+                    FROM api_tests.prompt_data_setups pds
+                    JOIN api_tests.test_data_setups tds ON pds.setup_id = tds.id
+                    JOIN api_tests.data_templates dt ON tds.template_id = dt.id
+                    JOIN api_tests.api_endpoints ae ON dt.endpoint_id = ae.id
+                    WHERE pds.prompt_id = $1 AND pds.is_active = true AND tds.is_active = true
+                    ORDER BY pds.execution_order ASC
+                """
+                result = await db.fetch(query, prompt_id)
+                if result:
+                    setups.extend([dict(r) for r in result])
+            elif prompt_id and not prompt_setup_table_exists:
+                logger.info("API setup link table api_tests.prompt_data_setups not found; skipping prompt-specific setup lookup")
+            
+            if project_id and not setups:
+                # Fallback: Load all available setups for the project 
+                query = """
+                    SELECT 
+                        tds.id,
+                        tds.name,
+                        tds.description,
+                        tds.execution_order,
+                        dt.name as template_name,
+                        dt.category,
+                        dt.http_method,
+                        dt.path,
+                        dt.response_extractors,
+                        ae.name as endpoint_name,
+                        ae.base_url
+                    FROM api_tests.test_data_setups tds
+                    JOIN api_tests.data_templates dt ON tds.template_id = dt.id
+                    JOIN api_tests.api_endpoints ae ON dt.endpoint_id = ae.id
+                    WHERE tds.project_id = $1 AND tds.is_active = true AND dt.is_active = true
+                    ORDER BY dt.category, tds.name
+                """
+                result = await db.fetch(query, project_id)
+                if result:
+                    setups.extend([dict(r) for r in result])
+            
+            self.api_test_data_setups = setups
+            logger.info(f"📦 Loaded {len(setups)} API test data setups")
+            return setups
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to load API test data setups: {e}")
+            self.api_test_data_setups = []
+            return []
+
+    # =========================
     # ENTERPRISE API METHODS
     # =========================
     
@@ -528,6 +858,120 @@ class EnterpriseAIService:
         logger.info(f"🚀 Starting plan generation for prompt: '{prompt_envelope.prompt[:100]}...'")
         logger.debug(f"📊 Request details - Tenant: {prompt_envelope.tenant_id}, Elements: {len(prompt_envelope.page_slice.elements) if prompt_envelope.page_slice else 0}")
         
+        # DATABASE PROVIDER: Check if tenant has a database-configured AI provider
+        # NOTE: tenant_id is OPTIONAL. If not provided, system uses environment variables (OPENAI_API_KEY, etc.)
+        # This ensures backward compatibility with existing deployments.
+        tenant_id = getattr(prompt_envelope, 'tenant_id', None)
+        project_id = getattr(prompt_envelope, 'project_id', None)
+        
+        if tenant_id:
+            logger.info(f"🔍 Checking database for active AI provider (tenant: {tenant_id})")
+            db_provider_config = await self._load_provider_config_from_db(tenant_id, project_id)
+            
+            if db_provider_config:
+                logger.info(f"✅ Using database-configured provider: {db_provider_config['provider']} ({db_provider_config.get('source')})")
+                
+                # Temporarily override config with database provider
+                self.config["current_provider"] = db_provider_config['provider']
+                self.config[db_provider_config['provider']] = {
+                    "apiKey": db_provider_config['api_key'],
+                    "enabled": True,
+                    "model": db_provider_config['model'],
+                    "timeout": int(db_provider_config.get('config_options', {}).get('timeout_ms', 20000)),
+                    "maxRetries": int(db_provider_config.get('config_options', {}).get('max_retries', 1)),
+                    "temperature": db_provider_config['temperature'],
+                    "maxTokens": db_provider_config['max_tokens'],
+                }
+                
+                # Re-initialize client with new config
+                self._initialize_openai()
+                
+                logger.debug(f"📝 Provider config: {db_provider_config['provider']} / {db_provider_config['model']}")
+            else:
+                logger.info(f"ℹ️ No database provider configured for tenant {tenant_id}, using environment variables")
+        else:
+            logger.info("ℹ️ No tenant_id provided, using environment variables (OPENAI_API_KEY, ANTHROPIC_API_KEY, etc.)")
+        
+        # Load API test data setups for AI context
+        prompt_id = getattr(prompt_envelope, 'prompt_id', None)
+        await self.load_api_test_data_for_prompt(prompt_id, project_id)
+        
+        # Load element repository for name mapping (always, regardless of bindings)
+        try:
+            from core.database import get_database_manager
+            db = await get_database_manager()
+
+            has_element_key = await db.fetchval(
+                """
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM information_schema.columns
+                    WHERE table_schema = 'repo'
+                      AND table_name = 'elements'
+                      AND column_name = 'element_key'
+                )
+                """
+            )
+
+            if has_element_key:
+                elements_query = """
+                    SELECT element_key, primary_selector
+                    FROM repo.elements
+                    ORDER BY created_at DESC
+                """
+            else:
+                elements_query = """
+                    SELECT name AS element_key, primary_selector
+                    FROM repo.elements
+                    ORDER BY created_at DESC
+                """
+
+            repository_elements = await db.fetch(elements_query)
+            logger.info(f"📦 Loaded {len(repository_elements) if repository_elements else 0} elements from repository for name mapping")
+            
+            # Create selector -> name mapping
+            element_selectors_reverse = {}
+            for element in repository_elements:
+                try:
+                    # Access as dict
+                    element_key = element.get('element_key')
+                    primary_selector = element.get('primary_selector')
+                    
+                    if not element_key or not primary_selector:
+                        continue
+                    
+                    if isinstance(primary_selector, dict):
+                        css_selector = primary_selector.get('css_selector', '') or primary_selector.get('css', '')
+                        if css_selector:
+                            element_selectors_reverse[css_selector.lower().strip()] = element_key
+                    elif isinstance(primary_selector, str):
+                        # Try to parse as JSON if it's a string
+                        import json
+                        try:
+                            selector_data = json.loads(primary_selector)
+                            if isinstance(selector_data, dict):
+                                css_selector = selector_data.get('css_selector', '') or selector_data.get('css', '')
+                                if css_selector:
+                                    element_selectors_reverse[css_selector.lower().strip()] = element_key
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+                except Exception as elem_err:
+                    logger.debug(f"Skipping element due to error: {elem_err}")
+                    continue
+            
+            # Store for use in response mapping
+            self.element_selectors_reverse = element_selectors_reverse
+            logger.info(f"🗺️  Created name mapping for {len(element_selectors_reverse)} elements")
+            
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to load element repository for name mapping: {e}")
+            import traceback
+            logger.debug(f"Traceback: {traceback.format_exc()}")
+            self.element_selectors_reverse = {}
+        
+        # Initialize element_selectors dict (from repository, keyed by element name)
+        element_selectors = {v: k for k, v in self.element_selectors_reverse.items()} if self.element_selectors_reverse else {}
+
         try:
             # Load existing bindings for this prompt if available
             existing_bindings = None
@@ -559,23 +1003,6 @@ class EnterpriseAIService:
                     # Debug: Log first binding structure
                     if existing_bindings and len(existing_bindings) > 0:
                         first_binding = existing_bindings[0]
-                    
-                    # Also load element repository data for automatic selector population
-                    elements_query = """
-                        SELECT element_key, primary_selector 
-                        FROM repo.elements 
-                        WHERE element_key LIKE '%price%' OR element_key LIKE '%total%' OR element_key LIKE '%subtotal%'
-                        ORDER BY created_at DESC
-                    """
-                    repository_elements = await db.execute(elements_query)
-                    
-                    # Create a mapping of element keys to selectors
-                    element_selectors = {}
-                    for element in repository_elements:
-                        if isinstance(element['primary_selector'], dict):
-                            css_selector = element['primary_selector'].get('css_selector', '')
-                            if css_selector:
-                                element_selectors[element['element_key']] = css_selector
                     
                     # Cache policy preference for synchronous selector methods
                     try:
@@ -869,6 +1296,7 @@ class EnterpriseAIService:
             actual_tokens = {"input": 0, "output": 0}
             method = "unknown"
             model = "unknown"
+            clarifications: List[Clarification] = []
 
             # Generate test steps using AI when available, fallback to heuristic
             logger.info(f" Checking AI availability - Client: {bool(self.client)}, Enabled: {self.config['openai']['enabled']}")
@@ -903,6 +1331,103 @@ class EnterpriseAIService:
                 logger.info("🔍 PURE HEURISTIC STEPS:")
                 for i, step in enumerate(steps, 1):
                     logger.info(f"  Pure Heuristic Step {i}: {step.action} -> {step.target} ({step.args.get('selector', 'no-selector')})")
+
+            # Guardrail: credentials must come only from prompt or data bindings
+            steps, missing_credential_fields = self._apply_credential_source_guardrail(prompt_envelope, ranked_elements, steps)
+            if missing_credential_fields:
+                field_list = ", ".join(missing_credential_fields)
+                clarifications.append(
+                    Clarification(
+                        type="missing_credentials",
+                        message=f"Login steps require credential values for: {field_list}. Add credentials via data binding variables or include them in the prompt.",
+                        suggestions=[
+                            "Add credential variables in Data Bindings (e.g., username/password constants or variables)",
+                            "Update your prompt to explicitly include the login credentials to use"
+                        ],
+                        required=True
+                    )
+                )
+            
+            # POLICY ENGINE: Evaluate test plan against configured policies
+            logger.debug(f"🎯 Evaluating {len(steps)} generated steps with policy engine")
+            try:
+                from services.policy_engine_enhanced import create_policy_engine
+                
+                # Get project and environment IDs from the request
+                project_id = getattr(prompt_envelope, 'project_id', None)
+                environment_id = getattr(prompt_envelope, 'environment_id', None)
+                
+                if project_id and environment_id:
+                    logger.info(f"🎯 Applying policy engine evaluation for project {project_id}")
+                    
+                    # Initialize policy engine
+                    db_manager = await get_database_manager()
+                    policy_engine = await create_policy_engine(db_manager, project_id, environment_id)
+                    
+                    # Evaluate test plan against policies
+                    test_plan_dict = {
+                        "steps": [
+                            {
+                                "step_index": i,
+                                "action": step.action,
+                                "target": step.target,
+                                "element": {
+                                    "confidence": int(step.confidence * 100)  # Convert to 0-100 scale
+                                },
+                                "args": step.args
+                            }
+                            for i, step in enumerate(steps)
+                        ]
+                    }
+                    
+                    evaluation = await policy_engine.evaluate_test_plan(test_plan_dict)
+                    
+                    # Handle blocked steps
+                    if not evaluation["approved"]:
+                        logger.warning(f"⚠️ Policy engine blocked {len(evaluation['blocked_steps'])} steps")
+                        
+                        # Filter out blocked steps
+                        blocked_indices = {s["step_index"] for s in evaluation["blocked_steps"]}
+                        steps = [step for i, step in enumerate(steps) if i not in blocked_indices]
+                        
+                        # Add warnings to clarifications
+                        for blocked in evaluation["blocked_steps"]:
+                            clarifications.append(
+                                Clarification(
+                                    type="policy_blocked",
+                                    message=f"Step {blocked['step_index']} ({blocked['action']}) was blocked by policy: {blocked['reason']}",
+                                    suggestions=["Review policy settings or modify test approach"],
+                                    required=False
+                                )
+                            )
+                    
+                    # Handle flagged steps (low confidence)
+                    if evaluation["flagged_steps"]:
+                        logger.info(f"🔍 Policy engine flagged {len(evaluation['flagged_steps'])} steps for review")
+                        
+                        for flagged in evaluation["flagged_steps"]:
+                            step_index = flagged["step_index"]
+                            if step_index < len(steps):
+                                # Add clarification for flagged step
+                                clarifications.append(
+                                    Clarification(
+                                        type="low_confidence",
+                                        message=f"Step {step_index} has low confidence ({flagged['confidence']}%) and may require review",
+                                        suggestions=["Verify element selector before execution"],
+                                        required=False
+                                    )
+                                )
+                    
+                    logger.info(f"✅ Policy evaluation complete - {len(steps)} steps approved, {len(evaluation['blocked_steps'])} blocked, {len(evaluation['flagged_steps'])} flagged")
+                    
+                else:
+                    logger.debug("ℹ️ No project/environment ID provided, skipping policy evaluation")
+                    
+            except ImportError:
+                logger.debug("ℹ️ Policy engine not available, skipping policy evaluation")
+            except Exception as e:
+                logger.error(f"❌ Policy engine evaluation failed: {e}")
+                # Don't fail the entire request, just log the error
             
             # SAFETY POLICY: Validate generated steps for destructive operations (if available)
             logger.debug(f"🛡️  Validating {len(steps)} generated steps for safety policy")
@@ -953,7 +1478,7 @@ class EnterpriseAIService:
             # Create successful response
             response = PlanResponse(
                 steps=steps,
-                clarifications=[],
+                clarifications=clarifications,
                 used={
                     "elementsConsidered": len(ranked_elements),
                     "catalogsLoaded": len(prompt_envelope.catalog_refs),
@@ -965,6 +1490,41 @@ class EnterpriseAIService:
                 model=model,
                 cache_used=cache_hits > 0
             )
+
+            # Replace selectors with friendly element names in response
+            # Keep original selector in args for execution, but show name in target for display
+            if hasattr(self, 'element_selectors_reverse') and self.element_selectors_reverse:
+                logger.info(f"🏷️  Mapping selectors to element names ({len(self.element_selectors_reverse)} names available)")
+                for step in response.steps:
+                    original_target = step.target
+                    if step.target:
+                        # Normalize and lookup
+                        target_normalized = step.target.lower().strip()
+                        element_name = None
+                        
+                        # Try direct match first
+                        if target_normalized in self.element_selectors_reverse:
+                            element_name = self.element_selectors_reverse[target_normalized]
+                        # Try removing :nth-of-type(1) at end
+                        elif target_normalized.endswith(':nth-of-type(1)'):
+                            target_alt = target_normalized[:-15]  # Remove :nth-of-type(1)
+                            if target_alt in self.element_selectors_reverse:
+                                element_name = self.element_selectors_reverse[target_alt]
+                        # Try removing leading "a " tag prefix
+                        elif target_normalized.startswith('a '):
+                            target_alt = target_normalized[2:]  # Remove "a "
+                            if target_alt in self.element_selectors_reverse:
+                                element_name = self.element_selectors_reverse[target_alt]
+                        
+                        if element_name:
+                            logger.debug(f"   ✓ Mapped '{original_target}' → '{element_name}'")
+                            # Keep original selector in args for execution
+                            step.args['_original_selector'] = original_target
+                            # Show friendly name in target for display
+                            step.target = element_name
+                            # Update description
+                            if step.description and original_target in step.description:
+                                step.description = step.description.replace(original_target, f"'{element_name}'")
 
             # Log final response steps for debugging
             logger.info(f"🎉 Plan generation successful - Method: {method}, Steps: {len(response.steps)}, Time: {response.processing_time_ms}ms")
@@ -1122,36 +1682,152 @@ class EnterpriseAIService:
             else:
                 raw_steps = parsed.get("steps", [])  # Object format with steps property
             
-            # Convert to PlanStep objects with element validation
+            # Helper functions for element validation (defined before loop to avoid scope issues)
+            def get_all_element_selectors(el):
+                """Extract all selector variants from stored element"""
+                selectors = set()
+                
+                # Add primary selector
+                primary = self._get_element_selector(el)
+                if primary:
+                    selectors.add(primary.lower())
+                
+                # Add element ID
+                el_id = self._get_element_id(el)
+                if el_id:
+                    selectors.add(el_id.lower())
+                    selectors.add(f"#{el_id}".lower())
+                
+                # Check if element has a dict structure with multiple selectors
+                if isinstance(el, dict):
+                    # Add css_selector variants
+                    if 'css_selector' in el or 'selector_css' in el:
+                        css = el.get('css_selector') or el.get('selector_css')
+                        if css:
+                            selectors.add(str(css).lower())
+                    
+                    # Add xpath
+                    if 'xpath' in el or 'selector_xpath' in el:
+                        xpath = el.get('xpath') or el.get('selector_xpath')
+                        if xpath:
+                            selectors.add(str(xpath).lower())
+                    
+                    # Add name attribute selector
+                    if 'attributes' in el and isinstance(el['attributes'], dict):
+                        if 'name' in el['attributes']:
+                            name = el['attributes']['name']
+                            selectors.add(f"[name='{name}']".lower())
+                            selectors.add(f'[name="{name}"]'.lower())
+                    
+                    # Add selectors dict if present
+                    if 'selectors' in el and isinstance(el['selectors'], dict):
+                        for key, val in el['selectors'].items():
+                            if val:
+                                selectors.add(str(val).lower())
+                
+                return selectors
+            
+            def normalize_selector(sel):
+                """Normalize a selector for comparison - handles common AI variations"""
+                if not sel:
+                    return ""
+                import re as regex_module
+                sel = str(sel).strip().lower()
+                
+                # Remove leading tag prefix before combinators: "a div > ul" -> "div > ul"
+                sel = regex_module.sub(r'^[a-z0-9]+\s+(?=[a-z#\[\.])', '', sel)
+                
+                # Remove redundant :nth-of-type(1) at the end
+                sel = regex_module.sub(r':nth-of-type\(1\)$', '', sel)
+                
+                # Remove tag prefix before id/class/attribute: "input#id" -> "#id"
+                sel = regex_module.sub(r'^[a-z0-9]+(?=[#\[\.])', '', sel)
+                
+                # Standardize quotes
+                sel = sel.replace("'", '"')
+                
+                # Remove trailing spaces
+                sel = sel.strip()
+                
+                return sel
+            
+            # Detect multi-page workflow by checking if open_url is in the steps
+            has_navigation = any(step.get('action') == 'open_url' for step in raw_steps)
+            
+            if has_navigation:
+                logger.info("🌐 Multi-page workflow detected (contains open_url) - relaxing element validation")
+                logger.info("   Elements from future pages may not be in current page_slice")
+            
+            # Convert to PlanStep objects with smart element validation
             steps = []
             for i, raw_step in enumerate(raw_steps[:prompt_envelope.max_steps]):
                 # Apply policy-based selector transformation to AI-generated target
                 original_target = raw_step.get("target")
+                action = raw_step.get("action", "")
                 
-                # Validate that the target element actually exists in our ranked_elements
+                # Skip validation for actions that don't need specific elements
+                if action in ["open_url", "wait", "screenshot", "navigate_back", "navigate_forward", "refresh"]:
+                    logger.debug(f"✅ Step {i+1} accepted (no element needed) - {action}")
+                    step = PlanStep(
+                        action=action,
+                        target=original_target,
+                        args=raw_step.get("args", {}),
+                        confidence=raw_step.get("confidence", 0.8),
+                        description=raw_step.get("description")
+                    )
+                    steps.append(step)
+                    continue
+                
+                # For multi-page workflows, skip strict validation since elements may be on future pages
+                if has_navigation:
+                    logger.debug(f"✅ Step {i+1} accepted (multi-page workflow) - {action} -> {original_target}")
+                    step = PlanStep(
+                        action=raw_step.get("action", ""),
+                        target=original_target,
+                        args=raw_step.get("args", {}),
+                        confidence=raw_step.get("confidence", 0.7),  # Lower confidence for unvalidated elements
+                        description=raw_step.get("description")
+                    )
+                    # Validate and correct variables in the step
+                    validated_step = self.variable_validator.validate_step_variables(step)
+                    if validated_step:
+                        steps.append(validated_step)
+                    continue
+                
+                # For element-based actions, validate against available elements
                 step_selector = raw_step.get("args", {}).get('selector', original_target)
                 element_found = False
-                matching_element = None
                 
+                step_selector_norm = normalize_selector(step_selector)
+                target_norm = normalize_selector(original_target)
+                
+                # Check against all available elements
                 for el in ranked_elements:
-                    el_id = self._get_element_id(el)
-                    el_selector = self._get_element_selector(el)
-                    el_text = self._get_element_text(el).lower()
+                    el_selectors = get_all_element_selectors(el)
                     
-                    # Check multiple matching criteria
-                    if (el_id == original_target or 
-                        el_selector == step_selector or 
-                        step_selector in el_selector or
-                        el_selector in step_selector):
+                    # Check exact matches (case-insensitive)
+                    if (step_selector and step_selector.lower() in el_selectors) or \
+                       (original_target and original_target.lower() in el_selectors):
                         element_found = True
-                        matching_element = el
-                        logger.debug(f"✅ Step {i+1} validated - found element: {original_target} -> {el_selector}")
+                        logger.debug(f"✅ Step {i+1} validated (exact match) - {action} -> {original_target}")
+                        break
+                    
+                    # Check normalized matches (without tag prefixes)
+                    for el_sel in el_selectors:
+                        el_sel_norm = normalize_selector(el_sel)
+                        if (step_selector_norm and el_sel_norm and 
+                            (el_sel_norm == step_selector_norm or el_sel_norm == target_norm)):
+                            element_found = True
+                            logger.debug(f"✅ Step {i+1} validated (normalized match) - {action} -> {original_target}")
+                            break
+                    
+                    if element_found:
                         break
                 
                 if not element_found:
-                    logger.warning(f"❌ Step {i+1} REJECTED - element not found: {original_target} ({step_selector})")
-                    logger.warning(f"   Available elements: {[self._get_element_selector(el) for el in ranked_elements[:3]]}")
-                    continue  # Skip this step entirely
+                    logger.warning(f"❌ Step {i+1} REJECTED - selector not in stored elements: {original_target or step_selector}")
+                    logger.warning(f"   📋 Try one of: {[self._get_element_selector(el) for el in ranked_elements[:5]]}")
+                    continue  # Skip this invented step
                 
                 # Element exists, create the step
                 if original_target and original_target.startswith('#'):
@@ -1211,7 +1887,7 @@ class EnterpriseAIService:
         
         if "login" in prompt or "sign in" in prompt:
             logger.info("🔑 Detected login intent, generating login steps")
-            steps.extend(await self._generate_login_steps(ranked_elements))
+            steps.extend(await self._generate_login_steps(ranked_elements, prompt_envelope.prompt))
         elif "search" in prompt:
             search_term = self._extract_search_term(prompt_envelope.prompt)
             logger.info(f"🔍 Detected search intent, term: '{search_term}'")
@@ -1277,7 +1953,7 @@ class EnterpriseAIService:
     # STEP GENERATION HELPERS
     # =========================
     
-    async def _generate_login_steps(self, elements: List[Any]) -> List[PlanStep]:
+    async def _generate_login_steps(self, elements: List[Any], prompt_text: str = "") -> List[PlanStep]:
         """Generate login-specific steps with policy-based selectors"""
         steps = [] 
         
@@ -1295,21 +1971,23 @@ class EnterpriseAIService:
             logger.debug(f"✅ Found username element: {self._get_element_selector(username_el)}")
             username_selector = await self._get_policy_based_element_selector(username_el)
             
-            # Get username value from constant bindings or fallback to default
-            username_value = self.get_constant_value("userName", self.get_constant_value("username", "standard_user"))
-            
-            steps.append(PlanStep(
-                action="type",
-                target=self._get_element_id(username_el),
-                args={
-                    "selector": self._get_element_selector(username_el), 
-                    "text": username_value,
-                    "element_type": "username_field"
-                },
-                description="Enter username/email",
-                confidence=0.9
-            ))
-            logger.debug(f"🔑 Using username value: {username_value}")
+            username_value = self._resolve_credential_value("username", prompt_text)
+
+            if username_value:
+                steps.append(PlanStep(
+                    action="type",
+                    target=self._get_element_id(username_el),
+                    args={
+                        "selector": self._get_element_selector(username_el), 
+                        "text": username_value,
+                        "element_type": "username_field"
+                    },
+                    description="Enter username/email",
+                    confidence=0.9
+                ))
+                logger.debug(f"🔑 Using username value from approved source: {username_value}")
+            else:
+                logger.warning("🔒 No approved username source found (prompt/data bindings); skipping username type step")
         else:
             logger.debug("❌ No username field found")
 
@@ -1319,21 +1997,23 @@ class EnterpriseAIService:
             logger.debug(f"✅ Found password element: {self._get_element_selector(password_el)}")
             password_selector = await self._get_policy_based_element_selector(password_el)
             
-            # Get password value from constant bindings or fallback to default
-            password_value = self.get_constant_value("password", "secret_sauce")
-            
-            steps.append(PlanStep(
-                action="type", 
-                target=self._get_element_id(password_el),
-                args={
-                    "selector": self._get_element_selector(password_el), 
-                    "text": password_value,
-                    "element_type": "password_field"
-                },
-                description="Enter password",
-                confidence=0.9
-            ))
-            logger.debug(f"🔑 Using password value: {password_value}")
+            password_value = self._resolve_credential_value("password", prompt_text)
+
+            if password_value:
+                steps.append(PlanStep(
+                    action="type", 
+                    target=self._get_element_id(password_el),
+                    args={
+                        "selector": self._get_element_selector(password_el), 
+                        "text": password_value,
+                        "element_type": "password_field"
+                    },
+                    description="Enter password",
+                    confidence=0.9
+                ))
+                logger.debug("Using password value from approved source (value redacted)")
+            else:
+                logger.warning("🔒 No approved password source found (prompt/data bindings); skipping password type step")
         else:
             logger.debug("❌ No password field found - SKIPPING password step")
 
@@ -1640,7 +2320,19 @@ class EnterpriseAIService:
     
     def _build_enhanced_system_prompt(self) -> str:
         """Build enhanced system prompt for intelligent test generation"""
-        base_prompt = """You are a QA automation engineer. Generate test steps in valid JSON format.
+        
+        # Add current date context
+        from datetime import datetime
+        current_date = datetime.now().strftime("%Y-%m-%d")
+        current_year = datetime.now().year
+        
+        base_prompt = f"""You are a QA automation engineer. Generate test steps in valid JSON format.
+
+**CURRENT CONTEXT:**
+- Today's date: {current_date}
+- Current year: {current_year}
+- When generating dates for travel, bookings, or future events, use dates from {current_year} or later
+- Example: For flight search, use departure dates like {current_year}-12-25 or later
 
 IMPORTANT RULES:
 1. Analyze the user's request AND page context to understand the SPECIFIC scope - adapt to ANY website type
@@ -1674,11 +2366,11 @@ IMPORTANT RULES:
 - Variable names are case-sensitive and must match exactly
 
 **VARIABLE USAGE IN ASSERTIONS:**
-- When using variables in assert_text, include the variable name in the "text" field as "${variableName}"
+- When using variables in assert_text, include the variable name in the "text" field as "${{variableName}}"
 - Only use variables that are explicitly defined in the data bindings
-- Example: {"action": "extract_data", "target": ".price-display", "args": {"selector": ".price-display", "variable": "backpackPrice"}}
-- Example: {"action": "calculate", "target": "", "args": {"formula": "itemSubTotal = backpackPrice + onesiePrice", "result_variable": "itemSubTotal"}}
-- Example: {"action": "assert_text", "target": ".total-label", "args": {"selector": ".total-label", "text": "Total: ${itemSubTotal}"}}
+- Example: {{"action": "extract_data", "target": ".price-display", "args": {{"selector": ".price-display", "variable": "backpackPrice"}}}}
+- Example: {{"action": "calculate", "target": "", "args": {{"formula": "itemSubTotal = backpackPrice + onesiePrice", "result_variable": "itemSubTotal"}}}}
+- Example: {{"action": "assert_text", "target": ".total-label", "args": {{"selector": ".total-label", "text": "Total: ${{itemSubTotal}}"}}}}
 - Variables will be dynamically replaced with their extracted values during test execution
 
 **PREDEFINED VARIABLES (when provided):**
@@ -1698,16 +2390,180 @@ IMPORTANT RULES:
 
         base_prompt += """
 
+**SELECTOR QUALITY RULES (CRITICAL):**
+- AVOID auto-generated IDs that contain random numbers, timestamps, or UUIDs (e.g., #tabs-06804563505102382-tab-0)
+- PREFER stable selectors in this priority order:
+  1. Semantic HTML5 elements (nav, main, article, section)
+  2. Stable data attributes (data-testid, data-cy, data-test)
+  3. ARIA attributes (aria-label, role)
+  4. Semantic class names (btn-primary, nav-link, search-input)
+  5. Stable IDs (user-name, password, login-button)
+- INDICATORS OF BAD SELECTORS:
+  - IDs with numbers: #element-123456789, #tabs-068045635
+  - React/Vue generated IDs: #__next, #app-root-12345
+  - Random hashes: #x7f3d9a2b
+- LOOK FOR PATTERNS:
+  - Forms: Look for <form> tags, input[type="..."], labeled inputs
+  - Buttons: <button>, input[type="submit"], [role="button"]
+  - Navigation: <nav>, .nav-link, [aria-label="navigation"]
+  - Interactive elements: Elements with event listeners, tabindex, or aria roles
+
 **AVAILABLE ACTIONS:**
+
+=== BASIC ACTIONS ===
 - open_url: Navigate to start page
 - type: Enter text into form fields  
 - click: Click buttons, links, and interactive elements
-- assert_text: Verify text content of elements
+- assert_text: Verify text content of elements (partial match)
 - assert_visible: Verify elements are visible
 - wait_for: Wait for page transitions or elements to load
-- extract_data: Extract dynamic values from page elements and store in variables
-- calculate: Perform mathematical operations on extracted variables
+- extract_data: Extract text/value from a SINGLE element (NOT arrays/multiple elements)
+  * MUST include "selector" in args
+  * MUST include "variable" name in args
+  * Extracts text from ONE element only
+  * Example: Extract price from one element into variable "backpackPrice"
+- calculate: Simple arithmetic ONLY (+, -, *, /)
+  * NO JavaScript code, NO array methods, NO .sort(), NO arrow functions
+  * Only supports: variableName = value1 + value2 - value3
+  * Use extracted variable names in formula
+  * Example: "totalPrice = backpackPrice + onesiePrice"
+- api_setup: Execute predefined API calls to create test data BEFORE UI test runs
+  * Use when test requires precondition data (e.g., create booking before testing change booking)
+  * MUST specify "setup_id" in args - use IDs from AVAILABLE API TEST DATA SETUPS section
+  * Variables extracted from API response become available for use in subsequent steps
+  * Place api_setup steps at the BEGINNING of the test, before any UI interactions
+  * Example: Create a booking via API, then use ${booking_id} in UI test steps
 - screenshot: Capture page state
+
+=== NAVIGATION & PAGE CONTROL ===
+- scroll_to_element: Scroll to bring an element into view (critical for lazy-loaded pages)
+  * Use when elements are below the fold or in scrollable containers
+- scroll_to_position: Scroll to specific position on page
+  * args.position: "top", "bottom", "50%" (percentage), or "500" (pixels)
+- wait_for_page_load: Smart wait that checks document.readyState and network idle
+  * Better than fixed waits, ensures page is actually ready
+  * args.timeout: optional timeout in seconds (default 30)
+- switch_to_frame: Switch context to an iframe
+  * args.frame: frame index (0, 1, 2), name/id, or CSS selector
+- switch_to_parent_frame: Switch back from iframe to parent context
+- switch_to_window: Switch to different browser tab/window
+  * args.window: "new" (newest tab), "main" (original), index, or handle
+- close_window: Close current window and switch to remaining
+- navigate_back: Click browser back button
+- navigate_forward: Click browser forward button  
+- refresh_page: Refresh/reload current page
+
+=== FORM & INPUT ===
+- clear_and_type: Clear existing text then type new text (avoids appending issues)
+  * Preferred over "type" when field may have existing content
+- type_slowly: Type character by character with delay
+  * Use for autocomplete dropdowns or fields with debounced validation
+  * args.delay: milliseconds between characters (default 100)
+- upload_file: Upload file to file input element
+  * args.file_path: absolute path to file to upload
+- select_by_index: Select dropdown option by index (0-based)
+  * args.index: option index to select
+- select_by_value: Select dropdown option by value attribute
+  * args.value: the value attribute of the option
+- select_by_text: Select dropdown option by visible text
+  * args.text: the visible text of the option
+- check_checkbox: Check a checkbox (idempotent - no-op if already checked)
+- uncheck_checkbox: Uncheck a checkbox (idempotent - no-op if already unchecked)
+- set_slider: Set a range slider/input to specific value
+  * args.value: numeric value to set
+- set_date_picker: Set a date picker field
+  * args.date: date value in appropriate format (yyyy-MM-dd for HTML5 inputs)
+
+=== VERIFICATION & ASSERTION ===
+- assert_text_exact: Verify element text matches exactly
+- assert_text_contains: Verify element text contains substring
+- assert_element_count: Verify number of elements matching selector
+  * args.count: expected number of elements
+- assert_attribute: Verify element attribute has expected value
+  * args.attribute: attribute name (href, placeholder, disabled, etc.)
+  * args.value: expected attribute value
+- assert_page_title: Verify page title matches expected value
+  * args.title: expected page title
+- assert_url: Verify current URL matches exactly
+  * args.url: expected URL
+- assert_url_contains: Verify current URL contains substring
+  * args.substring: expected URL substring
+- assert_element_enabled: Verify element is enabled/interactable
+- assert_element_disabled: Verify element is disabled
+- assert_checkbox_checked: Verify checkbox is checked
+- assert_checkbox_unchecked: Verify checkbox is unchecked
+- assert_toast_message: Verify toast/snackbar notification appears with text
+  * Auto-detects common toast selectors (.toast, .snackbar, [role="alert"])
+  * args.text: expected toast message text
+
+=== KEYBOARD & MOUSE ===
+- hover: Hover over element to reveal hidden menus/tooltips
+- right_click: Right-click (context click) on element
+- double_click: Double-click on element
+- drag_and_drop: Drag element to another element
+  * target: source element selector
+  * args.drop_target: destination element selector
+- press_key: Press keyboard key (Enter, Tab, Escape, arrow keys, F1-F12)
+  * args.key: key name (ENTER, TAB, ESCAPE, UP, DOWN, LEFT, RIGHT, etc.)
+- keyboard_shortcut: Execute keyboard shortcut (Ctrl+S, Ctrl+Z, etc.)
+  * args.keys: shortcut combination (e.g., "CTRL+S", "CTRL+SHIFT+N")
+
+=== TABLES & DYNAMIC CONTENT ===
+- get_table_cell_value: Extract value from table cell and store in variable
+  * args.row: row index (1-based)
+  * args.col: column index (1-based) or column header name
+  * args.variable: variable name to store value
+- assert_table_row_count: Verify number of rows in table
+  * args.count: expected row count
+- click_table_row_by_value: Find row containing value and click it
+  * args.value: text to search for
+  * args.col: optional column to search in
+- wait_for_table_to_load: Wait for table to have rows loaded
+  * Use for dynamically loaded table data
+
+=== LISTS & ITERATION ===
+- extract_list: Extract text from ALL elements matching selector into a list variable
+  * Creates: varName, varName_0, varName_1, varName_count
+  * Use for checking all product names, prices, etc.
+- verify_all: Verify ALL elements matching selector satisfy a condition
+  * args.condition: "not_empty", "contains:text", "equals:text", "matches:regex"
+  * Example: Verify all product descriptions contain certain text
+- count_elements: Count elements matching selector and store in variable
+- for_each: Iterate through extracted list, storing each item for subsequent steps
+
+=== DATE VERIFICATION ===
+- verify_date_format: Verify element text matches expected date format
+  * args.format: date format pattern (MM/dd/yyyy, yyyy-MM-dd, MMM dd, yyyy, etc.)
+  * Auto-detects common formats if not specified
+
+=== ALERTS & MODALS ===
+- accept_alert: Accept (click OK) JavaScript alert/confirm dialog
+- dismiss_alert: Dismiss (click Cancel) JavaScript alert/confirm dialog
+- get_alert_text: Extract alert text into variable
+  * args.variable: variable name to store alert text
+- wait_for_modal_visible: Wait for modal dialog to appear
+  * Auto-detects common modal selectors
+- wait_for_modal_dismissed: Wait for modal to close/disappear
+
+=== API / NETWORK ===
+- wait_for_api_response: Wait for specific API request to complete
+  * Use to ensure page data is ready before verifying
+  * args.url_pattern: optional URL substring to wait for
+  * args.timeout: timeout in seconds (default 30)
+
+**CRITICAL extract_data LIMITATIONS:**
+🚫 CANNOT extract from multiple elements into arrays
+🚫 CANNOT use .inventory_item_price without a specific element
+✅ CAN extract from ONE specific element: .inventory_item:nth-child(1) .inventory_item_price
+✅ Each extract_data creates ONE variable with ONE value
+✅ For multiple elements, use extract_list action instead
+
+**CRITICAL calculate LIMITATIONS:**
+🚫 NO JavaScript: NO .sort(), NO .filter(), NO arrow functions, NO array methods
+🚫 NO complex expressions: NO itemPrices.sort((a, b) => a - b)
+✅ ONLY simple math: totalPrice = price1 + price2
+✅ ONLY operators: + - * /
+✅ Use variables created by extract_data steps
 
 JSON FORMAT (respond with ONLY this JSON, no other text):
 {
@@ -1754,12 +2610,32 @@ JSON FORMAT (respond with ONLY this JSON, no other text):
     },
     {
       "action": "extract_data",
-      "target": ".price-display",
+      "target": ".inventory_item:nth-child(1) .inventory_item_price",
       "args": {
-        "selector": ".price-display",
-        "variable": "currentPrice"
+        "selector": ".inventory_item:nth-child(1) .inventory_item_price",
+        "variable": "firstItemPrice"
       },
-      "description": "Extract current price",
+      "description": "Extract first item price",
+      "confidence": 0.9
+    },
+    {
+      "action": "extract_data",
+      "target": ".inventory_item:nth-child(2) .inventory_item_price",
+      "args": {
+        "selector": ".inventory_item:nth-child(2) .inventory_item_price",
+        "variable": "secondItemPrice"
+      },
+      "description": "Extract second item price",
+      "confidence": 0.9
+    },
+    {
+      "action": "calculate",
+      "target": "",
+      "args": {
+        "formula": "totalPrice = firstItemPrice + secondItemPrice",
+        "result_variable": "totalPrice"
+      },
+      "description": "Calculate total of two prices",
       "confidence": 0.9
     },
     {
@@ -1775,6 +2651,14 @@ JSON FORMAT (respond with ONLY this JSON, no other text):
   ]
 }
 
+CRITICAL CONSTRAINTS:
+- extract_data extracts from ONE element at a time, creates ONE variable
+- calculate uses simple arithmetic ONLY (no JavaScript, no array operations)
+- To work with multiple items, create separate extract_data steps for each item
+- Use :nth-child(N) or specific selectors to target individual elements
+- NO dynamic selector generation with variables (no ${variable} interpolation in selectors)
+- Keep it simple: the test runner is Java-based, not JavaScript
+
 CRITICAL: When generating login steps, use the predefined constant values above, not values visible on the page."""
 
         # Add constant binding information if available
@@ -1785,6 +2669,48 @@ CRITICAL: When generating login steps, use the predefined constant values above,
                 constant_info += f"\n- {var_name}: '{value}'"
             constant_info += "\n- These values override any credentials shown on the page"
             base_prompt += constant_info
+
+        # Add API test data setup context if available
+        if hasattr(self, 'api_test_data_setups') and self.api_test_data_setups:
+            api_context = "\n\n**AVAILABLE API TEST DATA SETUPS:**"
+            api_context += "\n- Use api_setup action to create precondition data via API before UI test steps"
+            api_context += "\n- Place api_setup steps at the BEGINNING of your test plan"
+            api_context += "\n- Variables extracted from API responses can be used in subsequent steps with ${variable_name}"
+            api_context += "\n\nAvailable setups:"
+            
+            for setup in self.api_test_data_setups:
+                api_context += f"\n\n  Setup ID: {setup.get('id')}"
+                api_context += f"\n  Name: {setup.get('name')}"
+                api_context += f"\n  Category: {setup.get('category', 'general')}"
+                api_context += f"\n  Description: {setup.get('description', 'No description')}"
+                api_context += f"\n  API: {setup.get('http_method', 'POST')} {setup.get('endpoint_name', '')}{setup.get('path', '')}"
+                
+                # Show available output variables
+                extractors = setup.get('response_extractors', [])
+                if extractors:
+                    var_names = [e.get('name') for e in extractors if e.get('name')]
+                    if var_names:
+                        api_context += f"\n  Output Variables: {', '.join(var_names)}"
+                        api_context += f"\n  Use as: {', '.join([f'${{{v}}}' for v in var_names])}"
+            
+            api_context += "\n\n**API SETUP USAGE EXAMPLE:**"
+            api_context += """
+{
+  "action": "api_setup",
+  "target": "",
+  "args": {
+    "setup_id": "<UUID from available setups above>",
+    "variables": {}
+  },
+  "description": "Create test data via API",
+  "confidence": 0.95
+}"""
+            api_context += "\n\n**WHEN TO USE api_setup:**"
+            api_context += "\n- User mentions testing a flow that requires existing data (change booking, edit profile, cancel order)"
+            api_context += "\n- The prompt implies preconditions that need to be set up first"
+            api_context += "\n- Use the setup whose category/description best matches the precondition needed"
+            
+            base_prompt += api_context
 
         return base_prompt
     
@@ -1802,8 +2728,20 @@ CRITICAL: When generating login steps, use the predefined constant values above,
             selector = self._get_element_selector(el)
             text = self._get_element_text(el)
             
+            # Try to find a friendly name from element repository
+            element_name = None
+            if hasattr(self, 'element_selectors_reverse'):
+                # Look up by selector
+                selector_normalized = selector.lower().strip()
+                element_name = self.element_selectors_reverse.get(selector_normalized)
+            
             if tag.lower() in ['button', 'a', 'input', 'select', 'textarea'] and selector:
-                element_desc = f"{tag} {selector}"
+                # Show element name if available, otherwise show selector
+                if element_name:
+                    element_desc = f"{tag} '{element_name}' ({selector})"
+                else:
+                    element_desc = f"{tag} {selector}"
+                    
                 if text and text.strip():
                     element_desc += f' "{text[:30]}"'
                 
@@ -1865,21 +2803,25 @@ CRITICAL: When generating login steps, use the predefined constant values above,
 {elements_context}
 
 CRITICAL REQUIREMENTS:
-🚫 ONLY use elements from the PROVIDED ELEMENTS list above
-🚫 DO NOT generate steps for elements that are NOT in the list
-🚫 DO NOT assume elements exist (like #password, #login-button, etc.)
-🚫 DO NOT create fictional selectors or elements
-
-✅ ONLY reference selectors that appear in the elements list above
-✅ If required elements are missing, note this in clarifications
-✅ Generate steps ONLY for the elements that actually exist
+🌐 MULTI-PAGE WORKFLOWS: If your plan includes 'open_url' to navigate to different pages:
+   ✅ You can reference elements that will exist on FUTURE pages (after navigation)
+   ✅ Use standard, semantic selectors (e.g., #username, #password, .product-item)
+   ✅ The provided elements are from the CURRENT page only
+   
+📄 SINGLE-PAGE WORKFLOWS: If your plan works on the CURRENT page only:
+   🚫 ONLY use selectors from the PROVIDED ELEMENTS list above
+   🚫 DO NOT invent or guess selectors - use EXACT selectors from the element list
+   ✅ Copy selectors EXACTLY as shown - including quotes, brackets, and special characters
+   
+✅ Always prefer semantic, stable selectors over auto-generated IDs
+✅ If required elements are missing from current page, note this in clarifications
 
 Generate an ADAPTIVE workflow based on the website type and user request:
 
-0. ELEMENT VALIDATION (MANDATORY):
-   - Before creating ANY step, verify the target element exists in the PROVIDED ELEMENTS list above
-   - If a step requires an element not in the list, SKIP that step entirely
-   - Add clarification explaining which expected elements are missing
+0. ELEMENT VALIDATION:
+   - For SINGLE-PAGE workflows: Verify each target element exists in the PROVIDED ELEMENTS list
+   - For MULTI-PAGE workflows: Use semantic selectors for elements on future pages
+   - If critical elements are missing from current page, note this in clarifications
 
 1. ANALYZE WEBSITE TYPE from URL and available elements:
    - E-commerce: Look for product, cart, checkout elements
@@ -1889,29 +2831,45 @@ Generate an ADAPTIVE workflow based on the website type and user request:
    - General: Identify primary functionality from available elements
 
 2. FOCUS ON USER'S SPECIFIC REQUEST:
-   - If "test search functionality" → Focus on search boxes, filters, results
+   - If "search" mentioned → Find search input, TYPE search term, click search button, verify results
    - If "test booking flow" → Focus on date pickers, forms, booking buttons
    - If "test navigation" → Focus on menus, links, page transitions
    - If "comprehensive testing" → Test all major functionality for that site type
 
-3. LOGICAL WORKFLOW for the identified website type:
+3. COMPLETE ACTION SEQUENCES (DO NOT SKIP STEPS):
+   - Search workflow: MUST include type action → "type" into search input → click search → wait for results → verify
+   - Login workflow: MUST include type actions → "type" username → "type" password → click login
+   - Form workflow: MUST include type actions for EACH input field → fill all fields → submit
+   - Navigation workflow: Click links → wait for page load → verify new page
+   
+4. LOGICAL WORKFLOW for the identified website type:
    - Airlines: Search flights → Select dates → Choose flights → Enter passenger info
    - E-commerce: Browse products → Add to cart → View cart → Checkout
    - Banking: Login → Select account → Perform transactions
    - News: Navigate categories → Read articles → Use search
    - Forms: Fill fields → Validate → Submit → Verify results
 
-4. VERIFY elements appropriate to the website and request:
+5. VERIFY elements appropriate to the website and request:
    - Don't test shopping cart elements on airline sites
    - Don't test flight booking elements on news sites
    - Focus on elements that match the website's actual purpose
 
-5. ADAPTIVE STATE MANAGEMENT:
+6. ADAPTIVE STATE MANAGEMENT:
    - Understand element states specific to this website type
    - Follow logical interaction sequences for this domain
    - Verify results appropriate to the website's functionality
 
-6. End with a screenshot for documentation
+7. CRITICAL FOR SEARCH REQUESTS:
+   When the user asks to "search for X" or "test search", you MUST generate these steps:
+   - Navigate to the website
+   - Find the search input element (input[type="text"], textarea, or similar)
+   - Use "type" action to enter the search term into the input
+   - Click the search button or submit
+   - Wait for results to load
+   - Verify results are visible
+   DO NOT skip the "type" action - it is REQUIRED for search functionality!
+
+8. End with a screenshot for documentation
 
 CRITICAL: Adapt completely to the website type. Don't use e-commerce patterns for airlines, banking, or other domains."""
     
@@ -2335,7 +3293,7 @@ IMPORTANT: Return only the step_order numbers of the original steps that are ess
                 max_tokens=2000,
                 temperature=0.1,
                 retries=3,
-                timeout_ms=30000
+                timeout_ms=90000
             )
             
             analysis_result = json.loads(response)
@@ -2360,11 +3318,7 @@ IMPORTANT: Return only the step_order numbers of the original steps that are ess
                         "originalStepId": str(original_step.get("id", ""))
                     }
                     
-                    # Log for debugging
-                    if essential_step["action"] == "type" and essential_step["text_value"]:
-                        essential_steps.append(essential_step)
-                    elif essential_step["action"] == "type":
-                        essential_steps.append(essential_step)
+                    essential_steps.append(essential_step)
             
             # Calculate metrics
             original_count = len(all_steps)
@@ -2396,7 +3350,15 @@ IMPORTANT: Return only the step_order numbers of the original steps that are ess
         Fallback heuristic approach for minimal reproduction when AI is unavailable.
         Returns original steps based on heuristic rules.
         """
-        failed_step_numbers = {step.get("step_order", 0) for step in failed_steps}
+        failed_step_numbers = set()
+        for step in failed_steps:
+            if not isinstance(step, dict):
+                continue
+            step_order = step.get("step_order", step.get("step_index", 0))
+            try:
+                failed_step_numbers.add(int(step_order or 0))
+            except (TypeError, ValueError):
+                continue
         
         # Heuristic rules based on optimization level
         essential_actions = {"open_url", "click", "type", "select"}
@@ -2406,8 +3368,16 @@ IMPORTANT: Return only the step_order numbers of the original steps that are ess
         essential_steps = []
         
         for step in all_steps:
-            step_number = step.get("step_order", 0)
-            action = step.get("action", "").lower()
+            if not isinstance(step, dict):
+                continue
+
+            step_number_raw = step.get("step_order", 0)
+            try:
+                step_number = int(step_number_raw or 0)
+            except (TypeError, ValueError):
+                step_number = 0
+
+            action = str(step.get("action", "")).lower()
             
             include_step = False
             
@@ -2423,7 +3393,7 @@ IMPORTANT: Return only the step_order numbers of the original steps that are ess
             elif any(setup_action in action for setup_action in setup_actions):
                 if optimization_level == "conservative":
                     include_step = True
-                elif optimization_level == "moderate" and step_number <= max(failed_step_numbers):
+                elif optimization_level == "moderate" and failed_step_numbers and step_number <= max(failed_step_numbers):
                     include_step = True
             
             # Skip most verification steps unless conservative
@@ -2561,12 +3531,19 @@ Return a JSON array of recommendation strings.
         retries: int,
         timeout_ms: int,
     ) -> str:
-        """Call AI provider with JSON response format - supports OpenAI and Anthropic"""
+        """Call AI provider with JSON response format - supports OpenAI, Anthropic, and Ollama"""
         current_provider = self.config.get("current_provider", "openai")
         logger.debug(f" Starting AI completion: provider={current_provider}, model={model}, max_tokens={max_tokens}")
         
         # Route to appropriate provider
-        if current_provider == "anthropic" and self.anthropic_client:
+        if current_provider == "ollama" and self.ollama_client:
+            ollama_config = self.config.get("ollama", {})
+            return await self._chat_json_ollama(
+                ollama_config.get("model", model), 
+                system, user, max_tokens, temperature, retries, 
+                ollama_config.get("timeout", timeout_ms)
+            )
+        elif current_provider == "anthropic" and self.anthropic_client:
             return await self._chat_json_anthropic(model, system, user, max_tokens, temperature, retries, timeout_ms)
         elif current_provider == "openai" and self.client:
             return await self._chat_json_openai(model, system, user, max_tokens, temperature, retries, timeout_ms)
@@ -2630,8 +3607,12 @@ Return a JSON array of recommendation strings.
                     logger.error("💡 Check OpenAI API key configuration and billing status")
                 elif "429" in error_msg or "rate limit" in error_msg:
                     logger.warning(f"⚠️ OpenAI API rate limit hit: {str(e)}")
-                elif "timeout" in error_msg:
+                elif "timeout" in error_msg or "timed out" in error_msg:
                     logger.warning(f"⏱️ OpenAI API timeout: {str(e)}")
+                    logger.warning(f"💡 Request took longer than {timeout_ms}ms. Consider increasing timeout_ms or reducing prompt size.")
+                elif "connection" in error_msg or "network" in error_msg:
+                    logger.error(f"🌐 Network connectivity issue: {str(e)}")
+                    logger.error("💡 Check internet connection and firewall settings")
                 else:
                     logger.error(f"❌ OpenAI API error: {str(e)}")
                 
@@ -2736,6 +3717,101 @@ Return a JSON array of recommendation strings.
             raise RuntimeError(f"Anthropic API authentication failed: {last_err}. Check API key configuration.")
         else:
             raise RuntimeError(f"Anthropic call failed after {retries+1} attempts: {last_err}")
+
+    async def _chat_json_ollama(
+        self,
+        model: str,
+        system: str,
+        user: str,
+        max_tokens: int,
+        temperature: float,
+        retries: int,
+        timeout_ms: int,
+    ) -> str:
+        """Call Ollama with JSON response format using OpenAI-compatible API"""
+        logger.debug(f" Starting Ollama chat completion: model={model}, max_tokens={max_tokens}")
+        
+        if not self.ollama_client:
+            logger.error("❌ Ollama client not initialized")
+            raise RuntimeError("Ollama client not initialized. Ensure OLLAMA_ENABLED=true and Ollama is running.")
+
+        # Add JSON formatting instruction to the user prompt for better compliance
+        json_instruction = "\n\nIMPORTANT: You must respond with valid JSON only. Do not include any text, explanation, or markdown code blocks outside the JSON structure. Start directly with { and end with }."
+        user_with_json = user + json_instruction
+
+        def _call():
+            # Enforce rate limiting before making the call
+            self._enforce_rate_limit()
+            return self.ollama_client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": system + "\nYou must respond with valid JSON only."},
+                    {"role": "user", "content": user_with_json},
+                ],
+                max_tokens=max_tokens,
+                temperature=temperature,
+                # Note: Ollama may not support response_format, so we rely on prompt instructions
+            )
+
+        attempt = 0
+        last_err: Optional[Exception] = None
+        
+        while attempt <= retries:
+            try:
+                attempt += 1
+                logger.debug(f"🔄 Ollama API attempt {attempt}/{retries+1}")
+                
+                resp = await asyncio.to_thread(_call)
+                content = resp.choices[0].message.content if resp and resp.choices else ""
+                
+                # Clean up the response to extract JSON (Ollama models may include extra text)
+                if content:
+                    content = content.strip()
+                    # Remove markdown code blocks if present
+                    if content.startswith("```json"):
+                        content = content[7:]
+                    elif content.startswith("```"):
+                        content = content[3:]
+                    if content.endswith("```"):
+                        content = content[:-3]
+                    content = content.strip()
+                    
+                    # Try to extract JSON from the response
+                    json_match = re.search(r'\{.*\}', content, re.DOTALL)
+                    if json_match:
+                        content = json_match.group(0)
+                
+                logger.info(f"✅ Ollama API call successful on attempt {attempt}")
+                return content or ""
+                
+            except Exception as e:
+                last_err = e
+                error_msg = str(e).lower()
+                
+                # Enhanced error logging with specific handling for common issues
+                if "connection" in error_msg or "refused" in error_msg:
+                    logger.error(f"🔌 Ollama connection failed: {str(e)}")
+                    logger.error("💡 Ensure Ollama is running: 'ollama serve' or check OLLAMA_BASE_URL")
+                elif "timeout" in error_msg or "timed out" in error_msg:
+                    logger.warning(f"⏱️ Ollama timeout: {str(e)}")
+                    logger.warning(f"💡 Local inference can be slow. Consider increasing OLLAMA_TIMEOUT_MS or using a smaller model.")
+                elif "model" in error_msg and ("not found" in error_msg or "does not exist" in error_msg):
+                    logger.error(f"📦 Ollama model not found: {str(e)}")
+                    logger.error(f"💡 Pull the model first: 'ollama pull {model}'")
+                else:
+                    logger.error(f"❌ Ollama API error: {str(e)}")
+                
+                if attempt > retries:
+                    logger.error(f"💥 All {retries+1} Ollama API attempts exhausted")
+                    break
+                    
+                # Exponential backoff with jitter
+                sleep_time = min(2.0 * attempt, 5.0)
+                logger.debug(f"😴 Retrying in {sleep_time}s...")
+                await asyncio.sleep(sleep_time)
+        
+        # Final error handling
+        raise RuntimeError(f"Ollama call failed after {retries+1} attempts: {last_err}")
 
     async def analyze_prompt_intent(self, prompt: str, available_elements: List[Any]) -> Dict[str, Any]:
         """Phase 1: Analyze prompt to identify required pages and elements"""
@@ -3380,8 +4456,8 @@ async def generate_minimal_reproduction_steps(
         if not execution_id or not failed_steps:
             raise HTTPException(status_code=400, detail="execution_id and failed_steps are required")
         
-        # Get execution details and original plan data
-        # Follow the relationship: exec.runs -> tests.test_cases -> planner.prompts -> planner.plans
+         # Get execution details and original plan data
+         # Follow the relationship: exec.runs -> tests.test_cases -> planner.plans -> planner.prompts
         execution_query = """
         SELECT r.*, 
                p.text as prompt_text, 
@@ -3389,8 +4465,8 @@ async def generate_minimal_reproduction_steps(
                pl.plan_json
         FROM exec.runs r
         LEFT JOIN tests.test_cases tc ON r.test_case_id = tc.id
-        LEFT JOIN planner.prompts p ON tc.source_ref_id = p.id
-        LEFT JOIN planner.plans pl ON p.id = pl.prompt_id
+         LEFT JOIN planner.plans pl ON tc.plan_id = pl.id
+         LEFT JOIN planner.prompts p ON pl.prompt_id = p.id
         WHERE r.id = $1
         """
         execution = await db.execute_one(execution_query, execution_id)
@@ -3400,30 +4476,79 @@ async def generate_minimal_reproduction_steps(
         
         # Parse the original plan to get step data with text values
         original_plan_steps = []
-        if execution.get('plan_json'):
-            import json
-            plan_data = json.loads(execution['plan_json'])
-            original_plan_steps = plan_data.get('steps', [])
-        else:
-            # Get all steps for this execution with full step data
-            steps_query = """
-                SELECT id, step_order, action, target, status, error_message, created_at
-                FROM exec.step_results 
-                WHERE test_run_id = $1 
-                ORDER BY step_order ASC
-                """
-        all_steps = await db.execute(steps_query, execution_id)
+        plan_json = execution.get('plan_json')
+        if plan_json:
+            if isinstance(plan_json, dict):
+                plan_data = plan_json
+            elif isinstance(plan_json, str):
+                try:
+                    plan_data = json.loads(plan_json)
+                except Exception:
+                    plan_data = {}
+            else:
+                plan_data = {}
+            original_plan_steps = plan_data.get('steps', []) if isinstance(plan_data, dict) else []
+
+        # Get all steps for this execution with current schema fields.
+        steps_query = """
+            SELECT id, step_order, action_data, status, error_details, created_at
+            FROM exec.step_results
+            WHERE test_run_id = $1
+            ORDER BY step_order ASC
+            """
+        all_steps_raw = await db.fetch(steps_query, execution_id) or []
+
+        all_steps = []
+        for raw_step in all_steps_raw:
+            if not hasattr(raw_step, 'get'):
+                # Some adapters can return serialized rows; skip malformed entries.
+                continue
+
+            action_data = raw_step.get('action_data') or {}
+            if isinstance(action_data, str):
+                try:
+                    action_data = json.loads(action_data)
+                except Exception:
+                    action_data = {}
+            if not isinstance(action_data, dict):
+                action_data = {}
+
+            error_details = raw_step.get('error_details')
+            if isinstance(error_details, dict):
+                error_message = error_details.get('message') or str(error_details)
+            else:
+                error_message = str(error_details) if error_details else ''
+
+            all_steps.append({
+                'id': raw_step.get('id'),
+                'step_order': raw_step.get('step_order'),
+                'action': action_data.get('action', 'unknown'),
+                'target': action_data.get('locator') or action_data.get('selector') or '',
+                'status': raw_step.get('status'),
+                'error_message': error_message,
+                'created_at': raw_step.get('created_at')
+            })
         
         # Enrich step data with original plan information (including text values)
         enriched_steps = []
         for step in all_steps:
-            step_order = step.get('step_order', 0)
+            if not isinstance(step, dict):
+                continue
+
+            step_order_raw = step.get('step_order', 0)
+            try:
+                step_order = int(step_order_raw or 0)
+            except (TypeError, ValueError):
+                step_order = 0
+
             enriched_step = dict(step)
             
             # Try to find the corresponding plan step (plan steps are 1-indexed)
-            if step_order <= len(original_plan_steps):
+            if step_order > 0 and step_order <= len(original_plan_steps):
                 plan_step = original_plan_steps[step_order - 1]
-                params = plan_step.get('params', {})
+                params = plan_step.get('params', {}) if isinstance(plan_step, dict) else {}
+                if not isinstance(params, dict):
+                    params = {}
                 
                 # Add the text value from the original plan
                 text_value = params.get('text', '')
@@ -3546,7 +4671,7 @@ async def get_recent_failed_executions_for_analysis(
                 try:
                     import json
                     runner_meta = json.loads(runner_meta)
-                except:
+                except Exception:
                     runner_meta = {}
             
             execution_data = {
@@ -3577,9 +4702,7 @@ async def get_recent_failed_executions_for_analysis(
         }
         
     except Exception as e:
-        print(f"❌ Error getting recent failed executions: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error("Error getting recent failed executions: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to get recent failed executions: {str(e)}")
 
 @router.get("/analyze-element-failures/{element_id}")
@@ -3595,8 +4718,8 @@ async def analyze_element_failure_patterns(
     try:# Get failures involving this element
         failure_query = """
         SELECT 
-            sr.error_message,
-            sr.action,
+            sr.error_details->>'message' as error_message,
+            sr.action_data->>'action' as action,
             sr.step_order,
             sr.created_at,
             r.id as execution_id,
@@ -3606,7 +4729,7 @@ async def analyze_element_failure_patterns(
         JOIN exec.runs r ON sr.test_run_id = r.id
         LEFT JOIN tests.test_cases tc ON r.test_case_id = tc.id
         WHERE sr.status = 'failed' 
-        AND sr.target LIKE $1
+        AND sr.action_data->>'selector' LIKE $1
         AND sr.created_at >= CURRENT_TIMESTAMP - INTERVAL '{} days'
         ORDER BY sr.created_at DESC
         """.format(days)
@@ -3839,7 +4962,7 @@ async def store_elements_in_repository(page_info: dict, elements: list) -> int:
                 updated_at = NOW()
         """
         
-        # Helper function to generate semantic element key
+        # Helper function to generate semantic element key with AI enhancement
         def generate_semantic_element_key(element: dict, index: int) -> str:
             """Generate a semantic element key based on element properties"""
             tag = element.get("tag", "").lower()
@@ -3854,6 +4977,8 @@ async def store_elements_in_repository(page_info: dict, elements: list) -> int:
             type_attr = attributes.get("type", "")
             title = attributes.get("title", "")
             aria_label = attributes.get("aria-label", "")
+            role = attributes.get("role", "")
+            data_testid = attributes.get("data-testid", "")
             
             # Skip meta tags, style tags, and other non-interactive elements
             if tag in ["meta", "style", "script", "link", "title", "head"]:
@@ -3878,10 +5003,10 @@ async def store_elements_in_repository(page_info: dict, elements: list) -> int:
                 return None
             
             # Function to clean and format text for key names
-            def clean_text_for_key(text_input: str, max_length: int = 20) -> str:
+            def clean_text_for_key(text_input: str, max_length: int = 25) -> str:
                 if not text_input:
                     return ""
-                # Remove special characters, keep only alphanumeric
+                # Remove special characters, keep only alphanumeric and spaces
                 clean = "".join(c for c in text_input if c.isalnum() or c.isspace())
                 # Convert to camelCase
                 words = clean.split()
@@ -3892,7 +5017,57 @@ async def store_elements_in_repository(page_info: dict, elements: list) -> int:
                     result += word.capitalize()
                 return result[:max_length]
             
-            # Determine element purpose and generate key
+            # PRIORITY 1: Check for stable semantic attributes first (best for reliability)
+            if data_testid:
+                clean_testid = clean_text_for_key(data_testid)
+                return clean_testid if clean_testid else None
+            
+            # PRIORITY 2: Check for meaningful aria-labels
+            if aria_label and len(aria_label) > 2:
+                clean_aria = clean_text_for_key(aria_label)
+                if clean_aria and len(clean_aria) > 3:
+                    return clean_aria
+            
+            # PRIORITY 3: Check for semantic element IDs (but reject auto-generated ones)
+            if element_id:
+                # Reject IDs with random numbers, UUIDs, or timestamps
+                has_many_numbers = sum(c.isdigit() for c in element_id) > 4
+                has_uuid_pattern = len(element_id) > 20 and '-' in element_id
+                has_timestamp = any(pattern in element_id for pattern in ['tabs-', 'panel-', 'accordion-', 'id-'])
+                
+                if not (has_many_numbers or has_uuid_pattern or has_timestamp):
+                    # This looks like a human-created, stable ID
+                    clean_id = clean_text_for_key(element_id)
+                    if clean_id and len(clean_id) > 3:
+                        return clean_id
+            
+            # PRIORITY 4: Use meaningful text content (but be smart about it)
+            if text and len(text) > 2:
+                # For buttons/links with text, generate semantic keys
+                if tag in ["button", "a"]:
+                    clean_text = clean_text_for_key(text)
+                    if clean_text and len(clean_text) > 2:
+                        suffix = "Button" if tag == "button" else "Link"
+                        return f"{clean_text}{suffix}"
+            
+            # PRIORITY 5: Use role attribute for semantic understanding
+            if role:
+                role_lower = role.lower()
+                if role_lower == "tab":
+                    # For tabs, try to use aria-label or text
+                    if aria_label:
+                        clean_aria = clean_text_for_key(aria_label)
+                        return f"{clean_aria}Tab" if clean_aria else "tabOption"
+                    elif text:
+                        clean_text = clean_text_for_key(text, 15)
+                        return f"{clean_text}Tab" if clean_text else "tabOption"
+                    else:
+                        return f"tab{index}" if index < 10 else "tabOption"
+                elif role_lower == "button" and text:
+                    clean_text = clean_text_for_key(text)
+                    return f"{clean_text}Button" if clean_text else "actionButton"
+            
+            # Determine element purpose and generate key based on tag
             if tag == "input":
                 if type_attr == "password" or "password" in name.lower() or "password" in placeholder.lower():
                     return "passwordField"
@@ -4138,13 +5313,122 @@ async def store_elements_in_repository(page_info: dict, elements: list) -> int:
                     counter += 1
                 used_keys.add(element_key)
                 
+                # Generate HIGH-QUALITY selectors instead of using Chrome extension's raw data
+                tag = element.get("tag", "").lower()
+                attributes = element.get("attributes", {})
+                text = element.get("text", "").strip()
+                
+                # Helper to check if an ID is auto-generated/unstable
+                def is_stable_id(id_value: str) -> bool:
+                    if not id_value or len(id_value) < 3:
+                        return False
+                    # Reject IDs with many numbers (like APjFqb, tabs-068045)
+                    if sum(c.isdigit() for c in id_value) > len(id_value) * 0.4:
+                        return False
+                    # Reject single-letter or very short IDs
+                    if len(id_value) <= 2:
+                        return False
+                    # Reject common React/Vue patterns
+                    if id_value.startswith('__') or '-' in id_value and any(c.isdigit() for c in id_value):
+                        return False
+                    return True
+                
+                # Generate CSS selector based on priority (most stable first)
+                css_selector = ""
+                
+                # Priority 1: Stable data attributes
+                if attributes.get("data-testid"):
+                    css_selector = f"[data-testid='{attributes['data-testid']}']"
+                elif attributes.get("data-test"):
+                    css_selector = f"[data-test='{attributes['data-test']}']"
+                elif attributes.get("data-cy"):
+                    css_selector = f"[data-cy='{attributes['data-cy']}']"
+                
+                # Priority 2: Semantic attributes (title, aria-label, name)
+                elif attributes.get("title") and len(attributes["title"]) > 2:
+                    title = attributes["title"].replace("'", "\\'")
+                    css_selector = f"{tag}[title='{title}']"
+                elif attributes.get("aria-label") and len(attributes["aria-label"]) > 2:
+                    aria_label = attributes["aria-label"].replace("'", "\\'")
+                    css_selector = f"{tag}[aria-label='{aria_label}']"
+                elif attributes.get("name") and len(attributes["name"]) > 2:
+                    css_selector = f"{tag}[name='{attributes['name']}']"
+                elif attributes.get("placeholder") and len(attributes["placeholder"]) > 2:
+                    placeholder = attributes["placeholder"].replace("'", "\\'")
+                    css_selector = f"{tag}[placeholder='{placeholder}']"
+                
+                # Priority 3: Stable ID (only if it passes quality check)
+                elif attributes.get("id") and is_stable_id(attributes["id"]):
+                    css_selector = f"#{attributes['id']}"
+                
+                # Priority 4: Role + aria attributes
+                elif attributes.get("role"):
+                    if attributes.get("aria-label"):
+                        aria_label = attributes["aria-label"].replace("'", "\\'")
+                        css_selector = f"{tag}[role='{attributes['role']}'][aria-label='{aria_label}']"
+                    else:
+                        css_selector = f"{tag}[role='{attributes['role']}']"
+                
+                # Priority 5: Type attribute for inputs
+                elif tag == "input" and attributes.get("type"):
+                    if attributes.get("id") and is_stable_id(attributes["id"]):
+                        css_selector = f"input[type='{attributes['type']}']#{attributes['id']}"
+                    else:
+                        css_selector = f"input[type='{attributes['type']}']"
+                
+                # Priority 6: Semantic class names (avoid minified ones)
+                elif attributes.get("class"):
+                    classes = attributes["class"].split()
+                    # Find meaningful classes (longer names, semantic prefixes)
+                    semantic_classes = [c for c in classes if len(c) > 4 and not c.startswith('_')]
+                    if semantic_classes:
+                        css_selector = f"{tag}.{semantic_classes[0]}"
+                
+                # Last resort: Use Chrome extension's cssPath but log warning
+                if not css_selector:
+                    selectors = element.get("selectors", {})
+                    css_selector = selectors.get("cssPath", "")
+                    if css_selector and attributes.get("id") and not is_stable_id(attributes["id"]):
+                        logger.warning(f"⚠️ Using potentially unstable selector for {element_key}: {css_selector}")
+                
+                # Generate XPath equivalent
+                xpath_selector = ""
+                if css_selector.startswith("#"):
+                    # ID selector
+                    id_val = css_selector[1:]
+                    xpath_selector = f"//*[@id='{id_val}']"
+                elif "[title=" in css_selector:
+                    # Title attribute
+                    parts = css_selector.split("[title='")
+                    if len(parts) == 2:
+                        tag_part = parts[0]
+                        title_part = parts[1].rstrip("']")
+                        xpath_selector = f"//{tag_part}[@title='{title_part}']"
+                elif "[aria-label=" in css_selector:
+                    # Aria-label attribute
+                    parts = css_selector.split("[aria-label='")
+                    if len(parts) == 2:
+                        tag_part = parts[0]
+                        label_part = parts[1].rstrip("']")
+                        xpath_selector = f"//{tag_part}[@aria-label='{label_part}']"
+                elif "[name=" in css_selector:
+                    # Name attribute
+                    parts = css_selector.split("[name='")
+                    if len(parts) == 2:
+                        tag_part = parts[0]
+                        name_part = parts[1].rstrip("']")
+                        xpath_selector = f"//{tag_part}[@name='{name_part}']"
+                else:
+                    # Fallback to extension's xpath
+                    selectors = element.get("selectors", {})
+                    xpath_selector = selectors.get("xpath", "")
+                
                 # Create primary selector from element data
-                selectors = element.get("selectors", {})
                 primary_selector = {
-                    "tag": element.get("tag", ""),
-                    "css": selectors.get("cssPath", ""),
-                    "xpath": selectors.get("xpath", ""),
-                    "name": selectors.get("name", "")
+                    "tag": tag,
+                    "css_selector": css_selector,
+                    "xpath_selector": xpath_selector,
+                    "selector_quality": "high" if any(attr in css_selector for attr in ["data-testid", "aria-label", "title"]) else "medium"
                 }
                 
                 # Alternative selectors with all element metadata

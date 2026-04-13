@@ -1,0 +1,213 @@
+name: phase3-beta-gate
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  # -----------------------------------------------------------
+  # Job 1: E2E user journey + tenant isolation
+  # -----------------------------------------------------------
+  e2e-journeys:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests websockets jsonschema
+
+      - name: Start local stack
+        run: |
+          docker compose -f docker-compose.local.yml up -d --build
+
+      - name: Wait for unified API
+        run: |
+          for i in {1..60}; do
+            if curl -fsS http://localhost:8000/health > /dev/null; then
+              echo "Unified API healthy"
+              exit 0
+            fi
+            echo "Waiting... ($i/60)"
+            sleep 5
+          done
+          echo "Unified API not healthy"
+          docker compose -f docker-compose.local.yml logs unified-api --tail=100
+          exit 1
+
+      - name: Wait for MCP server
+        run: |
+          for i in {1..60}; do
+            if curl -fsS http://localhost:8001/mcp/health > /dev/null; then
+              echo "MCP server healthy"
+              exit 0
+            fi
+            echo "Waiting... ($i/60)"
+            sleep 5
+          done
+          echo "MCP server not healthy"
+          docker compose -f docker-compose.local.yml logs mcp-server --tail=100
+          exit 1
+
+      # Phase 1 + 2 regression gate
+      - name: Phase 1 smoke (regression)
+        env:
+          SMOKE_BASE_URL: http://localhost:8000
+          SMOKE_MCP_URL: ws://localhost:8001/mcp/ws
+        run: python tests/smoke_release_phase1.py
+
+      - name: Phase 2 contracts (regression)
+        run: python tests/test_contracts.py --offline
+
+      # Phase 3 E2E
+      - name: E2E user journey tests
+        run: |
+          python tests/test_e2e_user_journey.py \
+            --base-url http://localhost:8000 \
+            --runner-url http://localhost:8080
+
+      - name: Upload E2E report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase3-e2e-report
+          path: tests/phase3_e2e_report.json
+          retention-days: 30
+
+      - name: Dump logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.local.yml logs --tail=500
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f docker-compose.local.yml down -v
+
+  # -----------------------------------------------------------
+  # Job 2: MCP stress tests
+  # -----------------------------------------------------------
+  mcp-stress:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install websockets
+
+      - name: Start local stack
+        run: |
+          docker compose -f docker-compose.local.yml up -d --build
+
+      - name: Wait for MCP server
+        run: |
+          for i in {1..60}; do
+            if curl -fsS http://localhost:8001/mcp/health > /dev/null; then
+              echo "MCP server healthy"
+              exit 0
+            fi
+            echo "Waiting... ($i/60)"
+            sleep 5
+          done
+          exit 1
+
+      - name: MCP stress tests
+        run: |
+          python tests/test_mcp_stress.py \
+            --mcp-url ws://localhost:8001/mcp/ws \
+            --concurrency 10 \
+            --duration 10
+
+      - name: Upload stress report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase3-mcp-stress-report
+          path: tests/phase3_mcp_stress_report.json
+          retention-days: 30
+
+      - name: Dump logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.local.yml logs mcp-server --tail=300
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f docker-compose.local.yml down -v
+
+  # -----------------------------------------------------------
+  # Job 3: Performance baseline
+  # -----------------------------------------------------------
+  performance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+
+      - name: Start local stack
+        run: |
+          docker compose -f docker-compose.local.yml up -d --build
+
+      - name: Wait for unified API
+        run: |
+          for i in {1..60}; do
+            if curl -fsS http://localhost:8000/health > /dev/null; then
+              echo "Unified API healthy"
+              exit 0
+            fi
+            echo "Waiting... ($i/60)"
+            sleep 5
+          done
+          exit 1
+
+      - name: Performance baseline tests
+        run: |
+          python tests/test_performance_baseline.py \
+            --base-url http://localhost:8000 \
+            --iterations 10 \
+            --concurrency 10
+
+      - name: Upload performance baseline
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase3-performance-baseline
+          path: tests/phase3_performance_baseline.json
+          retention-days: 90
+
+      - name: Dump logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.local.yml logs --tail=300
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f docker-compose.local.yml down -v

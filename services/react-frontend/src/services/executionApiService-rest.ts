@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://testhelix.com';
+const API_BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:8000' : '');
 // Create axios instance with base configuration
 const apiClient = axios.create({
   baseURL: `${API_BASE_URL}/api/execution-dashboard`,
@@ -10,7 +10,7 @@ const apiClient = axios.create({
 });
 // Add request interceptor to include auth token
 apiClient.interceptors.request.use((config) => {
-  const token = localStorage.getItem('authToken');
+  const token = localStorage.getItem('auth_token');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }

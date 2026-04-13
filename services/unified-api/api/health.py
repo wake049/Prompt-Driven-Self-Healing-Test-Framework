@@ -8,8 +8,26 @@ from datetime import datetime
 import asyncio
 import sys
 import os
+import logging
+
+from core.database import get_database_manager
+from services.self_host_license_validator import get_license_state
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _get_license_health() -> dict:
+    """Return self-host license status for health endpoints."""
+    state = get_license_state()
+    if state.get("valid") is None:
+        return {"status": "not_configured"}
+    return {
+        "status": "valid" if state["valid"] else "invalid",
+        "reason": state.get("reason"),
+        "last_checked_at": state.get("last_checked_at"),
+    }
 
 @router.get("/")
 async def health_check():
@@ -31,8 +49,20 @@ async def detailed_health():
         import psutil
         memory_info = psutil.virtual_memory()
         
+        # Check database connectivity
+        db_status = "unknown"
+        try:
+            async with get_database_manager() as db:
+                await db.pool.fetchval("SELECT 1")
+                db_status = "healthy"
+        except Exception as db_err:
+            logger.warning("Health check: database unreachable: %s", db_err)
+            db_status = "unhealthy"
+
+        overall_status = "healthy" if db_status == "healthy" else "degraded"
+
         return {
-            "status": "healthy",
+            "status": overall_status,
             "timestamp": datetime.utcnow().isoformat(),
             "service": "Unified MCP API Server",
             "system_info": {
@@ -45,11 +75,9 @@ async def detailed_health():
                 }
             },
             "services": {
-                "policy_engine": "healthy", 
-                "ai_service": "healthy",
-                "healing_api": "healthy",
-                "sql_backend": "healthy"
-            }
+                "database": db_status
+            },
+            "self_host_license": _get_license_health()
         }
     except Exception as e:
         return {

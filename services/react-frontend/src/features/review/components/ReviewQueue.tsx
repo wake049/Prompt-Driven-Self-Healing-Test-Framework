@@ -66,7 +66,7 @@ const Title = styled.h1<{ theme: any }>`
   font-size: 2.5rem;
   font-weight: 700;
   margin: 0 0 10px 0;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #185FA5;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -117,7 +117,7 @@ const SearchInput = styled.input<{ theme: any }>`
   
   &:focus {
     outline: none;
-    border-color: #667eea;
+    border-color: #185FA5;
     box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
   }
   
@@ -148,7 +148,7 @@ const FilterSelect = styled.select<{ theme: any }>`
   
   &:focus {
     outline: none;
-    border-color: #667eea;
+    border-color: #185FA5;
     box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
   }
 `;
@@ -158,16 +158,16 @@ const SortButton = styled.button<{ theme: any; active: boolean }>`
   align-items: center;
   gap: 8px;
   padding: 12px 16px;
-  border: 1px solid ${props => props.active ? '#667eea' : props.theme.colors.border};
+  border: 1px solid ${props => props.active ? '#185FA5' : props.theme.colors.border};
   border-radius: 8px;
   background: ${props => props.active ? 'rgba(102, 126, 234, 0.1)' : props.theme.colors.background};
-  color: ${props => props.active ? '#667eea' : props.theme.colors.text};
+  color: ${props => props.active ? '#185FA5' : props.theme.colors.text};
   font-size: 14px;
   cursor: pointer;
   transition: all 0.3s ease;
   
   &:hover {
-    border-color: #667eea;
+    border-color: #185FA5;
     background: rgba(102, 126, 234, 0.05);
   }
 `;
@@ -185,7 +185,7 @@ const RefreshButton = styled.button<{ theme: any }>`
   transition: all 0.3s ease;
   
   &:hover {
-    border-color: #667eea;
+    border-color: #185FA5;
     background: rgba(102, 126, 234, 0.05);
   }
   
@@ -211,14 +211,14 @@ const FilterSummary = styled.div<{ theme: any }>`
 
 const FilterCount = styled.span`
   font-weight: 700;
-  color: #667eea;
+  color: #185FA5;
   font-size: 16px;
 `;
 
 const ClearFiltersButton = styled.button<{ theme: any }>`
   background: none;
   border: none;
-  color: #667eea;
+  color: #185FA5;
   cursor: pointer;
   font-size: 14px;
   text-decoration: underline;
@@ -238,8 +238,8 @@ const QueueItem = styled.div<{ theme: any; priority: string }>`
   border-radius: 12px;
   border: 2px solid ${props => {
     switch (props.priority) {
-      case 'high': return '#f56565';
-      case 'low': return '#48bb78';
+      case 'high': return '#c85050';
+      case 'low': return '#1D9E75';
       default: return props.theme.colors.border;
     }
   }};
@@ -284,7 +284,7 @@ const ElementKey = styled.h3<{ theme: any }>`
 const PageBadge = styled.span<{ theme: any }>`
   padding: 4px 8px;
   background: rgba(102, 126, 234, 0.2);
-  color: #667eea;
+  color: #185FA5;
   border-radius: 4px;
   font-size: 12px;
   font-weight: 500;
@@ -371,8 +371,8 @@ const ActionButton = styled.button<{ theme: any; variant?: 'primary' | 'secondar
   
   background: ${props => {
     switch (props.variant) {
-      case 'primary': return 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
-      case 'danger': return 'linear-gradient(135deg, #f56565 0%, #e53e3e 100%)';
+      case 'primary': return '#185FA5';
+      case 'danger': return 'linear-gradient(135deg, #c85050 0%, #A32D2D 100%)';
       default: return props.theme.colors.background;
     }
   }};
@@ -410,7 +410,7 @@ const StatusIcon = styled.div<{ status: string }>`
       case 'completed': return '#2f855a';
       case 'in_progress': return '#d69e2e';
       case 'rejected': return '#c53030';
-      default: return '#667eea';
+      default: return '#185FA5';
     }
   }};
 `;
@@ -437,7 +437,7 @@ const PaginationButton = styled.button<{ theme: any }>`
   transition: all 0.3s ease;
   
   &:hover {
-    border-color: #667eea;
+    border-color: #185FA5;
     background: rgba(102, 126, 234, 0.05);
   }
   
@@ -477,11 +477,54 @@ const ErrorState = styled.div<{ theme: any }>`
 `;
 
 // ================================
+import { config } from '../../../app/config';
+
 // Component
 // ================================
 const ReviewQueue: React.FC = () => {
   const { theme } = useTheme();
   const { client } = useMCPContext();
+
+  const getApiBaseUrl = () => config.apiBaseUrl;
+  const getAuthToken = () => localStorage.getItem('auth_token') || localStorage.getItem('authToken') || '';
+
+  const fetchReviewQueueHttp = async (params: Record<string, any>) => {
+    const query = new URLSearchParams(
+      Object.entries(params)
+        .filter(([, value]) => value !== undefined && value !== null && value !== '')
+        .reduce((acc, [key, value]) => ({ ...acc, [key]: String(value) }), {})
+    ).toString();
+
+    const response = await fetch(`${getApiBaseUrl()}/api/v1/healing/review-queue${query ? `?${query}` : ''}`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(getAuthToken() ? { Authorization: `Bearer ${getAuthToken()}` } : {})
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    return response.json();
+  };
+
+  const updateReviewStatusHttp = async (reviewId: string, status: 'approved' | 'rejected') => {
+    const response = await fetch(`${getApiBaseUrl()}/api/v1/healing/review/${reviewId}/status?status=${status}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(getAuthToken() ? { Authorization: `Bearer ${getAuthToken()}` } : {})
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    return response.json();
+  };
   
   const [items, setItems] = useState<ReviewQueueItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -597,18 +640,23 @@ const ReviewQueue: React.FC = () => {
   };
 
   const performApprove = async (item: ReviewQueueItem) => {
-    if (!client) {
-      notify('MCP client not available', 'error');
-      return;
-    }
-
     try {
       setLoading(true);
-      const result = await client.approveReview(item.id);
+      if (client) {
+        await client.approveReview(item.id);
+      } else {
+        await updateReviewStatusHttp(item.id, 'approved');
+      }
       await loadReviewQueue();
       notify(`Review item \"${item.element_key}\" approved`, 'success');
     } catch (err) {
-      notify('Failed to approve review item', 'error');
+      try {
+        await updateReviewStatusHttp(item.id, 'approved');
+        await loadReviewQueue();
+        notify(`Review item \"${item.element_key}\" approved`, 'success');
+      } catch {
+        notify('Failed to approve review item', 'error');
+      }
     } finally {
       setLoading(false);
       closeConfirm();
@@ -616,18 +664,23 @@ const ReviewQueue: React.FC = () => {
   };
 
   const performReject = async (item: ReviewQueueItem, reason?: string) => {
-    if (!client) {
-      notify('MCP client not available', 'error');
-      return;
-    }
-
     try {
       setLoading(true);
-      const result = await client.rejectReview(item.id);
+      if (client) {
+        await client.rejectReview(item.id);
+      } else {
+        await updateReviewStatusHttp(item.id, 'rejected');
+      }
       await loadReviewQueue();
       notify(`Review item \"${item.element_key}\" rejected`, 'info');
     } catch (err) {
-      notify('Failed to reject review item', 'error');
+      try {
+        await updateReviewStatusHttp(item.id, 'rejected');
+        await loadReviewQueue();
+        notify(`Review item \"${item.element_key}\" rejected`, 'info');
+      } catch {
+        notify('Failed to reject review item', 'error');
+      }
     } finally {
       setLoading(false);
       closePrompt();
@@ -649,18 +702,13 @@ const ReviewQueue: React.FC = () => {
 
   // Load review queue items using MCP client
   const loadReviewQueue = useCallback(async () => {
-    if (!client) {
-      setError('MCP client not available');
-      return;
-    }
-
     setLoading(true);
     setError(null);
     
     try {
       const offset = (currentPage - 1) * itemsPerPage;
       
-      const result = await client.getReviewQueue({
+      const requestParams = {
         status: filters.status,
         page: filters.page || undefined,
         search: filters.search || undefined,
@@ -669,7 +717,18 @@ const ReviewQueue: React.FC = () => {
         priority: filters.priority || undefined,
         limit: itemsPerPage,
         offset: offset
-      });
+      };
+
+      let result: any;
+      if (client) {
+        try {
+          result = await client.getReviewQueue(requestParams);
+        } catch {
+          result = await fetchReviewQueueHttp(requestParams);
+        }
+      } else {
+        result = await fetchReviewQueueHttp(requestParams);
+      }
       if (result.success !== false) { // Handle both success=true and undefined (for direct data)
         const data = result.data || result;
         const rawItems = Array.isArray(data) ? data : (data.items || data.data || []);

@@ -3,7 +3,11 @@
  * Handles communication between Chrome Extension and SQL Backend
  */
 
-const API_BASE_URL = 'https://testhelix.com/api/v1';
+// API Configuration - Toggle between local and production
+const USE_LOCAL_API = true; // Set to false for production
+const LOCAL_API_URL = 'http://localhost:8000/api/v1';
+const PROD_API_URL = 'https://fluxtest.io/api/v1';
+const API_BASE_URL = USE_LOCAL_API ? LOCAL_API_URL : PROD_API_URL;
 
 interface ApiRequestOptions {
   method?: string;
@@ -32,6 +36,7 @@ class MCPApiClient {
         'Content-Type': 'application/json',
         ...options.headers
       },
+      credentials: 'include', // Include cookies for authentication
       ...options
     };
 

@@ -1,0 +1,12 @@
+export { default as LandingPage } from './LandingPage';
+export { LandingHeader } from './LandingHeader';
+export { HeroSection } from './HeroSection';
+export { ProblemSection } from './ProblemSection';
+export { FeaturesGrid } from './FeaturesGrid';
+export { HowItWorksSection } from './HowItWorksSection';
+export { ComparisonTable } from './ComparisonTable';
+export { UseCasesSection } from './UseCasesSection';
+export { PricingSection } from './PricingSection';
+export { SocialProofSection } from './SocialProofSection';
+export { FinalCTA } from './FinalCTA';
+export { LandingFooter } from './LandingFooter';

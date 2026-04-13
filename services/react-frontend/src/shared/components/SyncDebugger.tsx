@@ -101,7 +101,7 @@ const SyncDebugger: React.FC = () => {
       // Load prompts
       addLog('📝 Loading prompts...');
       const token = localStorage.getItem('auth_token');
-      const promptsResponse = await fetch('https://testhelix.comapi/v1/prompts?limit=100', {
+      const promptsResponse = await fetch('https://fluxtest.ioapi/v1/prompts?limit=100', {
         headers: { 'Authorization': `Bearer ${token}` },
       });
       if (promptsResponse.ok) {
@@ -113,7 +113,7 @@ const SyncDebugger: React.FC = () => {
         const testPlansData = [];
         for (const prompt of promptsData.data || []) {
           try {
-            const testPlanResponse = await fetch(`https://testhelix.com/api/v1/generated-test-plans/by-prompt/${prompt.id}`, {
+            const testPlanResponse = await fetch(`https://fluxtest.io/api/v1/generated-test-plans/by-prompt/${prompt.id}`, {
               headers: { 'Authorization': `Bearer ${token}` },
             });
             if (testPlanResponse.ok) {

@@ -5,7 +5,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.impl.client.CloseableHttpClient;
-import org.apache.http.impl.client.HttpClients;
 import org.apache.http.util.EntityUtils;
 
 import java.io.IOException;
@@ -17,7 +16,7 @@ import java.util.List;
 public class SqlTestStepRepository {
     private static final String SQL_BACKEND_URL = System.getenv("UNIFIED_API_URL") != null ? 
         System.getenv("UNIFIED_API_URL") : 
-        "https://testhelix.com";
+        "https://fluxtest.io";
     private static final String ELEMENTS_ENDPOINT = "/api/v1/sql/elements";
     private static final String SESSIONS_ENDPOINT = "/api/v1/sql/sessions";
     private final ObjectMapper objectMapper;
@@ -85,7 +84,7 @@ public class SqlTestStepRepository {
     private List<Step> loadLatestPromptSteps() throws IOException {
         List<Step> steps = new ArrayList<>();
         
-        try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
+        try (CloseableHttpClient httpClient = HttpClientFactory.create()) {
             // Get the latest prompt with steps
             HttpGet httpGet = new HttpGet(SQL_BACKEND_URL + "/api/v1/sql/prompts?limit=1&order_by=created_at&order=desc");
             httpGet.setHeader("Accept", "application/json");
@@ -187,7 +186,7 @@ public class SqlTestStepRepository {
     }
 
     private String findSessionByName(String sessionName) throws IOException {
-        try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
+        try (CloseableHttpClient httpClient = HttpClientFactory.create()) {
             HttpGet httpGet = new HttpGet(SQL_BACKEND_URL + SESSIONS_ENDPOINT);
             httpGet.setHeader("Accept", "application/json");
             
@@ -216,7 +215,7 @@ public class SqlTestStepRepository {
     private List<JsonNode> getElementsForSession(String sessionId) throws IOException {
         List<JsonNode> elements = new ArrayList<>();
         
-        try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
+        try (CloseableHttpClient httpClient = HttpClientFactory.create()) {
             String url = SQL_BACKEND_URL + ELEMENTS_ENDPOINT + "?session_id=" + 
                         URLEncoder.encode(sessionId, StandardCharsets.UTF_8) + "&limit=100";
             
@@ -492,7 +491,7 @@ public class SqlTestStepRepository {
     }
 
     public boolean isAvailable() {
-        try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
+        try (CloseableHttpClient httpClient = HttpClientFactory.create()) {
             HttpGet httpGet = new HttpGet(SQL_BACKEND_URL + "/health");
             httpGet.setHeader("Accept", "application/json");
             

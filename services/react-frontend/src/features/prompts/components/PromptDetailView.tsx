@@ -1,15 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import styled from 'styled-components';
+import { pulseKeyframes, slideInKeyframes, spinKeyframes } from '../../../shared/styles/keyframes';
 import { useTheme } from '../../../contexts/ThemeContext';
 import { config } from '../../../app/config';
 import unifiedApiClient from '../../../shared/utils/unifiedApiClient';
 import { TestCaseExecutionHistory } from '../../execution';
 import { promptsApiService } from '../api';
 import { useAuth } from '../../../contexts/AuthContext';
+import { usePolicyPermissions } from '../../../hooks/usePolicyPermissions';
 import { BindingsManager } from '../../bindings';
 import { usePromptSelectorSync, useSyncNotifications } from '../../../shared/hooks/useSyncHooks';
 import { SyncIndicator, SyncNotification as SyncNotificationDisplay } from '../../../shared/components/SyncVisualIndicators';
+import BrowserSelector from '../../../shared/ui/BrowserSelector';
+import { PromptVersions } from './PromptVersions';
+import { PromptActivitySidebar } from './PromptActivitySidebar';
 import { 
   RefreshCw, 
   Play, 
@@ -26,7 +31,9 @@ import {
   XCircle,
   Clock,
   Activity,
-  Link
+  Link,
+  ChevronRight,
+  X
 } from 'lucide-react';
 
 // Modern Styled Components
@@ -49,8 +56,133 @@ const MainContent = styled.div`
   overflow: hidden;
 `;
 
+const HistoryToggleButton = styled.button`
+  position: fixed;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  background: #185FA5;
+  color: white;
+  border: none;
+  border-radius: 12px 0 0 12px;
+  padding: 16px 12px;
+  cursor: pointer;
+  box-shadow: -4px 0 12px rgba(102, 126, 234, 0.3);
+  z-index: 999;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 14px;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  
+  &:hover {
+    padding-right: 16px;
+    box-shadow: -6px 0 16px rgba(102, 126, 234, 0.4);
+  }
+`;
+
+const HistorySidebarOverlay = styled.div<{ $isOpen: boolean }>`
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+  z-index: 1000;
+  opacity: ${props => props.$isOpen ? 1 : 0};
+  pointer-events: ${props => props.$isOpen ? 'auto' : 'none'};
+  transition: opacity 0.3s ease;
+`;
+
+const HistorySidebarPanel = styled.div<{ $isOpen: boolean }>`
+  position: fixed;
+  right: ${props => props.$isOpen ? '0' : '-350px'};
+  top: 0;
+  bottom: 0;
+  width: 350px;
+  background: white;
+  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.15);
+  z-index: 1001;
+  transition: right 0.3s ease;
+  display: flex;
+  flex-direction: column;
+`;
+
+const HistorySidebarHeader = styled.div`
+  padding: 24px;
+  background: #185FA5;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+`;
+
+const HistorySidebarTitle = styled.h3`
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+`;
+
+const HistorySidebarClose = styled.button`
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  color: white;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  
+  &:hover {
+    background: rgba(255, 255, 255, 0.3);
+  }
+`;
+
+const HistorySidebarContent = styled.div`
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px;
+`;
+
+const HistoryItem = styled.div`
+  padding: 16px;
+  border-bottom: 1px solid #f1f5f9;
+  transition: all 0.2s ease;
+  
+  &:hover {
+    background: #f8fafc;
+  }
+  
+  &:last-child {
+    border-bottom: none;
+  }
+`;
+
+const HistoryAction = styled.div`
+  font-size: 14px;
+  font-weight: 600;
+  color: #1e293b;
+  margin-bottom: 4px;
+`;
+
+const HistoryDate = styled.div`
+  font-size: 12px;
+  color: #64748b;
+`;
+
 const Header = styled.div`
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #185FA5;
   padding: 32px 40px;
   box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
   position: relative;
@@ -156,7 +288,7 @@ const ActionsBar = styled.div`
 const PrimaryButton = styled.button<{ variant?: 'primary' | 'running' }>`
   background: ${props => props.variant === 'running' 
     ? 'linear-gradient(135deg, #6b7280, #4b5563)' 
-    : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'};
+    : '#185FA5'};
   color: white;
   border: none;
   padding: 12px 24px;
@@ -268,7 +400,7 @@ const DropdownItem = styled.div<{ theme: any }>`
 
   &:hover {
     background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
-    color: #667eea;
+    color: #185FA5;
   }
 `;
 
@@ -290,7 +422,7 @@ const TabsContainer = styled.div`
   background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
   padding: 0 40px;
   border-bottom: 2px solid;
-  border-image: linear-gradient(90deg, #667eea 0%, #764ba2 100%) 1;
+  border-image: linear-gradient(90deg, #185FA5 0%, #185FA5 100%) 1;
 
   @media (max-width: 768px) {
     padding: 0 20px;
@@ -298,25 +430,25 @@ const TabsContainer = styled.div`
   }
 `;
 
-const Tab = styled.div<{ active?: boolean }>`
+const Tab = styled.div<{ $active?: boolean }>`
   padding: 16px 24px;
   font-size: 14px;
   font-weight: 600;
-  color: ${props => props.active ? '#667eea' : '#6c757d'};
+  color: ${props => props.$active ? '#185FA5' : '#6c757d'};
   cursor: pointer;
-  border-bottom: 3px solid ${props => props.active ? '#667eea' : 'transparent'};
+  border-bottom: 3px solid ${props => props.$active ? '#185FA5' : 'transparent'};
   transition: all 0.3s ease;
   white-space: nowrap;
   position: relative;
   border-radius: 8px 8px 0 0;
   
-  ${props => props.active && `
+  ${props => props.$active && `
     background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
     box-shadow: 0 -2px 8px rgba(102, 126, 234, 0.2);
   `}
 
   &:hover {
-    color: #667eea;
+    color: #185FA5;
     background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
     transform: translateY(-2px);
     box-shadow: 0 2px 8px rgba(102, 126, 234, 0.2);
@@ -324,7 +456,7 @@ const Tab = styled.div<{ active?: boolean }>`
 `;
 
 const StepBadge = styled.span`
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #185FA5;
   color: white;
   border-radius: 16px;
   padding: 4px 10px;
@@ -430,12 +562,7 @@ const LoadingSpinner = styled.div`
   border-radius: 50%;
   width: 32px;
   height: 32px;
-  animation: spin 1s linear infinite;
-
-  @keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
-  }
+  animation: ${spinKeyframes} 1s linear infinite;
 `;
 
 const LoadingText = styled.span`
@@ -445,8 +572,8 @@ const LoadingText = styled.span`
 
 const ErrorMessage = styled.div`
   background: linear-gradient(135deg, #fee2e2, #fecaca);
-  border: 1px solid #f87171;
-  color: #dc2626;
+  border: 1px solid #c85050;
+  color: #8a2222;
   padding: 20px;
   border-radius: 12px;
   margin: 32px;
@@ -462,6 +589,7 @@ interface PromptData {
   description: string;
   content: string;
   starting_url?: string;
+  external_id?: string;  // Jira/Xray ID - editable by user
   category: string;
   tags: string[];  // Changed to match API response
   status?: string;
@@ -587,7 +715,7 @@ const StepEditForm: React.FC<{
                 style={{
                   flex: 1,
                   padding: '6px',
-                  border: `1px solid ${isSelector ? '#10b981' : '#d1d5db'}`,
+                  border: `1px solid ${isSelector ? '#1D9E75' : '#d1d5db'}`,
                   borderRadius: '4px',
                   fontSize: '12px',
                   backgroundColor: isSelector ? '#f0fdf4' : 'white'
@@ -601,7 +729,7 @@ const StepEditForm: React.FC<{
                 onClick={() => removeParam(key)}
                 style={{
                   padding: '6px 10px',
-                  backgroundColor: '#ef4444',
+                  backgroundColor: '#A32D2D',
                   color: '#ffffff',
                   border: 'none',
                   borderRadius: '4px',
@@ -646,7 +774,7 @@ const StepEditForm: React.FC<{
             onClick={addParam}
             style={{
               padding: '6px 10px',
-              backgroundColor: '#10b981',
+              backgroundColor: '#1D9E75',
               color: '#ffffff',
               border: 'none',
               borderRadius: '4px',
@@ -664,7 +792,7 @@ const StepEditForm: React.FC<{
           onClick={() => onSave(editedStep)}
           style={{
             padding: '8px 16px',
-            backgroundColor: '#10b981',
+            backgroundColor: '#1D9E75',
             color: '#ffffff',
             border: 'none',
             borderRadius: '4px',
@@ -733,7 +861,7 @@ const AddStepForm: React.FC<{
     <div style={{
       padding: '16px',
       backgroundColor: '#f0f9ff',
-      border: '2px solid #10b981',
+      border: '2px solid #1D9E75',
       borderRadius: '8px',
       marginTop: '16px'
     }}>
@@ -797,7 +925,7 @@ const AddStepForm: React.FC<{
               onClick={() => removeParam(key)}
               style={{
                 padding: '6px 10px',
-                backgroundColor: '#ef4444',
+                backgroundColor: '#A32D2D',
                 color: '#ffffff',
                 border: 'none',
                 borderRadius: '4px',
@@ -841,7 +969,7 @@ const AddStepForm: React.FC<{
             onClick={addParam}
             style={{
               padding: '6px 10px',
-              backgroundColor: '#10b981',
+              backgroundColor: '#1D9E75',
               color: '#ffffff',
               border: 'none',
               borderRadius: '4px',
@@ -860,7 +988,7 @@ const AddStepForm: React.FC<{
           disabled={!newStep.name}
           style={{
             padding: '8px 16px',
-            backgroundColor: newStep.name ? '#10b981' : '#d1d5db',
+            backgroundColor: newStep.name ? '#1D9E75' : '#d1d5db',
             color: '#ffffff',
             border: 'none',
             borderRadius: '4px',
@@ -921,8 +1049,8 @@ const StepsSectionTitle = styled.h2`
 const StepsErrorAlert = styled.div`
   background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
   border: 1px solid #fca5a5;
-  border-left: 4px solid #dc2626;
-  color: #dc2626;
+  border-left: 4px solid #8a2222;
+  color: #8a2222;
   padding: 16px 20px;
   border-radius: 12px;
   margin-bottom: 24px;
@@ -1005,7 +1133,7 @@ const StepsActionButtonsContainer = styled.div`
 `;
 
 const StepsSaveButton = styled.button<{ loading?: boolean }>`
-  background: linear-gradient(135deg, #059669 0%, #10b981 100%);
+  background: linear-gradient(135deg, #0F6E56 0%, #1D9E75 100%);
   color: white;
   border: none;
   padding: 12px 24px;
@@ -1081,7 +1209,7 @@ const StepsCancelButton = styled.button`
 `;
 
 const StepsSuccessMessage = styled.span`
-  color: #059669;
+  color: #0F6E56;
   font-size: 14px;
   font-weight: 600;
   display: flex;
@@ -1125,7 +1253,7 @@ const EditingModeText = styled.span`
 `;
 
 const AddStepButton = styled.button`
-  background: linear-gradient(135deg, #059669 0%, #10b981 100%);
+  background: linear-gradient(135deg, #0F6E56 0%, #1D9E75 100%);
   color: white;
   border: none;
   padding: 8px 16px;
@@ -1219,12 +1347,12 @@ const ActionTypeBadge = styled.span<{ actionType?: string }>`
       case 'click_css': 
       case 'click': return 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)';
       case 'type_css': 
-      case 'type': return 'linear-gradient(135deg, #10b981 0%, #059669 100%)';
+      case 'type': return 'linear-gradient(135deg, #1D9E75 0%, #0F6E56 100%)';
       case 'wait_for_css': 
       case 'wait_for': return 'linear-gradient(135deg, #6b7280 0%, #4b5563 100%)';
       case 'assert_text_css': 
       case 'assert_text': 
-      case 'assert_title_contains': return 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)';
+      case 'assert_title_contains': return 'linear-gradient(135deg, #A32D2D 0%, #8a2222 100%)';
       case 'calculate': 
       case 'math': 
       case 'computation': return 'linear-gradient(135deg, #06b6d4 0%, #0891b2 100%)';
@@ -1261,7 +1389,7 @@ const StepActionButton = styled.button<{ variant?: 'edit' | 'up' | 'down' | 'del
       case 'edit': return 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)';
       case 'up': 
       case 'down': return 'linear-gradient(135deg, #6b7280 0%, #4b5563 100%)';
-      case 'delete': return 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)';
+      case 'delete': return 'linear-gradient(135deg, #A32D2D 0%, #8a2222 100%)';
       default: return 'linear-gradient(135deg, #6b7280 0%, #4b5563 100%)';
     }
   }};
@@ -1550,7 +1678,7 @@ const detailStyles = {
   error: {
     backgroundColor: '#fee2e2',
     border: '1px solid #fecaca',
-    color: '#dc2626',
+    color: '#8a2222',
     padding: '16px',
     borderRadius: '8px',
     margin: '32px'
@@ -1573,7 +1701,7 @@ const detailStyles = {
   },
   stepItemWithRealElement: {
     backgroundColor: '#ffffff',
-    border: '1px solid #10b981',
+    border: '1px solid #1D9E75',
     borderRadius: '6px',
     padding: '16px',
     marginBottom: '12px',
@@ -1621,12 +1749,12 @@ const detailStyles = {
     marginRight: '12px'
   },
   stepParamValue: {
-    color: '#059669',
+    color: '#0F6E56',
     flex: 1,
     wordBreak: 'break-all' as 'break-all'
   },
   realElementBadge: {
-    backgroundColor: '#10b981',
+    backgroundColor: '#1D9E75',
     color: '#ffffff',
     padding: '2px 6px',
     borderRadius: '4px',
@@ -1646,7 +1774,7 @@ const detailStyles = {
   stepsError: {
     backgroundColor: '#fee2e2',
     border: '1px solid #fecaca',
-    color: '#dc2626',
+    color: '#8a2222',
     padding: '12px',
     borderRadius: '6px',
     marginBottom: '16px',
@@ -1675,7 +1803,7 @@ const SyncStatusIndicator = styled.div<{ hasRelated: boolean; isUpdating: boolea
   transition: all 0.3s ease;
   
   ${props => props.hasRelated ? `
-    background: linear-gradient(135deg, #48bb78 0%, #38b2ac 100%);
+    background: linear-gradient(135deg, #1D9E75 0%, #38b2ac 100%);
     color: white;
     box-shadow: 0 1px 4px rgba(72, 187, 120, 0.3);
   ` : `
@@ -1684,13 +1812,8 @@ const SyncStatusIndicator = styled.div<{ hasRelated: boolean; isUpdating: boolea
   `}
   
   ${props => props.isUpdating && `
-    animation: pulse 2s infinite;
+    animation: ${pulseKeyframes} 2s infinite;
   `}
-  
-  @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.7; }
-  }
 `;
 
 const SyncNotificationComponent = styled.div<{ type: 'success' | 'error' | 'info' }>`
@@ -1703,28 +1826,17 @@ const SyncNotificationComponent = styled.div<{ type: 'success' | 'error' | 'info
   color: white;
   font-weight: 500;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  animation: slideIn 0.3s ease-out;
+  animation: ${slideInKeyframes} 0.3s ease-out;
   max-width: 400px;
   
   background: ${props => {
     switch (props.type) {
-      case 'success': return 'linear-gradient(135deg, #48bb78 0%, #38b2ac 100%)';
-      case 'error': return 'linear-gradient(135deg, #f56565 0%, #e53e3e 100%)';
+      case 'success': return 'linear-gradient(135deg, #1D9E75 0%, #38b2ac 100%)';
+      case 'error': return 'linear-gradient(135deg, #c85050 0%, #A32D2D 100%)';
       case 'info': return 'linear-gradient(135deg, #4299e1 0%, #3182ce 100%)';
       default: return 'linear-gradient(135deg, #4299e1 0%, #3182ce 100%)';
     }
   }};
-  
-  @keyframes slideIn {
-    from {
-      transform: translateX(100%);
-      opacity: 0;
-    }
-    to {
-      transform: translateX(0);
-      opacity: 1;
-    }
-  }
 `;
 
 const ElementSyncIndicator = styled.span<{ hasSync: boolean; theme: any }>`
@@ -1738,7 +1850,7 @@ const ElementSyncIndicator = styled.span<{ hasSync: boolean; theme: any }>`
   font-weight: 600;
   
   ${props => props.hasSync ? `
-    background: linear-gradient(135deg, #48bb78 0%, #38b2ac 100%);
+    background: linear-gradient(135deg, #1D9E75 0%, #38b2ac 100%);
     color: white;
   ` : `
     background: ${props.theme.colors.surface === '#2d3748' ? 'rgba(74, 85, 104, 0.4)' : 'rgba(156, 163, 175, 0.3)'};
@@ -1873,7 +1985,7 @@ const FailureDate = styled.div<{ theme: any }>`
 `;
 
 const GenerateButton = styled.button<{ theme: any }>`
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #185FA5;
   color: white;
   border: none;
   padding: 10px 16px;
@@ -1920,12 +2032,12 @@ const StepAction = styled.div<{ theme: any }>`
 `;
 
 const StepError = styled.div<{ theme: any }>`
-  color: #e53e3e;
+  color: #A32D2D;
   font-size: 13px;
   background: ${props => props.theme.colors.surface === '#2d3748' ? 'rgba(229, 62, 62, 0.1)' : 'rgba(229, 62, 62, 0.05)'};
   padding: 8px;
   border-radius: 4px;
-  border-left: 3px solid #e53e3e;
+  border-left: 3px solid #A32D2D;
 `;
 
 const MinimalReproSection = styled.div<{ theme: any }>`
@@ -1998,11 +2110,11 @@ const LoadingMessage = styled.div<{ theme: any }>`
 
 const FailureErrorMessage = styled.div<{ theme: any }>`
   background: rgba(229, 62, 62, 0.1);
-  color: #e53e3e;
+  color: #A32D2D;
   padding: 16px;
   border-radius: 8px;
   margin-bottom: 20px;
-  border-left: 4px solid #e53e3e;
+  border-left: 4px solid #A32D2D;
 `;
 
 const EmptyState = styled.div<{ theme: any }>`
@@ -2034,6 +2146,8 @@ export const PromptDetailView: React.FC = () => {
   const { theme } = useTheme();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { canDelete, blockDestructiveActions } = usePolicyPermissions();
+  const { tenant, token } = useAuth();
   const [prompt, setPrompt] = useState<PromptData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -2048,6 +2162,7 @@ export const PromptDetailView: React.FC = () => {
   const [editedContent, setEditedContent] = useState('');
   const [editedDescription, setEditedDescription] = useState('');
   const [editedStartingUrl, setEditedStartingUrl] = useState('');
+  const [editedExternalId, setEditedExternalId] = useState('');
   
   // Failure analysis state
   const [failureAnalysisData, setFailureAnalysisData] = useState<any>(null);
@@ -2062,12 +2177,16 @@ export const PromptDetailView: React.FC = () => {
   const [runningDebugSteps, setRunningDebugSteps] = useState(false);
   const [debugStepsResults, setDebugStepsResults] = useState<any>(null);
   const [debugStepsError, setDebugStepsError] = useState<string | null>(null);
+  const debugPollRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
   
   // Test step editing state
   const [isEditingSteps, setIsEditingSteps] = useState(false);
   const [editedSteps, setEditedSteps] = useState<any[]>([]);
   const [editingStepIndex, setEditingStepIndex] = useState<number | null>(null);
   const [showAddStepForm, setShowAddStepForm] = useState(false);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [syncElementsPage, setSyncElementsPage] = useState(1);
+  const [syncStepsPage, setSyncStepsPage] = useState(1);
 
   // Sync functionality
   const {
@@ -2081,6 +2200,56 @@ export const PromptDetailView: React.FC = () => {
   } = usePromptSelectorSync(id || '');
   
   const { notification, clearNotification } = useSyncNotifications();
+  const syncElementsPerPage = 10;
+  const syncStepsPerPage = 8;
+  const totalRelatedElements = relatedElements.length;
+  const totalRelatedElementPages = Math.max(1, Math.ceil(totalRelatedElements / syncElementsPerPage));
+  const relatedElementsStart = (syncElementsPage - 1) * syncElementsPerPage;
+  const relatedElementsEnd = relatedElementsStart + syncElementsPerPage;
+  const paginatedRelatedElements = relatedElements.slice(relatedElementsStart, relatedElementsEnd);
+
+  const rawSyncSteps = getStepsWithElements();
+  const stepSelectorGroups = new Map<string, { stepIndex: number; selector: string; parameterKeys: string[]; elementIds: Set<string> }>();
+  rawSyncSteps.forEach(step => {
+    const key = `${step.stepIndex}-${step.currentValue}`;
+    if (!stepSelectorGroups.has(key)) {
+      stepSelectorGroups.set(key, {
+        stepIndex: step.stepIndex,
+        selector: step.currentValue,
+        parameterKeys: [],
+        elementIds: new Set()
+      });
+    }
+    const group = stepSelectorGroups.get(key)!;
+    group.parameterKeys.push(step.parameterKey);
+    group.elementIds.add(step.elementId);
+  });
+  const groupedSyncSteps = Array.from(stepSelectorGroups.values()).sort((a, b) => a.stepIndex - b.stepIndex);
+  const totalSyncSteps = groupedSyncSteps.length;
+  const totalSyncStepPages = Math.max(1, Math.ceil(totalSyncSteps / syncStepsPerPage));
+  const syncStepsStart = (syncStepsPage - 1) * syncStepsPerPage;
+  const syncStepsEnd = syncStepsStart + syncStepsPerPage;
+  const paginatedSyncSteps = groupedSyncSteps.slice(syncStepsStart, syncStepsEnd);
+
+  useEffect(() => {
+    setSyncElementsPage(1);
+  }, [totalRelatedElements]);
+
+  useEffect(() => {
+    if (syncElementsPage > totalRelatedElementPages) {
+      setSyncElementsPage(totalRelatedElementPages);
+    }
+  }, [syncElementsPage, totalRelatedElementPages]);
+
+  useEffect(() => {
+    setSyncStepsPage(1);
+  }, [totalSyncSteps]);
+
+  useEffect(() => {
+    if (syncStepsPage > totalSyncStepPages) {
+      setSyncStepsPage(totalSyncStepPages);
+    }
+  }, [syncStepsPage, totalSyncStepPages]);
 
   useEffect(() => {
     if (id && isValidUuid(id)) {
@@ -2111,6 +2280,7 @@ export const PromptDetailView: React.FC = () => {
         description: apiData.description || '',
         content: apiData.content || '',
         starting_url: apiData.starting_url,
+        external_id: apiData.external_id || '',
         category: apiData.category || '',
         tags: apiData.tags || [],
         status: apiData.status,
@@ -2136,8 +2306,10 @@ export const PromptDetailView: React.FC = () => {
     try {
       if (!isValidUuid(promptId)) {
         return;
-      }const token = localStorage.getItem('auth_token');
-  const response = await fetch(`${config.apiBaseUrl}/api/v1/generated-test-plans/by-prompt/${promptId}`, {
+      }
+
+      const token = localStorage.getItem('auth_token');
+      const response = await fetch(`${config.apiBaseUrl}/api/v1/generated-test-plans/by-prompt/${promptId}`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -2146,56 +2318,69 @@ export const PromptDetailView: React.FC = () => {
       });
 
       if (response.ok) {
-        const testPlansData = await response.json();// Get the first test plan if any exist
-        const existingPlan = testPlansData.test_plans && testPlansData.test_plans.length > 0 
-          ? testPlansData.test_plans[0] 
-          : null;
-          
-        if (existingPlan) {// Use the steps from the test plan
-          let planData = existingPlan.steps;
-          if (typeof planData === 'string') {
+        const testPlansData = await response.json();
+        // Find the first plan with parseable, non-empty steps
+        const plans = testPlansData.plans || testPlansData.test_plans || [];
+
+        const parsePlanActions = (raw: any): any[] => {
+          if (!raw) return [];
+          let parsed = raw;
+          // Some payloads are double-encoded JSON strings.
+          for (let i = 0; i < 2; i++) {
+            if (typeof parsed !== 'string') break;
             try {
-              planData = JSON.parse(planData);} catch (e) {
-            console.error(' Failed to parse test plan data:', e);
-            return;
+              parsed = JSON.parse(parsed);
+            } catch {
+              return [];
+            }
+          }
+
+          if (Array.isArray(parsed)) return parsed;
+          if (parsed && Array.isArray(parsed.steps)) return parsed.steps;
+          if (parsed && Array.isArray(parsed.actions)) return parsed.actions;
+          return [];
+        };
+
+        let selectedPlan: any = null;
+        let selectedActions: any[] = [];
+        for (const plan of plans) {
+          const actionsFromSteps = parsePlanActions(plan.steps);
+          const actionsFromPlanJson = parsePlanActions(plan.plan_json);
+          const actions = actionsFromSteps.length > 0 ? actionsFromSteps : actionsFromPlanJson;
+          if (actions.length > 0) {
+            selectedPlan = plan;
+            selectedActions = actions;
+            break;
           }
         }
-        
-        // Handle different data structures - if it's an array, wrap it in the expected structure
-        let formattedPlan;
-        if (Array.isArray(planData)) {
-          // Data is just an array of actions, need to wrap it
-          formattedPlan = {
-            actions: planData,
+
+        if (selectedPlan && selectedActions.length > 0) {
+          const formattedPlan = {
+            actions: selectedActions,
             meta: {
-              prompt: existingPlan.prompt_text,
+              prompt: selectedPlan.prompt_text,
               version: "1.0.0",
-              generatedAt: existingPlan.created_at,
-              totalElements: existingPlan.total_elements_count,
-              enterpriseMode: existingPlan.enterprise_mode,
-              chunksProcessed: existingPlan.chunks_processed,
-              originalStepCount: existingPlan.original_step_count
+              generatedAt: selectedPlan.created_at,
+              totalElements: selectedPlan.total_elements_count,
+              enterpriseMode: selectedPlan.enterprise_mode,
+              chunksProcessed: selectedPlan.chunks_processed,
+              originalStepCount: selectedPlan.original_step_count
             }
           };
-        } else if (planData && planData.actions) {
-          // Data is already in the correct structure
-          formattedPlan = planData;
-        } else {
-          console.error(' Unexpected data structure:', planData);
-          return;
+
+          // Set the generated steps to display the saved plan
+          setGeneratedSteps({
+            plan: formattedPlan,
+            metadata: {
+              processingTimeMs: selectedPlan.processing_time_ms,
+              chunksProcessed: selectedPlan.chunks_processed,
+              originalStepCount: selectedPlan.original_step_count
+            }
+          });
+          setTestPlanSaved(true);
         }
-        
-        // Set the generated steps to display the saved plan
-        setGeneratedSteps({
-          plan: formattedPlan,
-          metadata: {
-            processingTimeMs: existingPlan.processing_time_ms,
-            chunksProcessed: existingPlan.chunks_processed,
-            originalStepCount: existingPlan.original_step_count
-          }
-        });
-        setTestPlanSaved(true);} else {}
-      } else if (response.status === 404) {// This is normal - not all prompts have saved test plans
+      } else if (response.status === 404) {
+        // This is normal - not all prompts have saved test plans
       } else {
         console.warn(' Failed to load test plan:', response.statusText);
       }
@@ -2206,12 +2391,13 @@ export const PromptDetailView: React.FC = () => {
   };
 
   const handleBackToPrompts = () => {
-    navigate('/prompts');
+    navigate('/app/prompts');
   };
 
   const handleEdit = () => {setEditedDescription(prompt?.description || '');
     setEditedContent(prompt?.content || '');
     setEditedStartingUrl(prompt?.starting_url || '');
+    setEditedExternalId(prompt?.external_id || '');
     setIsEditing(true);
   };
 
@@ -2225,6 +2411,7 @@ export const PromptDetailView: React.FC = () => {
         content: editedContent,  // Changed from 'text' to 'content'
         description: editedDescription,  // Changed from 'intent' to 'description'
         starting_url: editedStartingUrl,
+        external_id: editedExternalId || null,  // Jira/Xray ID
         category: prompt.category
       };
       
@@ -2234,6 +2421,7 @@ export const PromptDetailView: React.FC = () => {
         description: savedPrompt.description || '',
         content: savedPrompt.content || '',
         starting_url: savedPrompt.starting_url || '',
+        external_id: savedPrompt.external_id || '',
         dateModified: savedPrompt.updated_at || new Date().toISOString()
       };
       setPrompt(updatedPrompt);
@@ -2257,7 +2445,28 @@ export const PromptDetailView: React.FC = () => {
     setEditedDescription('');
     setEditedContent('');
     setEditedStartingUrl('');
+    setEditedExternalId('');
   };
+
+  // Fetch available runner agents for the runner picker
+  useEffect(() => {
+    const fetchRunners = async () => {
+      try {
+        const apiBase = config.apiBaseUrl;
+        const orgParam = tenant?.id ? `?organization_id=${tenant.id}` : '';
+        const response = await fetch(`${apiBase}/api/v1/runners/list${orgParam}`, {
+          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        });
+        if (response.ok) {
+          const data = await response.json();
+          setAvailableRunners(data.runners || []);
+        }
+      } catch {
+        // Runners feature not available — that's fine, selector just stays hidden
+      }
+    };
+    fetchRunners();
+  }, [tenant?.id, token]);
 
   const handleRun = async () => {if (!id) {
       alert('No prompt selected');
@@ -2267,15 +2476,40 @@ export const PromptDetailView: React.FC = () => {
     try {
       setIsRunning(true);
       
-      // Call the test execution API
-      const result = await unifiedApiClient.executePrompt(id);
+      // Call the test execution API - no browser param needed, uses policy config
+      const execOptions: { browser?: string; runner_id?: string } = {};
+      if (selectedRunnerId) execOptions.runner_id = selectedRunnerId;
+      const result = await unifiedApiClient.executePrompt(id, Object.keys(execOptions).length ? execOptions : undefined);
       
-      if (result.success) {
-        setRunningExecutionId(result.execution_id);
-        alert(`Test execution started successfully!\nExecution ID: ${result.execution_id}\nSteps to execute: ${result.steps_count}`);
+      if (result.success && result.executions) {
+        const successfulExecutions = result.executions.filter((e: any) => e.success);
+        const failedExecutions = result.executions.filter((e: any) => !e.success);
         
-        // TODO: Fix polling when execution tracking is implemented
-        // pollExecutionStatus(result.execution_id);
+        if (successfulExecutions.length > 0) {
+          // Store all execution IDs for polling
+          const executionIds = successfulExecutions.map((e: any) => e.execution_id);
+          setRunningExecutionId(executionIds[0]); // Use first for primary polling
+          
+          const browserList = successfulExecutions.map((e: any) => e.browser).join(', ');
+          alert(
+            `Test execution started on ${successfulExecutions.length} browser(s)!\n` +
+            `Browsers: ${browserList}\n` +
+            `Execution IDs: ${executionIds.join(', ')}\n` +
+            `Steps to execute: ${result.steps_count}`
+          );
+          
+          // Start polling for all executions
+          executionIds.forEach((execId: string) => pollExecutionStatus(execId));
+        }
+        
+        if (failedExecutions.length > 0) {
+          const failedBrowsers = failedExecutions.map((e: any) => `${e.browser}: ${e.error}`).join('\n');
+          alert(`Some browsers failed to start:\n${failedBrowsers}`);
+        }
+        
+        if (successfulExecutions.length === 0) {
+          alert(`Failed to start test execution on any browser`);
+        }
       } else {
         alert(`Failed to start test execution: ${result.message || 'Unknown error'}`);
       }
@@ -2292,6 +2526,9 @@ export const PromptDetailView: React.FC = () => {
   const [isRunning, setIsRunning] = useState(false);
   const [runningExecutionId, setRunningExecutionId] = useState<string | null>(null);
   const [executionStatus, setExecutionStatus] = useState<any>(null);
+  const [selectedBrowser, setSelectedBrowser] = useState<string>('chrome'); // Multi-browser support
+  const [selectedRunnerId, setSelectedRunnerId] = useState<string>(''); // Runner agent selection
+  const [availableRunners, setAvailableRunners] = useState<Array<{ id: string; runner_name: string; status: string; capabilities: string[] | string }>>([]);
 
   // Poll execution status
   const pollExecutionStatus = async (executionId: string) => {
@@ -2362,7 +2599,7 @@ export const PromptDetailView: React.FC = () => {
     const action = actionName?.toLowerCase() || '';
     
     if (action.includes('open') || action.includes('navigate')) return '#3b82f6'; // Blue for navigation
-    if (action.includes('click')) return '#10b981'; // Green for clicks
+    if (action.includes('click')) return '#1D9E75'; // Green for clicks
     if (action.includes('type')) return '#f59e0b'; // Orange for input
     if (action.includes('wait')) return '#6b7280'; // Gray for waits
     if (action.includes('assert') || action.includes('verify')) return '#8b5cf6'; // Purple for assertions
@@ -2554,7 +2791,12 @@ export const PromptDetailView: React.FC = () => {
               }
               acc[pageName].push(element);
               return acc;
-            }, {});// Determine target page based on prompt context
+            }, {});
+            
+            // Log available pages for debugging
+            console.log('📚 Available pages:', Object.keys(elementsByPage).map(name => 
+              `${name} (${elementsByPage[name].length} elements)`
+            ).join(', '));// Determine target page based on prompt context
             let targetPageName = null;
             const startingUrl = prompt.starting_url;
             
@@ -2577,47 +2819,107 @@ export const PromptDetailView: React.FC = () => {
                 word.length > 3 && !['the', 'and', 'but', 'for', 'are', 'with', 'this', 'that', 'will', 'then'].includes(word)
               );
               
-              let bestMatch: { page: string | null, score: number } = { page: null, score: 0 };
+              // Check if prompt explicitly mentions a specific page
+              const pageNameMentions = [
+                { pattern: /\b(on\s+the\s+)?homepage\b|\bhome\s+page\b|\bstart\s+page\b|\bmain\s+page\b/i, names: ['home', 'homepage', 'main', 'index'] },
+                { pattern: /\bproduct\s+page\b|\bitem\s+page\b|\bdetail\s+page\b/i, names: ['product', 'item', 'detail'] },
+                { pattern: /\bsearch\s+results?\b|\bresults?\s+page\b/i, names: ['results', 'search results', 'search'] },
+                { pattern: /\blogin\s+page\b|\bsign\s+in\b/i, names: ['login', 'signin', 'sign in'] },
+                { pattern: /\bcheckout\s+page\b|\bcart\s+page\b/i, names: ['checkout', 'cart', 'shopping cart'] }
+              ];
               
-              for (const [pageName, pageElements] of Object.entries(elementsByPage)) {
-                let pageScore = 0;
-                const elements = pageElements as any[];
-                
-                // Score based on element text content matching prompt keywords
-                elements.forEach(element => {
-                  const elementText = (element.text_content || '').toLowerCase();
-                  promptKeywords.forEach(keyword => {
-                    if (elementText.includes(keyword.toLowerCase())) {
-                      pageScore += 10;
+              let explicitPageMatch: string | null = null;
+              for (const mention of pageNameMentions) {
+                if (mention.pattern.test(promptText)) {
+                  // Try to find a matching page name
+                  for (const expectedName of mention.names) {
+                    for (const pageName of Object.keys(elementsByPage)) {
+                      if (pageName.toLowerCase().includes(expectedName.toLowerCase())) {
+                        explicitPageMatch = pageName;
+                        console.log(`🎯 Explicit page match found: "${pageName}" based on prompt mention "${promptText.match(mention.pattern)?.[0]}"`);
+                        break;
+                      }
                     }
-                  });
-                });
-                
-                // Boost score for pages with more relevant elements
-                pageScore += elements.length * 0.5;
-                
-                if (pageScore > bestMatch.score) {
-                  bestMatch = { page: pageName, score: pageScore };
+                    if (explicitPageMatch) break;
+                  }
+                  if (explicitPageMatch) break;
                 }
               }
               
-              if (bestMatch.page) {
-                targetPageName = bestMatch.page;}
+              if (explicitPageMatch) {
+                targetPageName = explicitPageMatch;
+              } else {
+                // Fallback to keyword-based scoring
+                let bestMatch: { page: string | null, score: number } = { page: null, score: 0 };
+                
+                for (const [pageName, pageElements] of Object.entries(elementsByPage)) {
+                  let pageScore = 0;
+                  const elements = pageElements as any[];
+                  const pageNameLower = pageName.toLowerCase();
+                  
+                  // Strong boost for homepage when prompt mentions homepage-related terms
+                  if (/homepage|home|main|index|start/i.test(promptText)) {
+                    if (pageNameLower.includes('home') || pageNameLower.includes('main') || 
+                        pageNameLower.includes('index') || pageNameLower === 'american airlines') {
+                      pageScore += 100; // Very high priority for homepage
+                      console.log(`🏠 Homepage boost applied to: ${pageName}`);
+                    }
+                  }
+                  
+                  // Score based on element text content matching prompt keywords
+                  elements.forEach(element => {
+                    const elementText = (element.text_content || '').toLowerCase();
+                    promptKeywords.forEach(keyword => {
+                      if (elementText.includes(keyword.toLowerCase())) {
+                        pageScore += 10;
+                      }
+                    });
+                  });
+                  
+                  // Reduce score boost from element count (was causing wrong pages to be selected)
+                  // Only add a small bonus to avoid favoring pages just because they have more elements
+                  pageScore += elements.length * 0.1; // Reduced from 0.5
+                  
+                  if (pageScore > bestMatch.score) {
+                    bestMatch = { page: pageName, score: pageScore };
+                  }
+                }
+                
+                if (bestMatch.page) {
+                  targetPageName = bestMatch.page;
+                  console.log(`📄 Best page match: ${targetPageName} with score: ${bestMatch.score}`);
+                }
+              }
             }
 
-            // Use the most relevant page, or fallback to the page with most elements
+            // Use the most relevant page, or intelligent fallback
             if (!targetPageName && Object.keys(elementsByPage).length > 0) {
-              targetPageName = Object.keys(elementsByPage).reduce((a, b) => 
-                elementsByPage[a].length > elementsByPage[b].length ? a : b
-              );}
+              // Prioritize homepage/main page over just "most elements"
+              const homepagePatterns = /^(home|homepage|main|index|start|american airlines)$/i;
+              const homePage = Object.keys(elementsByPage).find(name => homepagePatterns.test(name.trim()));
+              
+              if (homePage) {
+                targetPageName = homePage;
+                console.log(`🏠 Defaulting to homepage: ${homePage}`);
+              } else {
+                // If no homepage found, use the page with most elements
+                targetPageName = Object.keys(elementsByPage).reduce((a, b) => 
+                  elementsByPage[a].length > elementsByPage[b].length ? a : b
+                );
+                console.log(`📊 Defaulting to page with most elements: ${targetPageName}`);
+              }
+            }
 
             // Filter elements to target page and transform for AI service
             let targetElements: any[];
+            
+            console.log(`🎯 Selected target page: ${targetPageName || 'ALL PAGES'}`);
             
             // If we have a clear page match, use those elements
             // But if it results in too few elements, expand to include related pages
             if (targetPageName && elementsByPage[targetPageName]) {
               targetElements = elementsByPage[targetPageName];
+              console.log(`📄 Using ${targetElements.length} elements from page: ${targetPageName}`);
               
               // If the target page has too few elements (less than 5), include other pages too
               if (targetElements.length < 5 && Object.keys(elementsByPage).length > 1) {// Add elements from other pages, prioritizing pages with similar content
@@ -2651,6 +2953,16 @@ export const PromptDetailView: React.FC = () => {
               priority: determineElementPriority(element, promptText),
               confidence: calculateElementConfidence(element, promptText)
             }));
+            
+            // Create selector-to-name mapping for display
+            const selectorToNameMap = new Map<string, string>();
+            targetElements.forEach((element: any) => {
+              if (element.css_selector && element.logical_key) {
+                selectorToNameMap.set(element.css_selector.toLowerCase().trim(), element.logical_key);
+              }
+            });
+            // Store in component state for use in step rendering
+            (window as any).__elementNameMap = selectorToNameMap;
 
             // Page context analysis is now handled by the backend's two-phase AI system// Log sample elements for debugging
             if (availableElements.length > 0) {}
@@ -2956,6 +3268,12 @@ export const PromptDetailView: React.FC = () => {
   };
 
   const deleteStep = (index: number) => {
+    // Check policy permissions before allowing delete
+    if (!canDelete) {
+      alert(`Delete action is blocked by ${blockDestructiveActions ? 'security policy' : 'permissions'}. Only administrators can delete when safety restrictions are enabled.`);
+      return;
+    }
+    
     if (confirm('Are you sure you want to delete this step?')) {
       const newSteps = editedSteps.filter((_, i) => i !== index);
       setEditedSteps(newSteps);
@@ -2971,10 +3289,32 @@ export const PromptDetailView: React.FC = () => {
     setEditedSteps(newSteps);
   };
 
-  const handleDuplicate = () => {// TODO: Implement duplicate functionality
+  const handleDuplicate = async () => {
+    if (!prompt) return;
+    try {
+      const duplicated = await promptsApiService.createPrompt({
+        title: `${prompt.title} (Copy)`,
+        content: prompt.content || '',
+        description: prompt.description,
+        category: prompt.category,
+        tags: prompt.tags,
+        starting_url: prompt.starting_url,
+      });
+      navigate(`/app/prompts/${duplicated.id}`);
+    } catch (err) {
+      alert('Failed to duplicate prompt');
+    }
   };
 
-  const handleArchive = () => {// TODO: Implement archive functionality
+  const handleArchive = async () => {
+    if (!prompt) return;
+    if (!window.confirm('Archive this prompt? It will no longer appear in your active prompts list.')) return;
+    try {
+      await promptsApiService.updatePrompt(prompt.id, { status: 'archived' } as any);
+      navigate('/app/prompts');
+    } catch (err) {
+      alert('Failed to archive prompt');
+    }
   };
 
   // Failure analysis functions
@@ -2983,40 +3323,89 @@ export const PromptDetailView: React.FC = () => {
     
     try {
       setLoadingFailures(true);
-      setFailuresError(null);const response = await unifiedApiClient.getRecentFailedExecutions(id, 10);// Handle both array response and object response
-        const executions = Array.isArray(response) ? response : response?.executions || [];if (executions && executions.length > 0) {// Log details of each execution to debug
-          executions.forEach((exec: any, index: number) => {});
-          
-          // Only show the most recent execution
-          const mostRecentExecution = executions[0];// Set the data with only the most recent execution
-          const failureData = { executions: [mostRecentExecution] };
-          setFailureAnalysisData(failureData);// Try both 'failed_steps' and 'steps' fields to be resilient
-          const failedSteps = mostRecentExecution?.failed_steps || 
-                             (mostRecentExecution?.steps || []).filter((step: any) => step.status === 'failed');
-          
-          if (mostRecentExecution && failedSteps && failedSteps.length > 0) {// Ensure the execution object has the right structure for the AI call
-            const executionForAI = {
-              ...mostRecentExecution,
-              failed_steps: failedSteps
-            };
-            
-            // Small delay to let the UI update first
-            setTimeout(() => {
-              generateMinimalReproSteps(executionForAI);
-            }, 500);
-          } else {}
-        } else {setFailureAnalysisData({ executions: [] });
+      setFailuresError(null);
+      setMinimalReproSteps(null);
+      setMinimalStepsError(null);
+      setSelectedExecution(null);
+
+      const response = await unifiedApiClient.getRecentFailedExecutions(id, 10);
+      const executions = Array.isArray(response) ? response : response?.executions || [];
+
+      if (executions && executions.length > 0) {
+        const normalizeExecution = (execution: any) => {
+          const executionId = execution?.execution_id || execution?.id || '';
+
+          const failedStepsFromList = Array.isArray(execution?.failed_steps)
+            ? execution.failed_steps
+            : [];
+
+          const failedStepsFromSteps = Array.isArray(execution?.steps)
+            ? execution.steps
+                .filter((step: any) => step?.status === 'failed')
+                .map((step: any) => ({
+                  action: step?.action || 'unknown',
+                  element_type: step?.element_type || undefined,
+                  selector: step?.selector || step?.target || '',
+                  error_message:
+                    typeof step?.error_message === 'string'
+                      ? step.error_message
+                      : (step?.error_message?.message || step?.error_details?.message || 'Step failed'),
+                  step_index: step?.step_index ?? step?.step_order ?? 0,
+                }))
+            : [];
+
+          const failedSteps = (failedStepsFromList.length > 0 ? failedStepsFromList : failedStepsFromSteps).map((step: any) => ({
+            ...step,
+            error_message:
+              typeof step?.error_message === 'string'
+                ? step.error_message
+                : (step?.error_message?.message || step?.error_details?.message || 'Step failed'),
+          }));
+
+          return {
+            ...execution,
+            execution_id: executionId,
+            failed_steps: failedSteps,
+            failed_steps_count:
+              typeof execution?.failed_steps === 'number'
+                ? execution.failed_steps
+                : failedSteps.length,
+          };
+        };
+
+        const normalizedExecutions = executions.map(normalizeExecution);
+
+        // Prefer the most recent execution with concrete failed step details.
+        const mostRecentExecution =
+          normalizedExecutions.find((execution: any) => execution.failed_steps.length > 0) ||
+          normalizedExecutions.find((execution: any) => execution.failed_steps_count > 0) ||
+          normalizedExecutions[0];
+
+        setFailureAnalysisData({ executions: [mostRecentExecution] });
+
+        if (mostRecentExecution.failed_steps.length > 0) {
+          // Small delay to let the UI update first
+          setTimeout(() => {
+            generateMinimalReproSteps(mostRecentExecution);
+          }, 500);
+        } else {
+          setMinimalStepsError('No failed step details were returned for this run, so AI analysis could not be generated.');
         }
+      } else {
+        setFailureAnalysisData({ executions: [] });
+      }
     } catch (error) {
       console.error('❌ Failed to load failure analysis:', error);
       const errorMessage = error instanceof Error ? error.message : String(error);
-        setFailuresError(`Failed to load failure analysis data: ${errorMessage}`);
+      setFailuresError(`Failed to load failure analysis data: ${errorMessage}`);
     } finally {
       setLoadingFailures(false);
     }
   };
 
-  const generateMinimalReproSteps = async (execution: any) => {if (!execution || !execution.failed_steps) {return;
+  const generateMinimalReproSteps = async (execution: any) => {
+    if (!execution || !Array.isArray(execution.failed_steps) || execution.failed_steps.length === 0) {
+      return;
     }
     
     try {
@@ -3026,7 +3415,7 @@ export const PromptDetailView: React.FC = () => {
       
       // Call the real API
       const response = await unifiedApiClient.generateMinimalReproSteps(
-        execution.execution_id,
+        execution.execution_id || execution.id,
         execution.failed_steps
       );
       
@@ -3092,8 +3481,27 @@ export const PromptDetailView: React.FC = () => {
         message: response.message
       });
 
-      // TODO: You can add polling here to check execution status
-      // For now, we'll just show that execution started
+      // Poll for execution status until terminal
+      if (debugPollRef.current) clearInterval(debugPollRef.current);
+      const execId = response.execution_id;
+      debugPollRef.current = setInterval(async () => {
+        try {
+          const statusRes = await unifiedApiClient.getExecutionStatus(execId);
+          const terminalStatuses = ['completed', 'passed', 'failed', 'error', 'cancelled'];
+          const currentStatus = (statusRes.status || '').toLowerCase();
+          setDebugStepsResults((prev: any) => ({
+            ...prev,
+            ...statusRes,
+            status: statusRes.status || prev?.status,
+          }));
+          if (terminalStatuses.includes(currentStatus)) {
+            if (debugPollRef.current) clearInterval(debugPollRef.current);
+            debugPollRef.current = null;
+          }
+        } catch {
+          // Silently retry on transient errors
+        }
+      }, 3000);
 
     } catch (error: any) {
       console.error('❌ Failed to run AI debug steps:', error);
@@ -3109,6 +3517,13 @@ export const PromptDetailView: React.FC = () => {
       loadFailureAnalysis();
     }
   }, [activeTab, id]);
+
+  // Cleanup debug steps polling on unmount
+  React.useEffect(() => {
+    return () => {
+      if (debugPollRef.current) clearInterval(debugPollRef.current);
+    };
+  }, []);
 
   if (loading) {
     return (
@@ -3161,6 +3576,37 @@ export const PromptDetailView: React.FC = () => {
               </TitleLeft>
 
               <ActionsBar>
+                <BrowserSelector
+                  value={selectedBrowser}
+                  onChange={setSelectedBrowser}
+                  disabled={isRunning}
+                  showIcon={false}
+                  variant="header"
+                />
+                {availableRunners.length > 0 && (
+                  <select
+                    value={selectedRunnerId}
+                    onChange={e => setSelectedRunnerId(e.target.value)}
+                    disabled={isRunning}
+                    style={{
+                      padding: '8px 12px',
+                      borderRadius: '8px',
+                      border: '1px solid #dee2e6',
+                      background: '#f8f9fa',
+                      color: '#495057',
+                      fontSize: '13px',
+                      cursor: 'pointer',
+                      minWidth: '140px',
+                    }}
+                  >
+                    <option value="">Auto (any runner)</option>
+                    {availableRunners.map(r => (
+                      <option key={r.id} value={r.id} disabled={r.status === 'offline'}>
+                        {r.runner_name} {r.status === 'offline' ? '(offline)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                )}
                 <PrimaryButton
                   variant={isRunning ? 'running' : 'primary'}
                   onClick={handleRun}
@@ -3231,19 +3677,19 @@ export const PromptDetailView: React.FC = () => {
           {/* Tabs */}
           <TabsContainer>
             <Tab
-              active={activeTab === 'overview'}
+              $active={activeTab === 'overview'}
               onClick={() => setActiveTab('overview')}
             >
               Overview
             </Tab>
             <Tab
-              active={activeTab === 'versions'}
+              $active={activeTab === 'versions'}
               onClick={() => setActiveTab('versions')}
             >
               Versions
             </Tab>
             <Tab
-              active={activeTab === 'steps'}
+              $active={activeTab === 'steps'}
               onClick={() => setActiveTab('steps')}
             >
               Generated Steps
@@ -3254,20 +3700,20 @@ export const PromptDetailView: React.FC = () => {
               )}
             </Tab>
             <Tab
-              active={activeTab === 'bindings'}
+              $active={activeTab === 'bindings'}
               onClick={() => setActiveTab('bindings')}
             >
               Variables
             </Tab>
             <Tab
-              active={activeTab === 'execution-history'}
+              $active={activeTab === 'execution-history'}
               onClick={() => setActiveTab('execution-history')}
             >
               <Activity size={14} style={{ marginRight: '4px' }} />
               Execution History
             </Tab>
             <Tab
-              active={activeTab === 'failure-analysis'}
+              $active={activeTab === 'failure-analysis'}
               onClick={() => setActiveTab('failure-analysis')}
             >
               🚨 Failure Analysis
@@ -3369,6 +3815,42 @@ export const PromptDetailView: React.FC = () => {
                   )}
                 </div>
 
+                {/* External ID (Jira/Xray) Section */}
+                <div style={detailStyles.descriptionSection}>
+                  <h2 style={{...detailStyles.sectionTitle, color: theme.colors.text}}>External ID (Jira/Xray)</h2>
+                  {isEditing ? (
+                    <input
+                      type="text"
+                      value={editedExternalId}
+                      onChange={(e) => setEditedExternalId(e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '12px',
+                        border: `1px solid ${theme.colors.border}`,
+                        borderRadius: '6px',
+                        fontSize: '14px',
+                        fontFamily: 'inherit',
+                        backgroundColor: theme.colors.surface,
+                        color: theme.colors.text
+                      }}
+                      placeholder="e.g., PROJ-1234, XRAY-TEST-001"
+                    />
+                  ) : (
+                    <div style={{
+                      ...detailStyles.contentBox,
+                      backgroundColor: theme.colors.surface,
+                      color: theme.colors.text,
+                      borderColor: theme.colors.border
+                    }}>
+                      {prompt.external_id ? (
+                        <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{prompt.external_id}</span>
+                      ) : (
+                        <span style={{ color: theme.colors.textSecondary, fontStyle: 'italic' }}>No external ID - using internal ID: {prompt.id.substring(0, 8).toUpperCase()}</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+
                 {/* Element Synchronization Status */}
                 {!isEditing && (
                   <div style={detailStyles.descriptionSection}>
@@ -3395,7 +3877,7 @@ export const PromptDetailView: React.FC = () => {
                           <div>
                             <strong>Linked Elements:</strong>
                             <ul style={{ margin: '8px 0', paddingLeft: '20px' }}>
-                              {relatedElements.map(elementId => (
+                              {paginatedRelatedElements.map(elementId => (
                                 <li key={elementId} style={{ marginBottom: '4px' }}>
                                   <SyncElementCode theme={theme}>
                                     {elementId}
@@ -3403,35 +3885,41 @@ export const PromptDetailView: React.FC = () => {
                                 </li>
                               ))}
                             </ul>
+                            {totalRelatedElements > syncElementsPerPage && (
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px' }}>
+                                <span style={{ fontSize: '12px', color: theme.colors.textSecondary }}>
+                                  Showing {relatedElementsStart + 1}-{Math.min(relatedElementsEnd, totalRelatedElements)} of {totalRelatedElements} elements
+                                </span>
+                                <div style={{ display: 'flex', gap: '6px' }}>
+                                  <button
+                                    onClick={() => setSyncElementsPage(prev => Math.max(1, prev - 1))}
+                                    disabled={syncElementsPage === 1}
+                                    style={{ padding: '4px 8px', borderRadius: '6px', border: `1px solid ${theme.colors.border}` }}
+                                  >
+                                    Previous
+                                  </button>
+                                  <button
+                                    disabled
+                                    style={{ padding: '4px 8px', borderRadius: '6px', border: `1px solid ${theme.colors.border}` }}
+                                  >
+                                    Page {syncElementsPage}/{totalRelatedElementPages}
+                                  </button>
+                                  <button
+                                    onClick={() => setSyncElementsPage(prev => Math.min(totalRelatedElementPages, prev + 1))}
+                                    disabled={syncElementsPage === totalRelatedElementPages}
+                                    style={{ padding: '4px 8px', borderRadius: '6px', border: `1px solid ${theme.colors.border}` }}
+                                  >
+                                    Next
+                                  </button>
+                                </div>
+                              </div>
+                            )}
                           </div>
-                          {getStepsWithElements().length > 0 && (
+                          {groupedSyncSteps.length > 0 && (
                             <div style={{ marginTop: '12px', fontSize: '13px' }}>
                               <strong>Steps with synchronized elements:</strong>
                               <div style={{ margin: '8px 0' }}>
-                                {(() => {
-                                  // Debug: Log the raw steps data
-                                  const rawSteps = getStepsWithElements();// More intelligent deduplication: group by step + selector combination
-                                  const stepSelectorGroups = new Map();
-                                  
-                                  rawSteps.forEach(step => {
-                                    // Create a unique key combining step and selector
-                                    const key = `${step.stepIndex}-${step.currentValue}`;
-                                    
-                                    if (!stepSelectorGroups.has(key)) {
-                                      stepSelectorGroups.set(key, {
-                                        stepIndex: step.stepIndex,
-                                        selector: step.currentValue,
-                                        parameterKeys: [],
-                                        elementIds: new Set()
-                                      });
-                                    }
-                                    
-                                    const group = stepSelectorGroups.get(key);
-                                    group.parameterKeys.push(step.parameterKey);
-                                    group.elementIds.add(step.elementId);
-                                  });return Array.from(stepSelectorGroups.values())
-                                    .sort((a, b) => a.stepIndex - b.stepIndex)
-                                    .map((group, index) => (
+                                {paginatedSyncSteps.map((group, index) => (
                                     <div key={`${group.stepIndex}-${group.selector}`} style={{ 
                                       marginBottom: '12px', 
                                       padding: '12px', 
@@ -3450,9 +3938,37 @@ export const PromptDetailView: React.FC = () => {
                                         {group.elementIds.size > 1 && ` (${group.elementIds.size} elements)`}
                                       </div>
                                     </div>
-                                  ));
-                                })()}
+                                  ))}
                               </div>
+                              {totalSyncSteps > syncStepsPerPage && (
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px' }}>
+                                  <span style={{ fontSize: '12px', color: theme.colors.textSecondary }}>
+                                    Showing {syncStepsStart + 1}-{Math.min(syncStepsEnd, totalSyncSteps)} of {totalSyncSteps} synchronized steps
+                                  </span>
+                                  <div style={{ display: 'flex', gap: '6px' }}>
+                                    <button
+                                      onClick={() => setSyncStepsPage(prev => Math.max(1, prev - 1))}
+                                      disabled={syncStepsPage === 1}
+                                      style={{ padding: '4px 8px', borderRadius: '6px', border: `1px solid ${theme.colors.border}` }}
+                                    >
+                                      Previous
+                                    </button>
+                                    <button
+                                      disabled
+                                      style={{ padding: '4px 8px', borderRadius: '6px', border: `1px solid ${theme.colors.border}` }}
+                                    >
+                                      Page {syncStepsPage}/{totalSyncStepPages}
+                                    </button>
+                                    <button
+                                      onClick={() => setSyncStepsPage(prev => Math.min(totalSyncStepPages, prev + 1))}
+                                      disabled={syncStepsPage === totalSyncStepPages}
+                                      style={{ padding: '4px 8px', borderRadius: '6px', border: `1px solid ${theme.colors.border}` }}
+                                    >
+                                      Next
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>
@@ -3517,10 +4033,14 @@ export const PromptDetailView: React.FC = () => {
             )}
 
             {activeTab === 'versions' && (
-              <div>
-                <h2 style={detailStyles.sectionTitle}>Versions</h2>
-                <p style={{...detailStyles.description, color: theme.colors.text}}>Version management coming soon...</p>
-              </div>
+              <PromptVersions 
+                promptId={id || ''}
+                currentPlan={generatedSteps?.plan}
+                onVersionActivated={() => {
+                  // Reload the prompt to get the updated plan
+                  if (id) fetchPrompt(id);
+                }}
+              />
             )}
 
             {activeTab === 'steps' && (
@@ -3968,7 +4488,9 @@ export const PromptDetailView: React.FC = () => {
                                       <StepActionButton
                                         variant="delete"
                                         onClick={() => deleteStep(index)}
-                                        title="Delete step"
+                                        disabled={!canDelete}
+                                        title={canDelete ? "Delete step" : "Delete disabled by security policy (admin only)"}
+                                        style={{ opacity: canDelete ? 1 : 0.4, cursor: canDelete ? 'pointer' : 'not-allowed' }}
                                       >
                                         🗑️
                                       </StepActionButton>
@@ -4060,11 +4582,11 @@ export const PromptDetailView: React.FC = () => {
                 )}
 
                 {failureAnalysisData?.executions?.map((execution: any, index: number) => (
-                  <FailureCard key={execution.execution_id || index} theme={theme}>
+                  <FailureCard key={execution.execution_id || execution.id || index} theme={theme}>
                     <FailureHeader theme={theme}>
                       <FailureInfo theme={theme}>
                         <FailureTitle theme={theme}>
-                          ❌ Execution #{execution.execution_id?.slice(-8)}
+                          ❌ Execution #{(execution.execution_id || execution.id || 'unknown').slice(-8)}
                         </FailureTitle>
                         <FailureDate theme={theme}>
                           {new Date(execution.started_at).toLocaleDateString('en-US', {
@@ -4108,8 +4630,22 @@ export const PromptDetailView: React.FC = () => {
                       </FailedStepsContainer>
                     )}
 
-                    {selectedExecution?.execution_id === execution.execution_id && minimalReproSteps && (
+                    {(selectedExecution?.execution_id || selectedExecution?.id) === (execution.execution_id || execution.id) && (
                       <MinimalReproSection theme={theme}>
+                        {generatingMinimalSteps && !minimalReproSteps && (
+                          <LoadingMessage theme={theme}>
+                            🤖 Generating AI failure analysis...
+                          </LoadingMessage>
+                        )}
+
+                        {minimalStepsError && (
+                          <FailureErrorMessage theme={theme}>
+                            {minimalStepsError}
+                          </FailureErrorMessage>
+                        )}
+
+                        {minimalReproSteps && (
+                          <>
                         <div style={{
                           display: 'flex',
                           justifyContent: 'space-between',
@@ -4121,23 +4657,20 @@ export const PromptDetailView: React.FC = () => {
                           border: `1px solid ${theme.colors.border}`
                         }}>
                           <div>
-                            <h4 style={{ 
+                             <h4 style={{ 
                               margin: 0,
                               color: theme.colors.text,
                               fontSize: '14px',
                               fontWeight: '600'
                             }}>
-                               AI-Generated Minimal Reproduction Steps
+                               AI Failure Analysis
                             </h4>
                             <p style={{ 
                               margin: '4px 0 0 0',
                               fontSize: '12px',
                               color: theme.colors.textSecondary
                             }}>
-                              Reduced from {minimalReproSteps.originalStepsCount || 0} to {minimalReproSteps.reducedStepsCount || 0} steps
-                              {minimalReproSteps.reproductionGuarantee && (
-                                <> • {Math.round(minimalReproSteps.reproductionGuarantee * 100)}% reproduction confidence</>
-                              )}
+                              AI confidence: {Math.round((minimalReproSteps.reproductionGuarantee || 0) * 100)}%
                             </p>
                           </div>
                         </div>
@@ -4184,196 +4717,42 @@ export const PromptDetailView: React.FC = () => {
                           </div>
                         )}
                         <MinimalReproTitle theme={theme}>
-                          ⚡ Minimal Reproduction Steps
+                          💡 AI Failure Insights
                         </MinimalReproTitle>
                         <div style={{ 
                           color: theme.colors.textSecondary,
                           fontSize: '14px',
                           marginBottom: '16px'
                         }}>
-                          AI-generated minimal steps to reproduce this failure:
+                          Read-only insights from recent failures. No steps are auto-generated or updated.
                         </div>
-
-                        {/* Run AI Debug Steps Button */}
-                        <div style={{ marginBottom: '16px' }}>
-                          <GenerateButton 
-                            theme={theme}
-                            onClick={runAIDebugSteps}
-                            disabled={runningDebugSteps || !minimalReproSteps?.minimalSteps?.length}
-                            style={{
-                              background: runningDebugSteps ? theme.colors.textSecondary : '#4CAF50',
-                              cursor: (runningDebugSteps || !minimalReproSteps?.minimalSteps?.length) ? 'not-allowed' : 'pointer'
-                            }}
-                          >
-                            {runningDebugSteps ? '🔄 Running Debug Steps...' : '🚀 Run AI Debug Steps'}
-                          </GenerateButton>
-                        </div>
-
-                        {debugStepsError && (
-                          <FailureErrorMessage theme={theme}>
-                            {debugStepsError}
-                          </FailureErrorMessage>
-                        )}
-
-                        {debugStepsResults && (
-                          <div style={{
-                            background: theme.colors.surface === '#2d3748' ? 'rgba(72, 187, 120, 0.1)' : 'rgba(72, 187, 120, 0.1)',
-                            border: '1px solid #48BB78',
-                            borderRadius: '8px',
-                            padding: '12px',
-                            marginBottom: '16px'
-                          }}>
-                            <div style={{ 
-                              fontWeight: '600', 
-                              color: '#48BB78',
-                              marginBottom: '8px'
-                            }}>
-                              ✅ Debug Steps Execution Completed
-                            </div>
-                            <div style={{ fontSize: '13px', color: theme.colors.textSecondary }}>
-                              Execution ID: {debugStepsResults.execution_id || 'N/A'}
-                            </div>
-                            {debugStepsResults.success_rate && (
-                              <div style={{ fontSize: '13px', color: theme.colors.textSecondary }}>
-                                Success Rate: {debugStepsResults.success_rate}%
-                              </div>
-                            )}
+                        <div style={{
+                          marginTop: '12px',
+                          padding: '12px',
+                          background: theme.colors.surface === '#2d3748' ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.04)',
+                          borderRadius: '8px'
+                        }}>
+                          <div style={{ fontWeight: 600, color: theme.colors.text, marginBottom: '8px' }}>
+                            Primary Insight
                           </div>
-                        )}
-                        
-                        {minimalStepsError && (
-                          <FailureErrorMessage theme={theme}>
-                            {minimalStepsError}
-                          </FailureErrorMessage>
-                        )}
+                          <div style={{ color: theme.colors.textSecondary, fontSize: '13px' }}>
+                            {(() => {
+                              const rawError = execution?.failed_steps?.[0]?.error_message;
+                              const message = typeof rawError === 'string'
+                                ? rawError
+                                : rawError
+                                  ? JSON.stringify(rawError)
+                                  : 'No detailed error message available.';
 
-                        {minimalReproSteps.minimalSteps && (
-                          <ModernStepsContainer>
-                            {minimalReproSteps.minimalSteps.map((step: any, stepIndex: number) => {
-                              // Helper function to get step description
-                              const getStepDescription = () => {
-                                switch(step.action) {
-                                  case 'open_url':
-                                  case 'open':
-                                    const url = step.target || step.value || step.text_value;
-                                    return url ? `Navigate to ${url}` : 'Navigate to URL';
-                                  case 'type':
-                                    const typeText = step.text_value || step.value;
-                                    const typeTarget = step.target?.replace('css=', '') || step.selector;
-                                    if (typeText && typeTarget) {
-                                      return `Type "${typeText}" into ${typeTarget}`;
-                                    } else if (typeText) {
-                                      return `Type "${typeText}"`;
-                                    } else if (typeTarget) {
-                                      return `Type text into ${typeTarget}`;
-                                    }
-                                    return 'Type text into element';
-                                  case 'click':
-                                    const clickTarget = step.target?.replace('css=', '') || step.selector;
-                                    return clickTarget ? `Click on ${clickTarget}` : 'Click element';
-                                  case 'wait_for':
-                                    const waitTarget = step.target?.replace('css=', '') || step.selector;
-                                    return waitTarget ? `Wait for ${waitTarget} to appear` : 'Wait for element to appear';
-                                  case 'verify_element':
-                                  case 'assert_visible':
-                                    const verifyTarget = step.target?.replace('css=', '') || step.selector;
-                                    return verifyTarget ? `Verify ${verifyTarget}` : 'Verify element';
-                                  case 'verify_text':
-                                  case 'assert_text':
-                                    const assertTarget = step.target?.replace('css=', '') || step.selector;
-                                    const expectedText = step.text_value || step.value;
-                                    if (assertTarget && expectedText) {
-                                      return `Verify ${assertTarget} contains "${expectedText}"`;
-                                    } else if (assertTarget) {
-                                      return `Verify text in ${assertTarget}`;
-                                    }
-                                    return 'Verify element text';
-                                  case 'screenshot':
-                                    return 'Take a screenshot';
-                                  default:
-                                    return step.description || step.action || 'Perform action';
-                                }
-                              };
+                              if (message.includes('Unsupported action: open_url')) {
+                                return 'Runner does not support open_url directly. Map open_url to an allowed navigation action (for example open or navigate) before execution.';
+                              }
 
-                              // Helper function to get essential parameters
-                              const getEssentialParams = () => {
-                                const essentials: {key: string, value: any}[] = [];
-                                
-                                // Add URL for navigation
-                                if (step.action === 'open_url' || step.action === 'open') {
-                                  const url = step.target || step.value || step.text_value;
-                                  if (url) {
-                                    essentials.push({
-                                      key: 'URL',
-                                      value: url
-                                    });
-                                  }
-                                } else {
-                                  // Add element selector for other actions
-                                  const selector = step.target?.replace('css=', '') || step.selector;
-                                  if (selector && selector !== '' && selector !== 'undefined') {
-                                    essentials.push({
-                                      key: 'Element',
-                                      value: selector
-                                    });
-                                  }
-                                }
-                                
-                                // Add text/value for input actions
-                                const textValue = step.text_value || step.value;
-                                if (textValue && textValue !== '' && textValue !== 'undefined' && step.action !== 'open_url' && step.action !== 'open') {
-                                  essentials.push({
-                                    key: 'Text',
-                                    value: textValue
-                                  });
-                                }
-                                
-                                return essentials;
-                              };
-
-                              return (
-                                <StepCard key={stepIndex}>
-                                  <StepHeader>
-                                    <StepNumber>{stepIndex + 1}</StepNumber>
-                                    <StepContent>
-                                      <StepTitle>
-                                        <ActionTypeBadge actionType={step.action}>
-                                          {step.action?.replace('_', ' ').toUpperCase() || 'ACTION'}
-                                        </ActionTypeBadge>
-                                        <StepDescription>{getStepDescription()}</StepDescription>
-                                        {step.status && (
-                                          <span style={{ 
-                                            marginLeft: '8px',
-                                            padding: '2px 8px',
-                                            borderRadius: '12px',
-                                            fontSize: '10px',
-                                            fontWeight: '600',
-                                            background: step.status === 'failed' ? '#ff6b6b' : 
-                                                       step.status === 'passed' ? '#51cf66' : '#6c757d',
-                                            color: 'white'
-                                          }}>
-                                            {step.status === 'failed' ? '❌ FAILED' : 
-                                             step.status === 'passed' ? '✅ PASSED' : step.status?.toUpperCase()}
-                                          </span>
-                                        )}
-                                      </StepTitle>
-                                      
-                                      {getEssentialParams().length > 0 && (
-                                        <StepDetails>
-                                          {getEssentialParams().map(({key, value}) => (
-                                            <StepDetailRow key={key}>
-                                              <StepDetailLabel>{key}:</StepDetailLabel>
-                                              <StepDetailValue>{value}</StepDetailValue>
-                                            </StepDetailRow>
-                                          ))}
-                                        </StepDetails>
-                                      )}
-                                    </StepContent>
-                                  </StepHeader>
-                                </StepCard>
-                              );
-                            })}
-                          </ModernStepsContainer>
+                              return message;
+                            })()}
+                          </div>
+                        </div>
+                          </>
                         )}
                       </MinimalReproSection>
                     )}
@@ -4382,36 +4761,40 @@ export const PromptDetailView: React.FC = () => {
               </FailureAnalysisSection>
             )}
           </Content>
-        </MainContent>        {/* History Sidebar */}
-        <div style={detailStyles.historySidebar}>
-          <div style={detailStyles.sidebarHeader}>History</div>
+        </MainContent>
+        
+        {/* History Toggle Button */}
+        {!isHistoryOpen && (
+          <HistoryToggleButton onClick={() => setIsHistoryOpen(true)}>
+            <History size={16} />
+            <span>History</span>
+          </HistoryToggleButton>
+        )}
+        
+        {/* History Sidebar Overlay */}
+        <HistorySidebarOverlay 
+          $isOpen={isHistoryOpen} 
+          onClick={() => setIsHistoryOpen(false)} 
+        />
+        
+        {/* History Sidebar Panel */}
+        <HistorySidebarPanel $isOpen={isHistoryOpen}>
+          <HistorySidebarHeader>
+            <HistorySidebarTitle>
+              <History size={20} />
+              History
+            </HistorySidebarTitle>
+            <HistorySidebarClose onClick={() => setIsHistoryOpen(false)}>
+              <X size={18} />
+            </HistorySidebarClose>
+          </HistorySidebarHeader>
           
-          <div style={detailStyles.historyItem}>
-            <div style={detailStyles.historyAction}>Generated steps</div>
-            <div style={detailStyles.historyDate}>
-              {prompt.created_at ? new Date(prompt.created_at).toLocaleDateString('en-US', {
-                month: 'short',
-                day: 'numeric',
-                year: 'numeric',
-                hour: 'numeric',
-                minute: '2-digit'
-              }) : 'Invalid Date'}
-            </div>
-          </div>
-
-          <div style={detailStyles.historyItem}>
-            <div style={detailStyles.historyAction}>Prompt created</div>
-            <div style={detailStyles.historyDate}>
-              {prompt.created_at ? new Date(prompt.created_at).toLocaleDateString('en-US', {
-                month: 'short',
-                day: 'numeric',
-                year: 'numeric',
-                hour: 'numeric',
-                minute: '2-digit'
-              }) : 'Invalid Date'}
-            </div>
-          </div>
-        </div>
+          <HistorySidebarContent>
+            {prompt && id && (
+              <PromptActivitySidebar promptId={id} />
+            )}
+          </HistorySidebarContent>
+        </HistorySidebarPanel>
       </Layout>
 
       {/* Sync Notification */}

@@ -92,17 +92,55 @@ class ElementRankingService:
     
     def _convert_to_page_element(self, raw_element: Dict[str, Any], index: int) -> PageElement:
         """Convert raw element data to PageElement model"""
+        import logging
+        logger = logging.getLogger(__name__)
+        
         attributes = raw_element.get("attributes", {})
+        
+        # Handle both snake_case (Python) and camelCase (JavaScript) field names
+        css_selector = (
+            raw_element.get("css_selector") or 
+            raw_element.get("cssSelector") or  # JavaScript extension format
+            raw_element.get("selector")
+        )
+        
+        xpath_selector = (
+            raw_element.get("xpath") or
+            raw_element.get("xpathSelector")  # Alternative format
+        )
+        
+        text_content = (
+            raw_element.get("text") or 
+            raw_element.get("textContent") or  # JavaScript extension format
+            raw_element.get("innerText")
+        )
+        
+        is_interactive = bool(
+            raw_element.get("isInteractive", False) or
+            raw_element.get("is_interactive", False)
+        )
+        
+        is_visible = bool(
+            raw_element.get("isVisible", True) or
+            raw_element.get("is_visible", True) or
+            raw_element.get("visible", True)
+        )
+        
+        tag = raw_element.get("tag", "div")
+        
+        # Log first few conversions to debug selector extraction
+        if index < 5:
+            logger.debug(f"🔄 Converting element {index}: tag={tag}, css={css_selector}, xpath={xpath_selector}, visible={is_visible}, interactive={is_interactive}, text='{(text_content or '')[:30]}'")
         
         return PageElement(
             element_id=f"el_{index}_{int(time.time()*1000)}",
-            tag=raw_element.get("tag", "div"),
-            selector_css=raw_element.get("css_selector") or raw_element.get("selector"),
-            selector_xpath=raw_element.get("xpath"),
-            text=raw_element.get("text") or raw_element.get("innerText"),
+            tag=tag,
+            selector_css=css_selector,
+            selector_xpath=xpath_selector,
+            text=text_content,
             attributes=attributes,
-            is_interactive=bool(raw_element.get("isInteractive", False)),
-            is_visible=bool(raw_element.get("isVisible", True)),
+            is_interactive=is_interactive,
+            is_visible=is_visible,
             page_location=raw_element.get("position") or raw_element.get("bounds")
         )
     
@@ -184,17 +222,48 @@ class ElementRankingService:
     ) -> List[PageElement]:
         """Hybrid ranking combining multiple strategies"""
         
+        import logging
+        logger = logging.getLogger(__name__)
+        
         # First apply heuristic filtering
         high_quality = []
+        filtered_out = []
         for element in elements:
             if self._is_high_quality_element(element):
                 high_quality.append(element)
+            else:
+                filtered_out.append(element)
         
-        # Then apply relevance ranking on filtered elements
-        if high_quality:
+        logger.debug(f"🔍 Hybrid ranking: {len(high_quality)}/{len(elements)} elements passed quality filter")
+        
+        if filtered_out and len(filtered_out) <= 10:
+            logger.debug(f"❌ Filtered out elements:")
+            for el in filtered_out[:10]:
+                logger.debug(f"   - {el.tag} | css={el.selector_css} | xpath={el.selector_xpath} | visible={el.is_visible} | text='{(el.text or '')[:30]}'")
+        
+        # IMPROVED: More adaptive fallback logic
+        min_acceptable = max(config.k, 10)  # Need at least K elements or 10, whichever is higher
+        
+        if len(high_quality) >= min_acceptable:
+            # Enough high-quality elements, use relevance ranking
+            return self._rank_by_relevance(high_quality, config, prompt_context)
+        elif len(high_quality) > 0:
+            # Some high-quality elements but not enough - augment with best filtered elements
+            logger.info(f"⚠️ Only {len(high_quality)} high-quality elements, augmenting with best filtered elements")
+            # Score all filtered elements and add the best ones
+            for el in filtered_out:
+                el.relevance_score = self._calculate_quality_score(el, config)
+            filtered_out.sort(key=lambda x: x.relevance_score or 0, reverse=True)
+            
+            # Add top filtered elements to reach minimum
+            needed = min_acceptable - len(high_quality)
+            high_quality.extend(filtered_out[:needed])
+            logger.info(f"✅ Augmented to {len(high_quality)} elements total")
+            
             return self._rank_by_relevance(high_quality, config, prompt_context)
         else:
-            # Fallback to top-K if no high-quality elements found
+            # No high-quality elements found - fallback to top-K on all elements
+            logger.warning(f"⚠️ No high-quality elements found, falling back to top-K on all elements")
             return self._rank_top_k(elements, config, prompt_context)
     
     def _calculate_quality_score(self, element: PageElement, config: ElementRankingConfig) -> float:
@@ -210,10 +279,13 @@ class ElementRankingService:
         if element.is_visible:
             score += config.visibility_weight
         
-        # Text content score
+        # Text content score - but don't penalize form inputs without text
         if element.text and len(element.text.strip()) > 2:
             text_quality = min(len(element.text.strip()) / 50.0, 1.0)  # Normalize to 0-1
             score += config.text_content_weight * text_quality
+        elif element.tag in ["input", "select", "textarea"]:
+            # Form inputs often don't have text content, so give them baseline score
+            score += config.text_content_weight * 0.3
         
         # Selector quality score
         selector_quality = self._calculate_selector_quality(element)
@@ -262,6 +334,32 @@ class ElementRankingService:
             if element.tag in ["input", "textarea", "select", "button"] or "form" in str(attributes):
                 relevance += 0.3
         
+        # Flight booking context
+        if any(keyword in prompt_lower for keyword in ["flight", "book", "booking", "reservation", "travel", "airport"]):
+            element_context = (element.text or "").lower() + str(attributes).lower() + (element.selector_css or "").lower()
+            
+            # Boost flight search form inputs
+            if any(keyword in element_context for keyword in [
+                "origin", "departure", "depart", "from", "leaving",
+                "destination", "arrival", "arrive", "to", "going",
+                "date", "calendar", "when",
+                "passenger", "traveler", "adult", "child", "senior",
+                "class", "cabin", "fare",
+                "oneway", "roundtrip", "one-way", "round-trip",
+                "search", "find", "flights"
+            ]):
+                relevance += 0.4
+            
+            # Boost flight selection and purchase buttons
+            if any(keyword in element_context for keyword in [
+                "select", "choose", "book", "continue", "checkout",
+                "purchase", "buy", "payment", "pay",
+                "main", "basic", "premium", "first",  # Fare classes
+                "card", "credit", "visa", "mastercard",
+                "insurance", "coverage", "protection"
+            ]):
+                relevance += 0.3
+        
         return min(relevance, 1.0)
     
     def _calculate_selector_quality(self, element: PageElement) -> float:
@@ -269,17 +367,37 @@ class ElementRankingService:
         
         score = 0.0
         
-        # Prefer elements with IDs
-        if element.attributes.get("id") and not self._is_dynamic_id(element.attributes["id"]):
+        # Prefer elements with IDs (but not dynamic ones)
+        element_id = element.attributes.get("id", "")
+        if element_id and not self._is_dynamic_id(element_id):
             score += 0.4
+            
+            # Extra boost for semantic IDs commonly used in forms
+            semantic_patterns = [
+                "origin", "departure", "depart", "from", "leaving",
+                "destination", "arrival", "arrive", "to", "going",
+                "date", "calendar", "passenger", "traveler", "adult",
+                "email", "username", "password", "firstname", "lastname",
+                "phone", "address", "city", "state", "zip", "postal"
+            ]
+            if any(pattern in element_id.lower() for pattern in semantic_patterns):
+                score += 0.2
         
         # Prefer elements with data-testid
         if element.attributes.get("data-testid"):
             score += 0.5
         
         # Prefer elements with stable names
-        if element.attributes.get("name") and not self._is_dynamic_id(element.attributes["name"]):
+        element_name = element.attributes.get("name", "")
+        if element_name and not self._is_dynamic_id(element_name):
             score += 0.3
+            
+            # Extra boost for semantic names
+            if any(pattern in element_name.lower() for pattern in [
+                "origin", "destination", "departure", "arrival", "date",
+                "passenger", "email", "username", "phone", "card"
+            ]):
+                score += 0.2
         
         # Check CSS selector quality
         if element.selector_css:
@@ -315,31 +433,40 @@ class ElementRankingService:
             return False
         
         # Check for stable identifiers
+        element_id = element.attributes.get("id", "")
         has_stable_id = (
-            element.attributes.get("id") and not self._is_dynamic_id(element.attributes["id"]) or
+            element_id and not self._is_dynamic_id(element_id) or
             element.attributes.get("data-testid") or
-            element.attributes.get("name") and not self._is_dynamic_id(element.attributes["name"])
+            (element.attributes.get("name") and not self._is_dynamic_id(element.attributes["name"]))
         )
         
-        # Interactive elements are generally high quality (relaxed requirement)
+        # RELAXED: Accept interactive elements even without stable IDs
+        # Modern web apps often use event handlers without semantic IDs
         if element.is_interactive:
             return True
         
-        # Elements with meaningful text content (relaxed length requirement)
-        if element.text and len(element.text.strip()) > 2:
+        # RELAXED: Accept form elements (critical for workflows)
+        if element.tag in ["input", "textarea", "select", "button"]:
             return True
         
-        # Form elements are often important
-        if element.tag in ["input", "textarea", "select", "button"]:
+        # RELAXED: Accept elements with meaningful text (lowered threshold from 10 to 2 chars)
+        if element.text and len(element.text.strip()) > 2:
             return True
             
         # Navigation and link elements are important for testing
-        if element.tag in ["a", "nav"] and (element.text or has_stable_id):
+        if element.tag in ["a", "nav"]:
             return True
             
-        # Headers and containers with IDs are useful for verification
-        if element.tag in ["h1", "h2", "h3", "h4", "h5", "h6", "div", "span"] and (has_stable_id or element.text):
+        # Headers and important containers
+        if element.tag in ["h1", "h2", "h3", "h4", "h5", "h6"] and element.text:
             return True
+            
+        # Divs and spans with stable IDs or aria roles (common in modern frameworks)
+        if element.tag in ["div", "span"]:
+            has_aria = any(attr.startswith("aria-") for attr in element.attributes.keys())
+            has_role = "role" in element.attributes
+            if has_stable_id or has_aria or has_role:
+                return True
         
         return False
     
@@ -368,15 +495,35 @@ class ElementRankingService:
         if not identifier:
             return False
         
-        # Common patterns for dynamic IDs
-        dynamic_patterns = [
-            lambda x: len(x) > 20 and x.isalnum(),  # Long alphanumeric strings
-            lambda x: x.count("-") > 5,  # Many dashes
-            lambda x: any(char.isdigit() for char in x) and len([c for c in x if c.isdigit()]) > len(x) // 2,  # Mostly numbers
-            lambda x: "react" in x.lower() or "mui" in x.lower(),  # Framework-generated
-        ]
+        # IMPROVED: More nuanced detection of truly dynamic IDs
+        # Allow IDs with some numbers, only flag truly random ones
         
-        return any(pattern(identifier) for pattern in dynamic_patterns)
+        # Extremely long alphanumeric strings (likely UUIDs or hashes)
+        if len(identifier) > 30 and identifier.replace("-", "").replace("_", "").isalnum():
+            return True
+        
+        # UUID pattern: 8-4-4-4-12 format
+        import re
+        if re.match(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', identifier.lower()):
+            return True
+        
+        # Many dashes or underscores suggests generated ID
+        if identifier.count("-") > 7 or identifier.count("_") > 7:
+            return True
+        
+        # Mostly numbers (> 80% digits) but allow some numbers (like #user-123)
+        digit_ratio = len([c for c in identifier if c.isdigit()]) / len(identifier) if len(identifier) > 0 else 0
+        if digit_ratio > 0.8 and len(identifier) > 5:
+            return True
+        
+        # Framework-specific patterns that are truly dynamic
+        if any(pattern in identifier.lower() for pattern in [
+            "react-", "mui-", "radix-", "headlessui-",  # Common framework prefixes
+            "-auto-", "-generated-", "-random-"  # Explicit generated markers
+        ]):
+            return True
+        
+        return False
     
     def _has_dynamic_classes(self, class_string: str) -> bool:
         """Check if class string contains dynamic class names"""

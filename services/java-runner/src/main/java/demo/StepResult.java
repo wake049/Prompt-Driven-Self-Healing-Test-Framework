@@ -1,6 +1,8 @@
 package demo;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import java.util.List;
+import java.util.ArrayList;
 
 public class StepResult {
     @JsonProperty("stepIndex")
@@ -29,9 +31,14 @@ public class StepResult {
     
     @JsonProperty("screenshotPath")
     private String screenshotPath;
+    
+    @JsonProperty("attemptedAlternatives")
+    private List<String> attemptedAlternatives;
 
     // Default constructor for Jackson
-    public StepResult() {}
+    public StepResult() {
+        this.attemptedAlternatives = new ArrayList<>();
+    }
 
     public StepResult(int stepIndex, Step step, String status, long duration) {
         this.stepIndex = stepIndex;
@@ -39,6 +46,7 @@ public class StepResult {
         this.status = status;
         this.duration = duration;
         this.healed = false;
+        this.attemptedAlternatives = new ArrayList<>();
     }
 
     // Getters and setters
@@ -112,6 +120,14 @@ public class StepResult {
 
     public void setScreenshotPath(String screenshotPath) {
         this.screenshotPath = screenshotPath;
+    }
+    
+    public List<String> getAttemptedAlternatives() {
+        return attemptedAlternatives;
+    }
+    
+    public void setAttemptedAlternatives(List<String> attemptedAlternatives) {
+        this.attemptedAlternatives = attemptedAlternatives;
     }
 
     @Override

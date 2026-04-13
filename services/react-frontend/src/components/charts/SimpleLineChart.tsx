@@ -47,7 +47,7 @@ const SimpleLineChart: React.FC<SimpleLineChartProps> = ({
   data,
   width,
   height = 200,
-  color = '#667eea',
+  color = '#185FA5',
   title
 }) => {
   if (!data || data.length === 0) {

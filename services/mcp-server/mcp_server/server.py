@@ -10,9 +10,12 @@ import asyncio
 import time
 import sys
 import os
+import logging
 from typing import Any, Dict, List, Optional, Union
 import uuid
 import httpx
+
+logger = logging.getLogger(__name__)
 import websockets
 from .schemas import (
     MCPRequest, MCPResponse, MCPError, MCPErrorCode, 
@@ -36,13 +39,14 @@ class MCPServer:
         if unified_api_base_url is None:
             unified_api_base_url = os.getenv("UNIFIED_API_URL")
             if unified_api_base_url is None:
-                if os.getenv("ENVIRONMENT") == "production":
-                    unified_api_base_url = "https://testhelix.com/api"  # Production API endpoint
-                else:
-                    unified_api_base_url = "http://localhost:8000"  # Local development
+                unified_api_base_url = "http://localhost:8000"  # Local development only
         
         self.unified_api_base_url = unified_api_base_url
-        self.unified_api_client = httpx.AsyncClient(base_url=unified_api_base_url)
+        self.unified_api_client = httpx.AsyncClient(
+            base_url=unified_api_base_url,
+            timeout=httpx.Timeout(30.0, connect=10.0),
+            limits=httpx.Limits(max_connections=50, max_keepalive_connections=20)
+        )
         self.tool_executor = ToolExecutor(self.unified_api_client)
         self.resource_manager = ResourceManager(self.unified_api_client)
         self.request_counter = 0
@@ -70,6 +74,12 @@ class MCPServer:
         """
         start_time = time.time()
         request_id = None
+        tenant_context = tenant_context  # Ensure defined for error handler
+        
+        # Periodic cache cleanup
+        from .cache import get_element_cache, get_resource_cache
+        get_element_cache().cleanup_expired()
+        get_resource_cache().cleanup_expired()
         
         try:
             # Parse request
@@ -241,6 +251,21 @@ class MCPServer:
                 "name": "add_to_review_queue",
                 "description": "Add an element to the review queue for manual approval",
                 "inputSchema": TOOL_SCHEMAS["add_to_review_queue"]
+            },
+            {
+                "name": "generate_test_scenarios",
+                "description": "Generate test scenarios from business document content using AI. Analyzes requirements, user stories, or design documents to create comprehensive test cases.",
+                "inputSchema": TOOL_SCHEMAS["generate_test_scenarios"]
+            },
+            {
+                "name": "refine_test_scenarios",
+                "description": "Refine generated test scenarios based on user feedback. Add, remove, or modify scenarios interactively with AI assistance.",
+                "inputSchema": TOOL_SCHEMAS["refine_test_scenarios"]
+            },
+            {
+                "name": "confirm_test_scenarios",
+                "description": "Confirm and save finalized test scenarios as prompts in the system after review.",
+                "inputSchema": TOOL_SCHEMAS["confirm_test_scenarios"]
             }
         ]
         
@@ -312,6 +337,7 @@ class MCPServer:
     
     def _update_stats(self, success: bool, latency_ms: float, tenant_id: str):
         """Update request statistics"""
+        prev_total = self.request_stats["total_requests"]
         self.request_stats["total_requests"] += 1
         if success:
             self.request_stats["successful_requests"] += 1
@@ -320,8 +346,7 @@ class MCPServer:
         
         # Update average latency (simple moving average)
         current_avg = self.request_stats["avg_latency_ms"]
-        total_requests = self.request_stats["total_requests"]
-        self.request_stats["avg_latency_ms"] = (current_avg * (total_requests - 1) + latency_ms) / total_requests
+        self.request_stats["avg_latency_ms"] = (current_avg * prev_total + latency_ms) / self.request_stats["total_requests"]
     
     async def run_stdio(self):
         """Run server with stdio transport"""
@@ -373,14 +398,14 @@ class MCPServer:
                         if "error" not in response_data:
                             # Auth was successful, get context for next requests
                             tenant_context = authenticate(None)
-                    except:
+                    except Exception:
                         pass
         
         # Start WebSocket server
         start_server = websockets.serve(handle_client, host, port)
         await start_server
         
-        print(f"MCP server running on ws://{host}:{port}")
+        logger.info(f"MCP server running on ws://{host}:{port}")
         
         # Keep server running
         await asyncio.Future()  # Run forever

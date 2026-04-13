@@ -6,7 +6,8 @@ const Navbar = () => {
   const navItems = [
     { path: '/', label: 'Elements', icon: '' },
     { path: '/policy', label: 'Policy Dashboard', icon: '🚦' },
-    { path: '/prompts', label: 'Prompts', icon: '📝' }
+    { path: '/prompts', label: 'Prompts', icon: '📝' },
+    { path: '/test-suites', label: 'Test Suites', icon: '📦' }
   ];
 
   const navbarStyle: React.CSSProperties = {

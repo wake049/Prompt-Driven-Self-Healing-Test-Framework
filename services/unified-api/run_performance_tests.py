@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 class PerformanceTestSuite:
     """Comprehensive performance testing for the unified API"""
     
-    def __init__(self, base_url: str = "https://testhelix.com"):
+    def __init__(self, base_url: str = "https://fluxtest.io"):
         self.base_url = base_url
         self.profiler = get_global_profiler()
         self.test_results: Dict[str, Any] = {}

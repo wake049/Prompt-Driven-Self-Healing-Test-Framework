@@ -2,7 +2,7 @@
  * API Client for React Frontend to communicate with Unified MCP API Server
  * Updated to use the new unified API endpoint
  */
-const API_BASE_URL = import.meta.env.VITE_POLICY_API_URL || 'https://testhelix.com/api/v1/policy';
+const API_BASE_URL = import.meta.env.VITE_POLICY_API_URL || 'https://fluxtest.io/api/v1/policy';
 interface ApiResponse<T = any> {
   success: boolean;
   data?: T;

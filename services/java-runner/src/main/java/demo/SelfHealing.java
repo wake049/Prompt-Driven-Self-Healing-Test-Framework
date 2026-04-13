@@ -8,13 +8,15 @@ import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.entity.StringEntity;
 import org.apache.http.impl.client.CloseableHttpClient;
-import org.apache.http.impl.client.HttpClients;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 public class SelfHealing {
     private WebDriver driver;
@@ -24,11 +26,18 @@ public class SelfHealing {
     private static final String HEALING_LOG_FILE = "healing_log.json";
     private static final String HEALING_SERVICE_URL = System.getenv("UNIFIED_API_URL") != null ? 
         System.getenv("UNIFIED_API_URL") + "/api/v1/healing/submit" : 
-        "https://testhelix.com/api/v1/healing/submit";
+        "http://localhost:8000/api/v1/healing/submit";
     private static final String SELECTOR_GENERATION_URL = System.getenv("UNIFIED_API_URL") != null ? 
         System.getenv("UNIFIED_API_URL") + "/api/v1/selectors/generate" : 
-        "https://testhelix.com/api/v1/selectors/generate";
+        "http://localhost:8000/api/v1/selectors/generate";
     private boolean useSqlBackend;
+    
+    // Policy configuration
+    private int confidenceThreshold = 85;  // Default 85%
+    private int maxRetries = 2;            // Default 2 retries
+    private int maxCandidates = 5;         // Default 5 candidates (from multi-outcome handling)
+    private boolean useRepositoryFallback = true;  // Default true
+    private boolean preferCssOverXpath = true;     // Default prefer CSS
 
     public SelfHealing(WebDriver driver, ElementRepository elementRepository) {
         this.driver = driver;
@@ -42,6 +51,34 @@ public class SelfHealing {
             System.out.println("✓ SQL Backend is available - using database for element alternatives");
         } else {
             System.out.println("⚠ SQL Backend not available - falling back to JSON file repository");
+        }
+    }
+    
+    public void setPolicyConfig(Map<String, Object> policyConfig) {
+        if (policyConfig != null) {
+            if (policyConfig.containsKey("confidenceThreshold")) {
+                Number thresholdValue = ((Number) policyConfig.get("confidenceThreshold"));
+                // Handle both 0-1 scale (0.85) and 0-100 scale (85)
+                this.confidenceThreshold = thresholdValue.doubleValue() <= 1.0 ? 
+                    (int)(thresholdValue.doubleValue() * 100) : thresholdValue.intValue();
+                System.out.println("📋 Policy: Confidence Threshold set to " + this.confidenceThreshold + "%");
+            }
+            if (policyConfig.containsKey("maxRetries")) {
+                this.maxRetries = ((Number) policyConfig.get("maxRetries")).intValue();
+                System.out.println("📋 Policy: Max Retries set to " + this.maxRetries);
+            }
+            if (policyConfig.containsKey("useRepositoryFallback")) {
+                this.useRepositoryFallback = (Boolean) policyConfig.get("useRepositoryFallback");
+                System.out.println("📋 Policy: Use Repository Fallback = " + this.useRepositoryFallback);
+            }
+            if (policyConfig.containsKey("preferCssOverXpath")) {
+                this.preferCssOverXpath = (Boolean) policyConfig.get("preferCssOverXpath");
+                System.out.println("📋 Policy: Prefer CSS over XPath = " + this.preferCssOverXpath);
+            }
+            if (policyConfig.containsKey("maxCandidates")) {
+                this.maxCandidates = ((Number) policyConfig.get("maxCandidates")).intValue();
+                System.out.println("📋 Policy: Max Candidates (multi-outcome) set to " + this.maxCandidates);
+            }
         }
     }
 
@@ -62,15 +99,19 @@ public class SelfHealing {
         // Multi-tier healing strategy
         List<String> alternatives = new ArrayList<>();
         
-        // Tier 1: Repository-based alternatives (prioritized by policy)
-        if (useSqlBackend) {
-            List<String> repoAlternatives = sqlElementRepository.getAlternatives(elementId, page, step.getSelectorPolicy());
-            alternatives.addAll(repoAlternatives);
-            System.out.println("📚 Tier 1: Found " + repoAlternatives.size() + " repository alternatives");
+        // Tier 1: Repository-based alternatives (only if policy allows)
+        if (this.useRepositoryFallback) {
+            if (useSqlBackend) {
+                List<String> repoAlternatives = sqlElementRepository.getAlternatives(elementId, page, step.getSelectorPolicy());
+                alternatives.addAll(repoAlternatives);
+                System.out.println("📚 Tier 1: Found " + repoAlternatives.size() + " repository alternatives (policy: useRepositoryFallback=true)");
+            } else {
+                List<String> repoAlternatives = elementRepository.getAlternatives(elementId, page);
+                alternatives.addAll(repoAlternatives);
+                System.out.println("📚 Tier 1: Found " + repoAlternatives.size() + " repository alternatives (policy: useRepositoryFallback=true)");
+            }
         } else {
-            List<String> repoAlternatives = elementRepository.getAlternatives(elementId, page);
-            alternatives.addAll(repoAlternatives);
-            System.out.println("📚 Tier 1: Found " + repoAlternatives.size() + " repository alternatives");
+            System.out.println("⏭️ Tier 1: Repository fallback DISABLED by policy (useRepositoryFallback=false)");
         }
         
         // Tier 2: Intelligent selector variations based on original locator
@@ -106,10 +147,18 @@ public class SelfHealing {
         System.out.println("🎯 Total healing candidates: " + alternatives.size());
 
         // Enhanced healing attempt with intelligent validation
-        for (int i = 0; i < alternatives.size(); i++) {
+        // Apply both maxRetries and maxCandidates policies
+        // maxCandidates limits how many alternatives we consider (filter before trying)
+        // maxRetries limits how many attempts we make (limit during execution)
+        int candidatesLimit = Math.min(alternatives.size(), this.maxCandidates);
+        int maxAttempts = Math.min(candidatesLimit, this.maxRetries);
+        System.out.println("📋 Policy: Considering " + candidatesLimit + " candidates (maxCandidates=" + this.maxCandidates + ")");
+        System.out.println("📋 Policy: Will attempt up to " + maxAttempts + " healing alternatives (maxRetries=" + this.maxRetries + ")");
+        
+        for (int i = 0; i < maxAttempts; i++) {
             String alternative = alternatives.get(i);
             try {
-                System.out.println("🔧 Attempt " + (i+1) + "/" + alternatives.size() + ": " + alternative);
+                System.out.println("🔧 Attempt " + (i+1) + "/" + maxAttempts + ": " + alternative);
                 logEntry.getAttemptedAlternatives().add(alternative);
                 
                 // Enhanced element validation with identity checking
@@ -126,9 +175,9 @@ public class SelfHealing {
                     int qualityScore = calculateHealingQuality(originalLocator, alternative, healedSelectorType, expectedPolicy);
                     
                     // CRITICAL: Only accept healing if quality score is acceptable
-                    int minQualityThreshold = 60; // Configurable threshold
-                    if (qualityScore < minQualityThreshold) {
-                        System.out.println("❌ Healing quality too low: " + qualityScore + "% (minimum: " + minQualityThreshold + "%)");
+                    // Use policy-configured confidence threshold
+                    if (qualityScore < this.confidenceThreshold) {
+                        System.out.println("❌ Healing quality too low: " + qualityScore + "% (minimum from policy: " + this.confidenceThreshold + "%)");
                         System.out.println("   Rejecting to prevent false positive healing");
                         continue; // Try next alternative
                     }
@@ -233,7 +282,7 @@ public class SelfHealing {
     private List<String> getAIGeneratedAlternatives(Step step) {
         List<String> alternatives = new ArrayList<>();
         
-        try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
+        try (CloseableHttpClient httpClient = HttpClientFactory.create()) {
             HttpPost httpPost = new HttpPost(SELECTOR_GENERATION_URL);
             httpPost.setHeader("Content-Type", "application/json");
             
@@ -275,16 +324,15 @@ public class SelfHealing {
         List<String> alternatives = new ArrayList<>();
         
         try {
-            // Simple JSON parsing - extract selector values from alternatives array
-            // This is a basic implementation - could be enhanced with proper JSON parsing library
-            String[] lines = responseBody.split("\"selector\":");
-            for (int i = 1; i < lines.length; i++) {
-                String line = lines[i];
-                int startQuote = line.indexOf("\"");
-                int endQuote = line.indexOf("\"", startQuote + 1);
-                if (startQuote != -1 && endQuote != -1) {
-                    String selector = line.substring(startQuote + 1, endQuote);
-                    alternatives.add(selector);
+            ObjectMapper mapper = new ObjectMapper();
+            JsonNode root = mapper.readTree(responseBody);
+            JsonNode alternativesNode = root.get("alternatives");
+            if (alternativesNode != null && alternativesNode.isArray()) {
+                for (JsonNode alt : alternativesNode) {
+                    JsonNode selectorNode = alt.get("selector");
+                    if (selectorNode != null && selectorNode.isTextual()) {
+                        alternatives.add(selectorNode.asText());
+                    }
                 }
             }
         } catch (Exception e) {
@@ -316,7 +364,7 @@ public class SelfHealing {
                 variations.add("css=#" + id);
                 variations.add("css=[id='" + id + "']");
                 if ("xpath".equals(selectorPolicy)) {
-                    variations.add("xpath=//*[@id='" + id + "']");
+                    variations.add("xpath=//*[@id=" + escapeXPathValue(id) + "]");
                 }
             }
             
@@ -326,7 +374,7 @@ public class SelfHealing {
                 variations.add("css=." + className);
                 variations.add("css=[class*='" + className + "']");
                 if ("xpath".equals(selectorPolicy)) {
-                    variations.add("xpath=//*[contains(@class,'" + className + "')]");
+                    variations.add("xpath=//*[contains(@class," + escapeXPathValue(className) + ")]");
                 }
             }
             
@@ -336,7 +384,7 @@ public class SelfHealing {
                 if (testId != null) {
                     variations.add("css=[data-testid='" + testId + "']");
                     if ("xpath".equals(selectorPolicy)) {
-                        variations.add("xpath=//*[@data-testid='" + testId + "']");
+                        variations.add("xpath=//*[@data-testid=" + escapeXPathValue(testId) + "]");
                     }
                 }
             }
@@ -347,7 +395,7 @@ public class SelfHealing {
                 if (name != null) {
                     variations.add("css=[name='" + name + "']");
                     if ("xpath".equals(selectorPolicy)) {
-                        variations.add("xpath=//*[@name='" + name + "']");
+                        variations.add("xpath=//*[@name=" + escapeXPathValue(name) + "]");
                     }
                 }
             }
@@ -796,6 +844,29 @@ public class SelfHealing {
     }
     
     /**
+     * Escape a string value for safe use in XPath expressions.
+     * Handles values containing single quotes by using concat().
+     */
+    private static String escapeXPathValue(String value) {
+        if (value == null) return "''";
+        if (!value.contains("'")) {
+            return "'" + value + "'";
+        }
+        if (!value.contains("\"")) {
+            return "\"" + value + "\"";
+        }
+        // Value contains both quote types — use concat()
+        StringBuilder sb = new StringBuilder("concat(");
+        String[] parts = value.split("'", -1);
+        for (int i = 0; i < parts.length; i++) {
+            if (i > 0) sb.append(",\"'\",");
+            sb.append("'").append(parts[i]).append("'");
+        }
+        sb.append(")");
+        return sb.toString();
+    }
+
+    /**
      * Extract attribute value from selector string
      */
     private String extractAttributeValue(String selector, String attributeName) {
@@ -822,7 +893,7 @@ public class SelfHealing {
     }
     
     private void sendHealingSuccessRequest(Step step, String healedLocator, List<String> attemptedAlternatives, String healedSelectorType, String expectedPolicy) {
-        try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
+        try (CloseableHttpClient httpClient = HttpClientFactory.create()) {
             HttpPost httpPost = new HttpPost(HEALING_SERVICE_URL);
             httpPost.setHeader("Content-Type", "application/json");
             
@@ -888,7 +959,7 @@ public class SelfHealing {
     }
 
     private void sendHealingFailureRequest(Step step, String error, List<String> attemptedAlternatives) {
-        try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
+        try (CloseableHttpClient httpClient = HttpClientFactory.create()) {
             HttpPost httpPost = new HttpPost(HEALING_SERVICE_URL);
             httpPost.setHeader("Content-Type", "application/json");
             

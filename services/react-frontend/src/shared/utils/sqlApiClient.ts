@@ -6,6 +6,7 @@
  */
 
 import { MCPFrontendManager } from '../../services/mcpFrontendClient';
+import { config } from '../../app/config';
 
 interface ApiResponse<T = any> {
   success: boolean;
@@ -229,42 +230,64 @@ class MCPSqlApiClient {
     }
   }
 
-  async updateElement(elementId: string, elementData: Partial<RecordedElementDB>): Promise<ApiResponse<RecordedElementDB>> {
+  async updateElement(elementId: string, updates: any): Promise<ApiResponse<any>> {
     try {
-      const client = await this.getMCPClient();
-      const result = await client.callTool("elements.add", {
-        elementId,
-        elementData: { ...elementData, id: elementId }
+      // Use direct REST API call
+      const apiUrl = config.apiBaseUrl;
+      const response = await fetch(`${apiUrl}/api/v1/sql/elements/${elementId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(updates)
       });
       
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ detail: 'Update failed' }));
+        throw new Error(errorData.detail || `HTTP ${response.status}`);
+      }
+      
+      const result = await response.json();
+      
       return {
-        success: result.ok || result.success || false,
-        data: result.data || result
+        success: result.success || true,
+        data: result.data,
+        message: result.message
       };
     } catch (error: any) {
       return {
         success: false,
-        error: error.message || "Failed to update element via MCP"
+        error: error.message || "Failed to update element"
       };
     }
   }
 
   async deleteElement(elementId: string): Promise<ApiResponse<void>> {
     try {
-      const client = await this.getMCPClient();
-      const result = await client.callTool("run_action", {
-        action_type: "delete_element",
-        element_name: elementId,
-        context: { operation: "delete" }
+      // Use direct REST API call instead of MCP
+      const apiUrl = config.apiBaseUrl;
+      const response = await fetch(`${apiUrl}/api/v1/sql/elements/${elementId}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json'
+        }
       });
       
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ detail: 'Delete failed' }));
+        throw new Error(errorData.detail || `HTTP ${response.status}`);
+      }
+      
+      const result = await response.json();
+      
       return {
-        success: result.ok || result.success || false
+        success: result.success || true,
+        message: result.message
       };
     } catch (error: any) {
       return {
         success: false,
-        error: error.message || "Failed to delete element via MCP"
+        error: error.message || "Failed to delete element"
       };
     }
   }

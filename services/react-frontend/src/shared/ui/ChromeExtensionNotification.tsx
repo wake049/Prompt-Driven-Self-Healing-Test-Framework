@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
+import { shimmerKeyframes } from '../styles/keyframes';
 import { 
   Chrome, 
   Download, 
@@ -14,7 +15,7 @@ import {
 
 const NotificationBanner = styled.div<{ $dismissed?: boolean }>`
   display: ${props => props.$dismissed ? 'none' : 'block'};
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #185FA5;
   color: white;
   padding: 16px 20px;
   box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
@@ -30,12 +31,7 @@ const NotificationBanner = styled.div<{ $dismissed?: boolean }>`
     width: 100%;
     height: 100%;
     background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
-    animation: shimmer 3s infinite;
-  }
-  
-  @keyframes shimmer {
-    0% { left: -100%; }
-    100% { left: 100%; }
+    animation: ${shimmerKeyframes} 3s infinite;
   }
 `;
 
@@ -144,7 +140,7 @@ const ActionButton = styled.button<{ $variant?: 'primary' | 'secondary' }>`
   
   ${props => props.$variant === 'primary' ? `
     background: white;
-    color: #667eea;
+    color: #185FA5;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
     
     &:hover {
@@ -247,7 +243,7 @@ const ChromeExtensionNotification: React.FC<ChromeExtensionNotificationProps> = 
       setAutoHideTimer(timer);
       
       return () => {
-        if (timer) clearTimeout(timer);
+        clearTimeout(timer);
       };
     } else if (extensionStatus === 'installed') {
       // If extension is installed but not connected, auto-hide after 10 seconds
@@ -259,14 +255,10 @@ const ChromeExtensionNotification: React.FC<ChromeExtensionNotificationProps> = 
       setAutoHideTimer(timer);
       
       return () => {
-        if (timer) clearTimeout(timer);
+        clearTimeout(timer);
       };
-    } else if (autoHideTimer) {
-      // Clear auto-hide timer if extension is no longer connected
-      clearTimeout(autoHideTimer);
-      setAutoHideTimer(null);
     }
-  }, [extensionStatus, autoHideTimer]);
+  }, [extensionStatus]);
 
   // Check if Chrome extension is installed/connected
   useEffect(() => {
@@ -401,19 +393,17 @@ const ChromeExtensionNotification: React.FC<ChromeExtensionNotificationProps> = 
 
   const handleGetExtension = () => {
     if (onNavigate) {
-      onNavigate('/chrome-extension');
+      onNavigate('/app/chrome-extension');
     } else {
-      // Fallback to external link if navigate function not provided
-      window.open('https://github.com/wake049/capstone-self-healing/tree/main/chrome-extension', '_blank');
+      window.location.href = '/app/chrome-extension';
     }
   };
 
   const handleViewDocs = () => {
     if (onNavigate) {
-      onNavigate('/chrome-extension');
+      onNavigate('/app/chrome-extension');
     } else {
-      // Fallback to external link if navigate function not provided
-      window.open('https://github.com/wake049/capstone-self-healing/blob/main/chrome-extension/README.md', '_blank');
+      window.location.href = '/docs';
     }
   };
 

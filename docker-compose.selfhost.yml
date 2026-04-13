@@ -1,0 +1,194 @@
+version: '3.8'
+
+# ==================================================
+# Enterprise Self-Hosted Deployment
+# ==================================================
+# Usage:
+#   1) Copy .env.selfhost.template -> .env.selfhost
+#   2) Fill required values
+#   3) docker-compose --env-file .env.selfhost -f docker-compose.selfhost.yml up -d --build
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: ${POSTGRES_CONTAINER_NAME:-postgres-selfhost}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    environment:
+      - POSTGRES_DB=${DB_NAME}
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+    volumes:
+      - postgres_data_selfhost:/var/lib/postgresql/data
+      - ./database-migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    mem_limit: ${POSTGRES_MEM_LIMIT:-1g}
+    cpus: ${POSTGRES_CPUS:-1.0}
+
+  unified-api:
+    build:
+      context: services/unified-api
+      dockerfile: Dockerfile
+    container_name: ${UNIFIED_API_CONTAINER_NAME:-unified-api-selfhost}
+    ports:
+      - "${UNIFIED_API_PORT:-8000}:8000"
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=${DB_NAME}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - AI_PROVIDER=${AI_PROVIDER:-openai}
+      - OLLAMA_ENABLED=${OLLAMA_ENABLED:-false}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://ollama:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.1:8b}
+      - OLLAMA_TIMEOUT_MS=${OLLAMA_TIMEOUT_MS:-60000}
+      - AI_SERVICE_URL=http://unified-api:8000
+      - ENVIRONMENT=production
+      - DEBUG=false
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - SELF_HOST_LICENSE_KEY=${SELF_HOST_LICENSE_KEY:-}
+      - SELF_HOST_TENANT_SLUG=${SELF_HOST_TENANT_SLUG:-}
+      - SELF_HOST_VALIDATION_URL=${SELF_HOST_VALIDATION_URL:-}
+      - SELF_HOST_LICENSE_VALIDATION_TOKEN=${SELF_HOST_LICENSE_VALIDATION_TOKEN:-}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    mem_limit: ${UNIFIED_API_MEM_LIMIT:-2g}
+    cpus: ${UNIFIED_API_CPUS:-2.0}
+
+  mcp-server:
+    build:
+      context: services/mcp-server
+      dockerfile: Dockerfile
+    container_name: ${MCP_CONTAINER_NAME:-mcp-server-selfhost}
+    ports:
+      - "${MCP_PORT:-8001}:8001"
+    environment:
+      - MCP_HOST=0.0.0.0
+      - MCP_PORT=8001
+      - MCP_AUTH_REQUIRED=${MCP_AUTH_REQUIRED:-true}
+      - MCP_DEBUG=${MCP_DEBUG:-false}
+      - ENVIRONMENT=production
+      - MCP_API_KEY=${MCP_API_KEY}
+      - UNIFIED_API_URL=${UNIFIED_API_URL:-http://unified-api:8000}
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=${DB_NAME}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DATABASE_OPTIONAL=false
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.connect(('localhost', 8001)); s.close()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    mem_limit: ${MCP_MEM_LIMIT:-1g}
+    cpus: ${MCP_CPUS:-1.0}
+
+  java-runner:
+    build:
+      context: services/java-runner
+      dockerfile: Dockerfile
+    container_name: ${JAVA_RUNNER_CONTAINER_NAME:-java-runner-selfhost}
+    ports:
+      - "${JAVA_RUNNER_PORT:-8080}:8080"
+    environment:
+      - API_BASE_URL=http://unified-api:8000
+      - SELENIUM_HEADLESS=${SELENIUM_HEADLESS:-true}
+      - DISPLAY=:99
+      - ENVIRONMENT=production
+    restart: unless-stopped
+    depends_on:
+      - unified-api
+    volumes:
+      - ./services/java-runner/screenshots:/app/screenshots
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    mem_limit: ${JAVA_RUNNER_MEM_LIMIT:-2g}
+    cpus: ${JAVA_RUNNER_CPUS:-2.0}
+
+  react-frontend:
+    build:
+      context: services/react-frontend
+      dockerfile: Dockerfile
+      args:
+        - VITE_UNIFIED_API_URL=${VITE_UNIFIED_API_URL}
+        - VITE_API_BASE_URL=${VITE_API_BASE_URL}
+        - VITE_SQL_API_URL=${VITE_SQL_API_URL}
+        - VITE_AI_API_URL=${VITE_AI_API_URL}
+        - VITE_HEALING_API_URL=${VITE_HEALING_API_URL}
+        - VITE_POLICY_API_URL=${VITE_POLICY_API_URL}
+        - VITE_MCP_SERVER_URL=${VITE_MCP_SERVER_URL}
+        - VITE_MCP_AUTH_TOKEN=${VITE_MCP_AUTH_TOKEN:-}
+    container_name: ${FRONTEND_CONTAINER_NAME:-react-frontend-selfhost}
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    environment:
+      - REACT_APP_API_BASE_URL=${REACT_APP_API_BASE_URL}
+      - REACT_APP_MCP_SERVER_URL=${REACT_APP_MCP_SERVER_URL}
+      - NODE_ENV=production
+      - FRONTEND_DOMAIN=${FRONTEND_DOMAIN}
+    restart: unless-stopped
+    depends_on:
+      - unified-api
+      - mcp-server
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    mem_limit: ${FRONTEND_MEM_LIMIT:-1g}
+    cpus: ${FRONTEND_CPUS:-1.0}
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ${OLLAMA_CONTAINER_NAME:-ollama-selfhost}
+    profiles: ["ollama"]
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    mem_limit: ${OLLAMA_MEM_LIMIT:-8g}
+    cpus: ${OLLAMA_CPUS:-4.0}
+
+volumes:
+  postgres_data_selfhost:
+    driver: local
+  ollama_models:
+    driver: local

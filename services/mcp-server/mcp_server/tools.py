@@ -9,6 +9,7 @@ import json
 import time
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlencode, quote
 import httpx
 import jsonschema
 from .schemas import ToolResult, TOOL_SCHEMAS, MCPError, MCPErrorCode
@@ -103,6 +104,12 @@ class ToolExecutor:
                 result_data = await self._execute_update_review_status(args, tenant_context)
             elif tool_name == "add_to_review_queue":
                 result_data = await self._execute_add_to_review_queue(args, tenant_context)
+            elif tool_name == "generate_test_scenarios":
+                result_data = await self._execute_generate_test_scenarios(args, tenant_context)
+            elif tool_name == "refine_test_scenarios":
+                result_data = await self._execute_refine_test_scenarios(args, tenant_context)
+            elif tool_name == "confirm_test_scenarios":
+                result_data = await self._execute_confirm_test_scenarios(args, tenant_context)
             else:
                 raise Exception(f"Tool implementation not found: {tool_name}")
             
@@ -160,7 +167,7 @@ class ToolExecutor:
                     try:
                         error_detail = e.response.json().get("detail", str(e))
                         error_msg = f"Failed to delete element {element_name}: {error_detail}"
-                    except:
+                    except Exception:
                         pass
                 
                 return {
@@ -200,68 +207,89 @@ class ToolExecutor:
                 "step_logs": result.get("logs", [])
             }
         except httpx.HTTPError as e:
-            # If execution service doesn't exist, provide mock response
-            if e.response and e.response.status_code == 404:
-                return {
-                    "status": "success",
-                    "execution_time_ms": 150,
-                    "selector_used": f"#{element_name}",
-                    "healing_applied": None,
-                    "result_data": {"action": action_type, "element": element_name},
-                    "step_logs": [f"Mock execution of {action_type} on {element_name}"]
-                }
-            raise Exception(f"Execution service error: {e}")
+            error_detail = str(e)
+            if e.response is not None:
+                try:
+                    error_detail = e.response.json().get("detail", str(e))
+                except Exception:
+                    pass
+            raise Exception(f"Execution service error: {error_detail}")
     
     async def _execute_verify_section(self, args: Dict[str, Any], tenant_context: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute verify.section tool"""
+        """Execute verify.section tool via unified API"""
         preset_name = args.get("preset_name")
         preset = args.get("preset")
         
         if not preset_name and not preset:
             raise Exception("Either preset_name or preset must be provided")
         
-        # If preset_name provided, try to load from storage
+        # If preset_name provided, load from backend
         if preset_name and not preset:
-            # Mock preset loading (in real implementation, load from database)
-            preset = {
-                "name": preset_name,
-                "description": f"Verification preset: {preset_name}",
-                "checks": [
-                    {"type": "exists", "elementId": "default", "description": "Mock verification check"}
-                ]
-            }
+            try:
+                response = await self.unified_api_client.get(f"/api/v1/verification/presets/{quote(preset_name)}")
+                response.raise_for_status()
+                preset = response.json()
+            except httpx.HTTPError:
+                raise Exception(f"Verification preset '{preset_name}' not found")
         
-        verification_results = []
-        passed_count = 0
-        failed_count = 0
-        
-        for check in preset.get("checks", []):
-            # Mock verification execution
-            check_result = {
-                "check_type": check["type"],
-                "element_id": check.get("elementId"),
-                "description": check["description"],
-                "passed": True,  # Mock always passes
-                "actual_value": "mock_value",
-                "expected_value": check.get("expected"),
-                "execution_time_ms": 50
-            }
-            
-            if check_result["passed"]:
-                passed_count += 1
-            else:
-                failed_count += 1
-            
-            verification_results.append(check_result)
-        
-        return {
-            "preset_name": preset.get("name", "custom"),
-            "total_checks": len(verification_results),
-            "passed_checks": passed_count,
-            "failed_checks": failed_count,
-            "overall_result": "passed" if failed_count == 0 else "failed",
-            "checks": verification_results
+        # Execute verification checks via the execution service
+        verify_data = {
+            "preset": preset,
+            "tenant_id": tenant_context.get("tenant_id")
         }
+        
+        try:
+            response = await self.unified_api_client.post("/api/v1/execution/verify-section", json=verify_data)
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPError:
+            # If no dedicated verify endpoint, run checks locally against element data
+            verification_results = []
+            passed_count = 0
+            failed_count = 0
+            
+            for check in preset.get("checks", []):
+                element_id = check.get("elementId")
+                check_type = check["type"]
+                
+                # Try to verify element exists in the database
+                element_found = False
+                if element_id:
+                    try:
+                        el_response = await self.unified_api_client.get(f"/api/v1/sql/elements?logical_key={quote(element_id)}")
+                        if el_response.status_code == 200:
+                            el_data = el_response.json()
+                            element_found = len(el_data.get("data", [])) > 0
+                    except Exception:
+                        pass
+                
+                passed = element_found if check_type == "exists" else False
+                
+                check_result = {
+                    "check_type": check_type,
+                    "element_id": element_id,
+                    "description": check.get("description", ""),
+                    "passed": passed,
+                    "actual_value": "found" if element_found else "not_found",
+                    "expected_value": check.get("expected"),
+                    "execution_time_ms": 0
+                }
+                
+                if passed:
+                    passed_count += 1
+                else:
+                    failed_count += 1
+                
+                verification_results.append(check_result)
+            
+            return {
+                "preset_name": preset.get("name", "custom"),
+                "total_checks": len(verification_results),
+                "passed_checks": passed_count,
+                "failed_checks": failed_count,
+                "overall_result": "passed" if failed_count == 0 else "failed",
+                "checks": verification_results
+            }
     
     async def _execute_context_put(self, args: Dict[str, Any], tenant_context: Dict[str, Any]) -> Dict[str, Any]:
         """Store value in context"""
@@ -371,12 +399,13 @@ class ToolExecutor:
                 "message": result.get("message", "Element recorded")
             }
         except httpx.HTTPError as e:
-            # If the unified API is unavailable or returns an error, fall back to a tolerant mock
+            # Propagate the error instead of returning fake success data
             return {
                 "element_id": element_id,
-                "success": True,
-                "database_id": f"mock_{element_id}",
-                "message": f"Mock recording of element {element_id} (fallback due to error: {str(e)})"
+                "success": False,
+                "database_id": None,
+                "error": f"Failed to record element: {str(e)}",
+                "message": f"Unified API unavailable: {str(e)}"
             }
     
     async def _execute_elements_get(self, args: Dict[str, Any], tenant_context: Dict[str, Any]) -> Dict[str, Any]:
@@ -390,7 +419,7 @@ class ToolExecutor:
         
         async def fetch_element():
             try:
-                response = await self.unified_api_client.get(f"/api/v1/sql/elements?logical_key={element_id}")
+                response = await self.unified_api_client.get(f"/api/v1/sql/elements?{urlencode({'logical_key': element_id})}")
                 response.raise_for_status()
                 result = response.json()
                 
@@ -400,15 +429,7 @@ class ToolExecutor:
                 
                 return elements[0]
             except httpx.HTTPError:
-                # Mock element if service unavailable
-                return {
-                    "logical_key": element_id,
-                    "css_selector": f"#{element_id}",
-                    "xpath": f"//*[@id='{element_id}']",
-                    "text_content": f"Mock element {element_id}",
-                    "tag": "div",
-                    "page": "unknown"
-                }
+                raise Exception(f"Element '{element_id}' not found and unified API is unavailable")
         
         element_data = await async_cached_call(cache, cache_key_str, fetch_element)
         
@@ -466,49 +487,7 @@ class ToolExecutor:
                     "data": result.get("data", [])
                 }
         except httpx.HTTPError as e:
-            # Mock data if service unavailable
-            # Mock data if service unavailable
-            if data_type in ["execution_trends", "failure_analysis", "performance_metrics"]:
-                # Return mock analytics data in the expected format
-                if data_type == "execution_trends":
-                    return {
-                        "period_days": filters.get("days", 30),
-                        "trends": [],
-                        "total_data_points": 0
-                    }
-                elif data_type == "failure_analysis":
-                    return {
-                        "period_days": filters.get("days", 30),
-                        "failure_patterns": [],
-                        "action_failure_rates": [],
-                        "analysis_summary": {
-                            "total_failure_patterns": 0,
-                            "total_actions_analyzed": 0,
-                            "highest_failure_rate": 0.0
-                        }
-                    }
-                elif data_type == "performance_metrics":
-                    return {
-                        "period_days": filters.get("days", 7),
-                        "total_executions": 0,
-                        "avg_execution_time": 0.0,
-                        "median_execution_time": 0.0,
-                        "p95_execution_time": 0.0,
-                        "min_execution_time": 0.0,
-                        "max_execution_time": 0.0,
-                        "successful_executions": 0,
-                        "success_rate": 0.0,
-                        "action_performance": []
-                    }
-            else:
-                # Legacy mock data format
-                return {
-                    "data_type": data_type,
-                    "total_count": 1,
-                    "limit": limit,
-                    "filters": filters,
-                    "data": [{"id": "mock_1", "type": data_type, "status": "mock"}]
-                }
+            raise Exception(f"Failed to fetch {data_type} data: unified API unavailable ({str(e)})")
     
     async def _execute_bulk_generate_locators(self, args: Dict[str, Any], tenant_context: Dict[str, Any]) -> Dict[str, Any]:
         """Generate improved locators for multiple elements"""
@@ -534,28 +513,8 @@ class ToolExecutor:
                 "failed_generations": result.get("failed_count", 0),
                 "results": result.get("results", [])
             }
-        except httpx.HTTPError:
-            # Mock generation if service unavailable
-            mock_results = []
-            for element in elements:
-                mock_results.append({
-                    "element_id": element["id"],
-                    "original_selector": element["current_selector"],
-                    "generated_selectors": [
-                        f"#{element['id']}_improved",
-                        f"[data-test-id='{element['id']}']"
-                    ],
-                    "confidence": 0.85,
-                    "strategy_used": strategy
-                })
-            
-            return {
-                "strategy": strategy,
-                "total_elements": len(elements),
-                "successful_generations": len(elements),
-                "failed_generations": 0,
-                "results": mock_results
-            }
+        except httpx.HTTPError as e:
+            raise Exception(f"Failed to generate locators: AI service unavailable ({str(e)})")
 
     async def _execute_analyze_page_elements(self, args: Dict[str, Any], tenant_context: Dict[str, Any]) -> Dict[str, Any]:
         """Analyze page elements using AI service (or mock when unavailable)
@@ -598,21 +557,7 @@ class ToolExecutor:
             result = response.json()
             return result
         except httpx.HTTPError as e:
-            # Provide a reasonable mock analysis structure
-            elements = page_data.get("elements", []) if isinstance(page_data, dict) else []
-            total = len(elements)
-            interactive = sum(1 for el in elements if el.get("isInteractive"))
-            mock_summary = {
-                "summary": {
-                    "totalElements": total,
-                    "interactiveElements": interactive,
-                    "issuesFound": 0,
-                    "suggestions": []
-                },
-                "recommendations": [],
-                "processingTime": 120
-            }
-            return mock_summary
+            raise Exception(f"Failed to analyze page elements: AI service unavailable ({str(e)})")
 
     async def _execute_analytics_healing_data(self, args: Dict[str, Any], tenant_context: Dict[str, Any]) -> Dict[str, Any]:
         """Get healing analytics data"""
@@ -621,17 +566,12 @@ class ToolExecutor:
         
         try:
             # Use the existing unified API client but with a full URL for analytics endpoints
-            response = await self.unified_api_client.get(f"/api/analytics/healing-analytics?timeRange={time_range}&limit={limit}")
+            response = await self.unified_api_client.get(f"/api/analytics/healing-analytics?{urlencode({'timeRange': time_range, 'limit': limit})}")
             response.raise_for_status()
             result = response.json()
             return result
         except Exception as e:
-            # Return mock data if service unavailable
-            return {
-                "success": True,
-                "healing_data": [],
-                "total_count": 0
-            }
+            raise Exception(f"Failed to fetch healing analytics: {str(e)}")
 
     async def _execute_analytics_trends(self, args: Dict[str, Any], tenant_context: Dict[str, Any]) -> Dict[str, Any]:
         """Get analytics trends data"""
@@ -640,9 +580,10 @@ class ToolExecutor:
         
         try:
             # Use the existing unified API client
-            endpoint = f"/api/analytics/trends?timeRange={time_range}"
+            params = {'timeRange': time_range}
             if metric_type:
-                endpoint += f"&metricType={metric_type}"
+                params['metricType'] = metric_type
+            endpoint = f"/api/analytics/trends?{urlencode(params)}"
 
             response = await self.unified_api_client.get(endpoint)
             response.raise_for_status()
@@ -754,44 +695,7 @@ class ToolExecutor:
             
             return result
         except Exception as e:
-            # Return mock data in the format expected by the frontend
-            return {
-                "success": True,
-                "performance_trends": [
-                    {
-                        "metric_name": "execution_success_rate",
-                        "data_points": [
-                            {"timestamp": "2025-11-01T00:00:00Z", "value": 78.5, "label": "Nov 1"},
-                            {"timestamp": "2025-11-02T00:00:00Z", "value": 82.1, "label": "Nov 2"},
-                            {"timestamp": "2025-11-03T00:00:00Z", "value": 80.0, "label": "Nov 3"}
-                        ],
-                        "analysis": {
-                            "trend": "stable",
-                            "percentage_change": 1.9,
-                            "significance": "low",
-                            "insights": ["Success rate has remained stable over the analysis period"]
-                        },
-                        "threshold_breaches": 0,
-                        "recommendations": ["Continue monitoring current performance levels"]
-                    },
-                    {
-                        "metric_name": "average_execution_time",
-                        "data_points": [
-                            {"timestamp": "2025-11-01T00:00:00Z", "value": 1150, "label": "Nov 1"},
-                            {"timestamp": "2025-11-02T00:00:00Z", "value": 1200, "label": "Nov 2"},
-                            {"timestamp": "2025-11-03T00:00:00Z", "value": 1250, "label": "Nov 3"}
-                        ],
-                        "analysis": {
-                            "trend": "up",
-                            "percentage_change": 8.7,
-                            "significance": "medium",
-                            "insights": ["Execution time showing gradual increase", "Performance optimization may be needed"]
-                        },
-                        "threshold_breaches": 1,
-                        "recommendations": ["Review test complexity", "Consider parallel execution strategies"]
-                    }
-                ]
-            }
+            raise Exception(f"Failed to fetch analytics trends: {str(e)}")
 
     async def _execute_analytics_failure_patterns(self, args: Dict[str, Any], tenant_context: Dict[str, Any]) -> Dict[str, Any]:
         """Get analytics failure patterns"""
@@ -800,9 +704,10 @@ class ToolExecutor:
         
         try:
             # Use the existing unified API client
-            endpoint = f"/api/analytics/failure-patterns?timeRange={time_range}"
+            params = {'timeRange': time_range}
             if group_by:
-                endpoint += f"&groupBy={group_by}"
+                params['groupBy'] = group_by
+            endpoint = f"/api/analytics/failure-patterns?{urlencode(params)}"
 
             response = await self.unified_api_client.get(endpoint)
             response.raise_for_status()
@@ -865,36 +770,7 @@ class ToolExecutor:
             
             return result
         except Exception as e:
-            # Return mock data in the format expected by the frontend
-            return {
-                "success": True,
-                "failure_patterns": [
-                    {
-                        "pattern_id": "pattern_001",
-                        "error_type": "element_not_found",
-                        "frequency": 15,
-                        "trend": [
-                            {"timestamp": "2025-11-01T00:00:00Z", "value": 12, "label": "Nov 1"},
-                            {"timestamp": "2025-11-02T00:00:00Z", "value": 18, "label": "Nov 2"},
-                            {"timestamp": "2025-11-03T00:00:00Z", "value": 15, "label": "Nov 3"}
-                        ],
-                        "affected_components": ["login-button", "search-input", "nav-menu"],
-                        "severity": "high"
-                    },
-                    {
-                        "pattern_id": "pattern_002",
-                        "error_type": "timeout_error",
-                        "frequency": 8,
-                        "trend": [
-                            {"timestamp": "2025-11-01T00:00:00Z", "value": 5, "label": "Nov 1"},
-                            {"timestamp": "2025-11-02T00:00:00Z", "value": 9, "label": "Nov 2"},
-                            {"timestamp": "2025-11-03T00:00:00Z", "value": 8, "label": "Nov 3"}
-                        ],
-                        "affected_components": ["checkout-form", "payment-widget"],
-                        "severity": "medium"
-                    }
-                ]
-            }
+            raise Exception(f"Failed to fetch failure patterns: {str(e)}")
 
     async def _execute_analytics_ai_insights(self, args: Dict[str, Any], tenant_context: Dict[str, Any]) -> Dict[str, Any]:
         """Get AI-powered analytics insights"""
@@ -903,29 +779,17 @@ class ToolExecutor:
 
         try:
             # Use the existing unified API client
-            endpoint = f"/api/analytics/ai-insights?timeRange={time_range}"
+            params = {'timeRange': time_range}
             if insight_type:
-                endpoint += f"&insightType={insight_type}"
+                params['insightType'] = insight_type
+            endpoint = f"/api/analytics/ai-insights?{urlencode(params)}"
 
             response = await self.unified_api_client.get(endpoint)
             response.raise_for_status()
             result = response.json()
             return result
         except Exception as e:
-            # Return mock data in the format expected by the frontend
-            return {
-                "success": True,
-                "ai_insights": {
-                    "insights": [],
-                    "summary": {
-                        "total_insights": 0,
-                        "critical_insights": 0,
-                        "high_priority_insights": 0,
-                        "average_confidence": 0,
-                        "analysis_timestamp": "2025-11-03T12:00:00Z"
-                    }
-                }
-            }
+            raise Exception(f"Failed to fetch AI insights: {str(e)}")
     
     async def _execute_sql_get_all_elements(self, args: Dict[str, Any], tenant_context: Dict[str, Any]) -> Dict[str, Any]:
         """Get all elements from the SQL database"""
@@ -983,13 +847,7 @@ class ToolExecutor:
                 "message": result.get("message", "Element updated")
             }
         except httpx.HTTPError as e:
-            # Mock response if service unavailable
-            return {
-                "element_id": element_id,
-                "success": True,
-                "updated_fields": list(updates.keys()),
-                "message": f"Mock update of element {element_id}"
-            }
+            raise Exception(f"Failed to update element {element_id}: unified API unavailable ({str(e)})")
 
     async def _execute_get_review_queue(self, args: Dict[str, Any], tenant_context: Dict[str, Any]) -> Dict[str, Any]:
         """Get review queue items from unified API"""
@@ -1027,18 +885,7 @@ class ToolExecutor:
             result = response.json()
             return result
         except httpx.HTTPError as e:
-            # Return mock data if service unavailable
-            return {
-                "success": True,
-                "data": [],
-                "count": 0,
-                "total": 0,
-                "pagination": {
-                    "limit": limit,
-                    "offset": offset,
-                    "has_more": False
-                }
-            }
+            raise Exception(f"Failed to fetch review queue: unified API unavailable ({str(e)})")
 
     async def _execute_get_pending_reviews(self, args: Dict[str, Any], tenant_context: Dict[str, Any]) -> Dict[str, Any]:
         """Get pending review items for ReviewQueuePage compatibility"""
@@ -1049,10 +896,7 @@ class ToolExecutor:
             result = response.json()
             return {"data": result}
         except httpx.HTTPError as e:
-            # Return mock data if service unavailable
-            return {
-                "data": []
-            }
+            raise Exception(f"Failed to fetch pending reviews: unified API unavailable ({str(e)})")
 
     async def _execute_update_review_status(self, args: Dict[str, Any], tenant_context: Dict[str, Any]) -> Dict[str, Any]:
         """Update review item status"""
@@ -1067,12 +911,7 @@ class ToolExecutor:
             result = response.json()
             return result
         except httpx.HTTPError as e:
-            # Return mock response if service unavailable
-            return {
-                "id": review_id,
-                "status": status,
-                "message": f"Mock update: review {review_id} marked as {status}"
-            }
+            raise Exception(f"Failed to update review {review_id}: unified API unavailable ({str(e)})")
 
     async def _execute_add_to_review_queue(self, args: Dict[str, Any], tenant_context: Dict[str, Any]) -> Dict[str, Any]:
         """Add element to review queue"""
@@ -1085,7 +924,7 @@ class ToolExecutor:
         # First try to get element details to retrieve element_key
         element_key = element_name  # fallback to element_name
             # Use the SQL backend to get element details by element_key (logical_key)
-        element_response = await self.unified_api_client.get(f"/api/v1/sql/elements?logical_key={element_id}")
+        element_response = await self.unified_api_client.get(f"/api/v1/sql/elements?{urlencode({'logical_key': element_id})}")
         if element_response.status_code == 200:
             result = element_response.json()
             elements = result.get("data", [])
@@ -1122,15 +961,189 @@ class ToolExecutor:
             result = response.json()
             return result
         except httpx.HTTPError as e:
-            # Return mock response if service unavailable
-            return {
-                "id": f"mock-{element_id}",
-                "element_id": element_id,
-                "element_name": element_name,
-                "note": note,
-                "status": "open",
-                "message": f"Mock addition: element {element_id} added to review queue"
+            raise Exception(f"Failed to add element to review queue: unified API unavailable ({str(e)})")
+
+    async def _execute_generate_test_scenarios(self, args: Dict[str, Any], tenant_context: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Generate test scenarios from business document content.
+        
+        This tool analyzes business documents (requirements, user stories, design docs)
+        and generates comprehensive test scenarios that can be saved as prompts.
+        
+        🔒 PRIVACY: Document content should be anonymized client-side before calling.
+        Pass anonymization_mappings to enable de-anonymization of results.
+        """
+        document_content = args["document_content"]
+        document_name = args.get("document_name", "uploaded_document")
+        document_type = args.get("document_type", "text")
+        save_as_prompts = args.get("save_as_prompts", False)
+        starting_url = args.get("starting_url", "")
+        
+        # Anonymization parameters
+        anonymization_mappings = args.get("anonymization_mappings")
+        deanonymize_response = args.get("deanonymize_response", False)
+        validate_anonymization = args.get("validate_anonymization", True)
+        
+        try:
+            # Call the unified API document-to-tests endpoint
+            request_data = {
+                "content": document_content,
+                "document_name": document_name,
+                "document_type": document_type,
+                "save_as_prompts": save_as_prompts,
+                "starting_url": starting_url,
+                "validate_anonymization": validate_anonymization
             }
+            
+            # Include anonymization mappings if provided
+            if anonymization_mappings:
+                request_data["anonymization_mappings"] = anonymization_mappings
+                request_data["deanonymize_response"] = deanonymize_response
+            
+            response = await self.unified_api_client.post(
+                "/api/v1/document-to-tests/generate-from-text",
+                json=request_data,
+                timeout=120.0  # Allow longer timeout for AI processing
+            )
+            response.raise_for_status()
+            result = response.json()
+            
+            return {
+                "success": result.get("success", True),
+                "scenarios": result.get("scenarios", []),
+                "summary": result.get("summary", ""),
+                "total_scenarios": result.get("total_scenarios", 0),
+                "saved_prompt_ids": result.get("saved_prompt_ids"),
+                "message": result.get("message", "Test scenarios generated successfully")
+            }
+            
+        except httpx.HTTPError as e:
+            error_detail = str(e)
+            if hasattr(e, 'response') and e.response is not None:
+                try:
+                    error_detail = e.response.json().get("detail", str(e))
+                except Exception:
+                    pass
+            
+            return {
+                "success": False,
+                "scenarios": [],
+                "summary": "",
+                "total_scenarios": 0,
+                "error": f"Failed to generate test scenarios: {error_detail}"
+            }
+
+    async def _execute_refine_test_scenarios(self, args: Dict[str, Any], tenant_context: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Refine test scenarios based on user feedback.
+        
+        This allows users to interactively improve generated scenarios:
+        - Add new scenarios
+        - Remove unwanted scenarios
+        - Modify existing scenarios
+        - Get AI suggestions for better coverage
+        """
+        scenarios = args["scenarios"]
+        feedback = args["feedback"]
+        document_summary = args.get("document_summary", "")
+        anonymization_mappings = args.get("anonymization_mappings", {})
+        deanonymize_response = args.get("deanonymize_response", False)
+        
+        try:
+            request_data = {
+                "scenarios": scenarios,
+                "feedback": feedback,
+                "document_summary": document_summary,
+                "anonymization_mappings": anonymization_mappings,
+                "deanonymize_response": deanonymize_response
+            }
+            
+            response = await self.unified_api_client.post(
+                "/api/v1/document-to-tests/refine",
+                json=request_data,
+                timeout=120.0
+            )
+            response.raise_for_status()
+            result = response.json()
+            
+            return {
+                "success": result.get("success", True),
+                "scenarios": result.get("scenarios", scenarios),
+                "summary": result.get("summary", ""),
+                "total_scenarios": result.get("total_scenarios", len(result.get("scenarios", []))),
+                "changes_made": result.get("changes_made", []),
+                "message": result.get("message", "Scenarios refined successfully")
+            }
+            
+        except httpx.HTTPError as e:
+            error_detail = str(e)
+            if hasattr(e, 'response') and e.response is not None:
+                try:
+                    error_detail = e.response.json().get("detail", str(e))
+                except Exception:
+                    pass
+            
+            return {
+                "success": False,
+                "scenarios": scenarios,  # Return original on failure
+                "summary": "",
+                "total_scenarios": len(scenarios),
+                "changes_made": [],
+                "error": f"Failed to refine scenarios: {error_detail}"
+            }
+
+    async def _execute_confirm_test_scenarios(self, args: Dict[str, Any], tenant_context: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Confirm and save finalized test scenarios as prompts.
+        
+        This is the final step after the user has reviewed and refined
+        scenarios to their satisfaction.
+        """
+        scenarios = args["scenarios"]
+        document_name = args.get("document_name", "")
+        starting_url = args.get("starting_url", "")
+        anonymization_mappings = args.get("anonymization_mappings", {})
+        deanonymize_before_save = args.get("deanonymize_before_save", False)
+        
+        try:
+            request_data = {
+                "scenarios": scenarios,
+                "document_name": document_name,
+                "starting_url": starting_url,
+                "anonymization_mappings": anonymization_mappings,
+                "deanonymize_before_save": deanonymize_before_save
+            }
+            
+            response = await self.unified_api_client.post(
+                "/api/v1/document-to-tests/confirm",
+                json=request_data,
+                timeout=60.0
+            )
+            response.raise_for_status()
+            result = response.json()
+            
+            return {
+                "success": result.get("success", True),
+                "saved_count": result.get("saved_count", 0),
+                "saved_prompt_ids": result.get("saved_prompt_ids", []),
+                "message": result.get("message", "Scenarios saved successfully")
+            }
+            
+        except httpx.HTTPError as e:
+            error_detail = str(e)
+            if hasattr(e, 'response') and e.response is not None:
+                try:
+                    error_detail = e.response.json().get("detail", str(e))
+                except Exception:
+                    pass
+            
+            return {
+                "success": False,
+                "saved_count": 0,
+                "saved_prompt_ids": [],
+                "error": f"Failed to save scenarios: {error_detail}"
+            }
+
 
 def register_tools() -> List[str]:
     """Return list of registered tool names"""

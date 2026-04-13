@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import styled, { ThemeProvider } from 'styled-components';
 import { useTheme } from '../../../contexts/ThemeContext';
 import { http } from '../../../shared/api';
+import { BrowserMultiSelect } from '../../../shared/ui/BrowserMultiSelect';
 
 // TypeScript interfaces for styled components
 interface PolicyRuleProps {
@@ -27,6 +28,7 @@ type PolicyConfigurations = {
     blockDestructiveActions: boolean;
     requireConfirmationKeywords: string[];
     allowTestModeOverride: boolean;
+    preferredBrowsers: string[];
     active: boolean;
   };
   multiOutcomeHandling: {
@@ -39,6 +41,7 @@ type PolicyConfigurations = {
     logAllDecisions: boolean;
     escalateUnknownElements: boolean;
     retentionDays: number;
+    executionRetentionDays: number;
     active: boolean;
   };
 };
@@ -99,8 +102,6 @@ const Subtitle = styled.p`
 `;
 
 const MainContent = styled.div`
-  max-width: 1400px;
-  margin: 0 auto;
   padding: 2rem;
 `;
 
@@ -191,7 +192,7 @@ const PolicyToggle = styled.div<{ $isActive: boolean }>`
   position: relative;
   width: 60px;
   height: 32px;
-  background: ${props => props.$isActive ? '#10b981' : '#d1d5db'};
+  background: ${props => props.$isActive ? '#1D9E75' : '#d1d5db'};
   border-radius: 16px;
   cursor: pointer;
   transition: background 0.3s;
@@ -339,7 +340,7 @@ const SaveButton = styled.button<{ $hasChanges: boolean; $isSaving: boolean }>`
   
   &:hover {
     background-color: ${props => props.$hasChanges ? 
-      (props.theme.colors.surface === '#2d3748' ? '#38a169' : '#059669') : 
+      (props.theme.colors.surface === '#2d3748' ? '#1D9E75' : '#0F6E56') : 
       (props.theme.colors.surface === '#2d3748' ? '#4a5568' : '#9ca3af')};
   }
 `;
@@ -363,8 +364,7 @@ const PolicyEngine: React.FC = () => {
     executionSafety: {
       blockDestructiveActions: true,
       requireConfirmationKeywords: ['delete', 'remove', 'submit payment'],
-      allowTestModeOverride: true,
-      active: true
+      allowTestModeOverride: true,      preferredBrowsers: ["chrome"],      active: true
     },
     multiOutcomeHandling: {
       preferVisibleElements: true,
@@ -376,6 +376,7 @@ const PolicyEngine: React.FC = () => {
       logAllDecisions: true,
       escalateUnknownElements: true,
       retentionDays: 60,
+      executionRetentionDays: 60,
       active: true
     }
   });
@@ -498,25 +499,25 @@ const PolicyEngine: React.FC = () => {
         locatorHealing: { confidenceThreshold: 0.95, maxRetries: 1 },
         executionSafety: { blockDestructiveActions: true },
         multiOutcomeHandling: { confidenceThreshold: 0.90, maxCandidates: 5 },
-        auditReview: { retentionDays: 90 }
+        auditReview: { retentionDays: 90, executionRetentionDays: 90 }
       },
       balanced: {
         locatorHealing: { confidenceThreshold: 0.85, maxRetries: 2 },
         executionSafety: { blockDestructiveActions: true },
         multiOutcomeHandling: { confidenceThreshold: 0.75, maxCandidates: 8 },
-        auditReview: { retentionDays: 60 }
+        auditReview: { retentionDays: 60, executionRetentionDays: 60 }
       },
       lenient: {
         locatorHealing: { confidenceThreshold: 0.70, maxRetries: 3 },
         executionSafety: { blockDestructiveActions: false },
         multiOutcomeHandling: { confidenceThreshold: 0.60, maxCandidates: 10 },
-        auditReview: { retentionDays: 30 }
+        auditReview: { retentionDays: 30, executionRetentionDays: 30 }
       },
       dev: {
         locatorHealing: { confidenceThreshold: 0.50, maxRetries: 5 },
         executionSafety: { blockDestructiveActions: false },
         multiOutcomeHandling: { confidenceThreshold: 0.40, maxCandidates: 15 },
-        auditReview: { retentionDays: 7 }
+        auditReview: { retentionDays: 7, executionRetentionDays: 7 }
       }
     };
 
@@ -634,7 +635,7 @@ const PolicyEngine: React.FC = () => {
 
             <PolicyRule $isActive={policies.locatorHealing.preferCssOverXpath}>
               <RuleInfo>
-                <RuleType $color="#10b981">PREFERENCE</RuleType>
+                <RuleType $color="#1D9E75">PREFERENCE</RuleType>
                 <RuleDescription>Prefer CSS selectors over XPath when both work</RuleDescription>
                 <RuleAction>CSS &gt; XPath</RuleAction>
               </RuleInfo>
@@ -665,7 +666,7 @@ const PolicyEngine: React.FC = () => {
             
             <PolicyRule $isActive={policies.executionSafety.blockDestructiveActions}>
               <RuleInfo>
-                <RuleType $color="#ef4444">SECURITY</RuleType>
+                <RuleType $color="#A32D2D">SECURITY</RuleType>
                 <RuleDescription>Block destructive actions unless explicitly allowed</RuleDescription>
                 <RuleAction>Block: delete, remove, submit payment</RuleAction>
               </RuleInfo>
@@ -686,6 +687,21 @@ const PolicyEngine: React.FC = () => {
                 onClick={() => togglePolicy('executionSafety', 'allowTestModeOverride')}
               />
             </PolicyRule>
+
+            <div style={{ padding: '16px 0' }}>
+              <BrowserMultiSelect
+                value={policies.executionSafety.preferredBrowsers || ['chrome']}
+                onChange={(browsers) => {
+                  setPolicies(prev => ({
+                    ...prev,
+                    executionSafety: {
+                      ...prev.executionSafety,
+                      preferredBrowsers: browsers
+                    }
+                  }));
+                }}
+              />
+            </div>
           </PolicyCard>
 
           {/* Multi-Outcome Handling */}
@@ -749,13 +765,25 @@ const PolicyEngine: React.FC = () => {
                   <span>Retention Days:</span>
                   <ThresholdSlider
                     type="range"
-                    min="7"
-                    max="365"
-                    step="1"
+                    min="30"
+                    max="360"
+                    step="30"
                     value={policies.auditReview.retentionDays}
                     onChange={(e) => updateThreshold('auditReview', 'retentionDays', parseInt(e.target.value))}
                   />
                   <ThresholdValue>{policies.auditReview.retentionDays} days</ThresholdValue>
+                </ThresholdControl>
+                <ThresholdControl>
+                  <span>Execution History:</span>
+                  <ThresholdSlider
+                    type="range"
+                    min="30"
+                    max="360"
+                    step="30"
+                    value={policies.auditReview.executionRetentionDays}
+                    onChange={(e) => updateThreshold('auditReview', 'executionRetentionDays', parseInt(e.target.value))}
+                  />
+                  <ThresholdValue>{policies.auditReview.executionRetentionDays} days</ThresholdValue>
                 </ThresholdControl>
               </RuleInfo>
               <PolicyToggle

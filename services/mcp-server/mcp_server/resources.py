@@ -6,10 +6,14 @@ Provides list/get operations with proper caching and pagination.
 
 import logging
 from typing import Any, Dict, List
+from urllib.parse import urlencode
 import httpx
 from .cache import get_resource_cache, cache_key, async_cached_call
 
 logger = logging.getLogger(__name__)
+
+ALLOWED_RESOURCE_SCHEMES = {"elements", "executions", "stats"}
+MAX_PAGE_LIMIT = 500
 
 
 class ResourceManager:
@@ -84,14 +88,17 @@ class ResourceManager:
             params = {}
         
         # Route to appropriate handler
+        if scheme not in ALLOWED_RESOURCE_SCHEMES:
+            raise Exception(f"Unknown resource scheme: {scheme}. Allowed: {', '.join(ALLOWED_RESOURCE_SCHEMES)}")
+        
         if scheme == "elements":
             return await self._handle_elements_resource(path, params, tenant_context)
         elif scheme == "executions":
             return await self._handle_executions_resource(path, params, tenant_context)
         elif scheme == "stats":
             return await self._handle_stats_resource(path, params, tenant_context)
-        else:
-            raise Exception(f"Unknown resource scheme: {scheme}")
+        elif scheme == "stats":
+            return await self._handle_stats_resource(path, params, tenant_context)
     
     async def _handle_elements_resource(self, path: str, params: Dict[str, str], tenant_context: Dict[str, Any]) -> Dict[str, Any]:
         """Handle elements:// resources"""
@@ -134,7 +141,7 @@ class ResourceManager:
         if tag_filter:
             api_params["tag"] = tag_filter
         
-        query_string = "&".join([f"{k}={v}" for k, v in api_params.items()])
+        query_string = urlencode(api_params)
         endpoint = f"/api/v1/sql/elements?{query_string}"
         
         # Use caching for list requests
@@ -168,33 +175,8 @@ class ResourceManager:
                     }
                 }
             except httpx.HTTPError as e:
-                # Return mock data if service unavailable
-                mock_elements = [
-                    {
-                        "logical_key": f"mock_element_{i}",
-                        "css_selector": f"#mock-{i}",
-                        "tag": "div",
-                        "text_content": f"Mock element {i}",
-                        "page": "mock_page"
-                    }
-                    for i in range(min(limit, 5))
-                ]
-                
-                return {
-                    "elements": mock_elements,
-                    "pagination": {
-                        "limit": limit,
-                        "offset": offset,
-                        "count": len(mock_elements),
-                        "has_more": False,
-                        "next_cursor": None
-                    },
-                    "filters": {
-                        "page": page_filter,
-                        "tag": tag_filter
-                    },
-                    "mock": True
-                }
+                logger.error("Failed to fetch elements from unified API: %s", e)
+                raise Exception(f"Unified API unavailable: {e}") from e
         
         return await async_cached_call(cache, cache_key_str, fetch_elements)
     
@@ -225,26 +207,14 @@ class ResourceManager:
             except httpx.HTTPError as e:
                 if e.response and e.response.status_code == 404:
                     return {"element": None, "found": False}
-                
-                # Return mock element if service unavailable
-                return {
-                    "element": {
-                        "logical_key": element_id,
-                        "css_selector": f"#{element_id}",
-                        "xpath": f"//*[@id='{element_id}']",
-                        "tag": "div",
-                        "text_content": f"Mock element: {element_id}",
-                        "page": "mock_page",
-                        "mock": True
-                    },
-                    "found": True
-                }
+                logger.error("Failed to fetch element %s from unified API: %s", element_id, e)
+                raise Exception(f"Unified API unavailable: {e}") from e
         
         return await async_cached_call(cache, cache_key_str, fetch_element)
     
     async def _list_executions(self, params: Dict[str, str], tenant_context: Dict[str, Any]) -> Dict[str, Any]:
         """List test executions with pagination"""
-        limit = int(params.get("limit", "50"))
+        limit = min(int(params.get("limit", "50")), MAX_PAGE_LIMIT)
         offset = int(params.get("offset", "0"))
         session_filter = params.get("session_id")
         
@@ -253,7 +223,7 @@ class ResourceManager:
         if session_filter:
             api_params["session_id"] = session_filter
         
-        query_string = "&".join([f"{k}={v}" for k, v in api_params.items()])
+        query_string = urlencode(api_params)
         endpoint = f"/api/v1/sql/executions?{query_string}"
         
         try:
@@ -277,33 +247,9 @@ class ResourceManager:
                     "session_id": session_filter
                 }
             }
-        except httpx.HTTPError:
-            # Return mock executions if service unavailable
-            mock_executions = [
-                {
-                    "id": f"mock_exec_{i}",
-                    "tool_name": "run_action",
-                    "status": "success",
-                    "execution_time_ms": 150,
-                    "timestamp": "2025-11-02T12:00:00Z"
-                }
-                for i in range(min(limit, 3))
-            ]
-            
-            return {
-                "executions": mock_executions,
-                "pagination": {
-                    "limit": limit,
-                    "offset": offset,
-                    "count": len(mock_executions),
-                    "has_more": False,
-                    "next_cursor": None
-                },
-                "filters": {
-                    "session_id": session_filter
-                },
-                "mock": True
-            }
+        except httpx.HTTPError as e:
+            logger.error("Failed to fetch executions from unified API: %s", e)
+            raise Exception(f"Unified API unavailable: {e}") from e
     
     async def _get_execution(self, params: Dict[str, str], tenant_context: Dict[str, Any]) -> Dict[str, Any]:
         """Get specific execution by ID"""
@@ -323,20 +269,8 @@ class ResourceManager:
         except httpx.HTTPError as e:
             if e.response and e.response.status_code == 404:
                 return {"execution": None, "found": False}
-            
-            # Return mock execution if service unavailable
-            return {
-                "execution": {
-                    "id": execution_id,
-                    "tool_name": "run_action",
-                    "status": "success",
-                    "execution_time_ms": 200,
-                    "result": {"action": "click", "element": "button"},
-                    "timestamp": "2025-11-02T12:00:00Z",
-                    "mock": True
-                },
-                "found": True
-            }
+            logger.error("Failed to fetch execution %s from unified API: %s", execution_id, e)
+            raise Exception(f"Unified API unavailable: {e}") from e
     
     async def _get_repository_stats(self, params: Dict[str, str], tenant_context: Dict[str, Any]) -> Dict[str, Any]:
         """Get repository statistics"""
@@ -349,20 +283,9 @@ class ResourceManager:
                 "statistics": result,
                 "generated_at": "2025-11-02T12:00:00Z"
             }
-        except httpx.HTTPError:
-            # Return mock stats if service unavailable
-            return {
-                "statistics": {
-                    "total_elements": 156,
-                    "active_elements": 142,
-                    "total_sessions": 23,
-                    "total_executions": 1247,
-                    "success_rate": 0.89,
-                    "avg_execution_time_ms": 185
-                },
-                "generated_at": "2025-11-02T12:00:00Z",
-                "mock": True
-            }
+        except httpx.HTTPError as e:
+            logger.error("Failed to fetch repository stats from unified API: %s", e)
+            raise Exception(f"Unified API unavailable: {e}") from e
     
     async def _get_healing_stats(self, params: Dict[str, str], tenant_context: Dict[str, Any]) -> Dict[str, Any]:
         """Get healing statistics"""
@@ -375,22 +298,9 @@ class ResourceManager:
                 "healing_statistics": result,
                 "generated_at": "2025-11-02T12:00:00Z"
             }
-        except httpx.HTTPError:
-            # Return mock healing stats if service unavailable
-            return {
-                "healing_statistics": {
-                    "total_healing_attempts": 47,
-                    "successful_healings": 32,
-                    "healing_success_rate": 0.68,
-                    "avg_healing_time_ms": 750,
-                    "common_healing_patterns": [
-                        {"pattern": "id_changed", "count": 15},
-                        {"pattern": "class_changed", "count": 12},
-                        {"pattern": "dom_restructure", "count": 8}
-                    ]
-                },
-                "generated_at": "2025-11-02T12:00:00Z",
-                "mock": True
+        except httpx.HTTPError as e:
+            logger.error("Failed to fetch healing stats from unified API: %s", e)
+            raise Exception(f"Unified API unavailable: {e}") from e
             }
     
     def _parse_query_string(self, query_string: str) -> Dict[str, str]:

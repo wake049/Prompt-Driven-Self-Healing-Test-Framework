@@ -5,6 +5,8 @@
  * Provides a unified interface for all frontend functionality via MCP server.
  */
 
+import { config } from '../app/config';
+
 interface MCPRequest {
   jsonrpc: "2.0";
   id: number;
@@ -50,10 +52,80 @@ export class MCPFrontendClient {
   private serverUrl: string;
   private authToken: string;
   private connectionListeners: Array<(connected: boolean) => void> = [];
+  private readonly connectionTimeoutMs = 3000;
+  private heartbeatInterval: ReturnType<typeof setInterval> | null = null;
+  private readonly heartbeatIntervalMs = 30000;
+
+  private getApiBaseUrl(): string {
+    return config.apiBaseUrl;
+  }
+
+  private async httpGet(path: string): Promise<any> {
+    const token = MCPFrontendClient.resolveAuthToken() || this.authToken || '';
+    const response = await fetch(`${this.getApiBaseUrl()}${path}`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {})
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    return response.json();
+  }
+
+  private static resolveServerUrl(): string {
+    const configuredUrl = import.meta.env.VITE_MCP_SERVER_URL;
+    if (configuredUrl && configuredUrl.trim().length > 0) {
+      return configuredUrl;
+    }
+
+    if (typeof window !== 'undefined') {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      return `${protocol}//${window.location.host}/mcp/ws`;
+    }
+
+    return 'ws://localhost:8000/mcp/ws';
+  }
+
+  private static getConnectionCandidates(primaryUrl: string): string[] {
+    const candidates: string[] = [];
+    const primary = (primaryUrl || '').trim();
+    if (primary) {
+      candidates.push(primary);
+    }
+
+    // Optional explicit fallback (no implicit port probing)
+    const fallbackUrl = (import.meta.env.VITE_MCP_SERVER_FALLBACK_URL || '').trim();
+    if (fallbackUrl && fallbackUrl !== primary) {
+      candidates.push(fallbackUrl);
+    }
+
+    return candidates;
+  }
+
+  private static resolveAuthToken(): string {
+    if (typeof window !== 'undefined') {
+      const runtimeToken = localStorage.getItem('auth_token');
+      if (runtimeToken && runtimeToken.trim().length > 0) {
+        return runtimeToken;
+      }
+    }
+
+    const configuredToken = import.meta.env.VITE_MCP_AUTH_TOKEN;
+    if (configuredToken && configuredToken.trim().length > 0) {
+      return configuredToken;
+    }
+
+    return '';
+  }
 
   constructor(
-    serverUrl: string = 'wss://mcp.testhelix.com/mcp/ws',
-    authToken: string = "devtoken"
+    serverUrl: string = MCPFrontendClient.resolveServerUrl(),
+    authToken: string = MCPFrontendClient.resolveAuthToken()
   ) {
     this.serverUrl = serverUrl;
     this.authToken = authToken;
@@ -64,41 +136,83 @@ export class MCPFrontendClient {
    * Connect to MCP server via WebSocket
    */
   async connect(): Promise<void> {
-    return new Promise((resolve, reject) => {
+    const candidates = MCPFrontendClient.getConnectionCandidates(this.serverUrl);
+    let lastError: Error | null = null;
+
+    for (const candidate of candidates) {
       try {
-        this.websocket = new WebSocket(this.serverUrl);
+        const ws = await this.connectToCandidate(candidate);
+        this.websocket = ws;
+        this.serverUrl = candidate;
+        this.isConnected = true;
+        this.reconnectAttempts = 0;
+        this.notifyConnectionListeners(true);
+        this.startHeartbeat();
+        console.log(`MCP connected via ${candidate}`);
+        return;
+      } catch (error: any) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+      }
+    }
 
-        this.websocket.onopen = () => {
-          this.isConnected = true;
-          this.reconnectAttempts = 0;
-          this.notifyConnectionListeners(true);
-          resolve();
-        };
+    this.isConnected = false;
+    this.notifyConnectionListeners(false);
+    throw new Error(
+      `Failed to connect to MCP server. Tried: ${candidates.join(', ')}. Last error: ${lastError?.message || 'unknown error'}`
+    );
+  }
 
-        this.websocket.onmessage = (event) => {
+  private async connectToCandidate(url: string): Promise<WebSocket> {
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const socket = new WebSocket(url);
+
+      const timeout = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        try {
+          socket.close();
+        } catch {
+          // Ignore close errors during timeout handling
+        }
+        reject(new Error(`Connection timeout for ${url}`));
+      }, this.connectionTimeoutMs);
+
+      socket.onopen = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+
+        socket.onmessage = (event) => {
           this.handleMessage(event.data);
         };
 
-        this.websocket.onclose = (event) => {
+        socket.onclose = () => {
           this.isConnected = false;
           this.notifyConnectionListeners(false);
           this.handleConnectionClose();
         };
 
-        this.websocket.onerror = (error) => {
-          reject(new Error("Failed to connect to MCP server"));
+        socket.onerror = () => {
+          // Runtime socket errors are handled by onclose/reconnection flow
         };
 
-        // Connection timeout
-        setTimeout(() => {
-          if (!this.isConnected) {
-            reject(new Error("MCP connection timeout"));
-          }
-        }, 10000);
+        resolve(socket);
+      };
 
-      } catch (error) {
-        reject(error);
-      }
+      socket.onerror = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        reject(new Error(`WebSocket error for ${url}`));
+      };
+
+      socket.onclose = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        reject(new Error(`Socket closed before connect for ${url}`));
+      };
     });
   }
 
@@ -106,6 +220,7 @@ export class MCPFrontendClient {
    * Disconnect from MCP server
    */
   disconnect(): void {
+    this.stopHeartbeat();
     if (this.websocket) {
       this.websocket.close();
       this.websocket = null;
@@ -126,6 +241,32 @@ export class MCPFrontendClient {
    */
   isConnectedToServer(): boolean {
     return this.isConnected && this.websocket?.readyState === WebSocket.OPEN;
+  }
+
+  private startHeartbeat(): void {
+    this.stopHeartbeat();
+    this.heartbeatInterval = setInterval(async () => {
+      if (!this.isConnectedToServer()) {
+        this.stopHeartbeat();
+        return;
+      }
+      try {
+        await this.sendRequest('ping', {});
+      } catch {
+        console.warn('MCP heartbeat failed, connection may be dead');
+        this.isConnected = false;
+        this.notifyConnectionListeners(false);
+        this.stopHeartbeat();
+        this.handleConnectionClose();
+      }
+    }, this.heartbeatIntervalMs);
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
+    }
   }
 
   /**
@@ -165,7 +306,7 @@ export class MCPFrontendClient {
       method,
       params: {
         ...params,
-        auth_token: this.authToken
+        auth_token: MCPFrontendClient.resolveAuthToken() || this.authToken
       }
     };
 
@@ -188,7 +329,13 @@ export class MCPFrontendClient {
    * Handle incoming messages from MCP server
    */
   private handleMessage(data: string): void {
-      const response: MCPResponse = JSON.parse(data);
+    let response: MCPResponse;
+    try {
+      response = JSON.parse(data);
+    } catch {
+      console.error('MCP: received malformed JSON response');
+      return;
+    }
 
       const pending = this.pendingRequests.get(response.id);
       if (!pending) {
@@ -346,44 +493,71 @@ export class MCPFrontendClient {
 
   // Test Data and Analytics
   async getExecutionStats(filters?: any): Promise<any> {
-    const result = await this.callTool("fetch_test_data", {
-      data_type: "execution_stats",
-      filters
-    });
-    return result.data || result;
+    try {
+      const result = await this.callTool("fetch_test_data", {
+        data_type: "execution_stats",
+        filters
+      });
+      return result.data || result;
+    } catch {
+      const query = new URLSearchParams(filters || {}).toString();
+      const fallback = await this.httpGet(`/api/v1/sql/execution-stats${query ? `?${query}` : ''}`);
+      return fallback.data || fallback;
+    }
   }
 
   async getRecentExecutions(options?: { limit?: number; filters?: any }): Promise<any> {
-    const result = await this.callTool("fetch_test_data", {
-      data_type: "recent_executions",
-      filters: options?.filters,
-      limit: options?.limit || 20
-    });
-    return result.data || result;
+    try {
+      const result = await this.callTool("fetch_test_data", {
+        data_type: "recent_executions",
+        filters: options?.filters,
+        limit: options?.limit || 20
+      });
+      return result.data || result;
+    } catch {
+      const params = new URLSearchParams({ limit: String(options?.limit || 20), ...(options?.filters || {}) }).toString();
+      const fallback = await this.httpGet(`/api/v1/sql/executions${params ? `?${params}` : ''}`);
+      return fallback.data || fallback;
+    }
   }
 
   async getExecutionTrends(days: number = 30): Promise<any> {
-    const result = await this.callTool("fetch_test_data", {
-      data_type: "execution_trends",
-      filters: { days }
-    });
-    return result.data || result;
+    try {
+      const result = await this.callTool("fetch_test_data", {
+        data_type: "execution_trends",
+        filters: { days }
+      });
+      return result.data || result;
+    } catch {
+      const fallback = await this.httpGet(`/api/v1/sql/execution-trends?days=${days}`);
+      return fallback.data || fallback;
+    }
   }
 
   async getFailureAnalysis(days: number = 30, limit: number = 10): Promise<any> {
-    const result = await this.callTool("fetch_test_data", {
-      data_type: "failure_analysis",
-      filters: { days, limit }
-    });
-    return result.data || result;
+    try {
+      const result = await this.callTool("fetch_test_data", {
+        data_type: "failure_analysis",
+        filters: { days, limit }
+      });
+      return result.data || result;
+    } catch {
+      const fallback = await this.httpGet(`/api/v1/sql/failure-analysis?days=${days}&limit=${limit}`);
+      return fallback.data || fallback;
+    }
   }
 
   async getPerformanceMetrics(days: number = 7): Promise<any> {
-    const result = await this.callTool("fetch_test_data", {
-      data_type: "performance_metrics",
-      filters: { days }
-    });
-    return result.data || result;
+    try {
+      const result = await this.callTool("fetch_test_data", {
+        data_type: "performance_metrics",
+        filters: { days }
+      });
+      return result.data || result;
+    } catch {
+      const fallback = await this.httpGet(`/api/v1/sql/performance-metrics?days=${days}`);
+      return fallback.data || fallback;
+    }
   }
 
   // LLM Summaries
@@ -448,23 +622,48 @@ export class MCPFrontendClient {
 
   // Analytics Services
   async getHealingAnalytics(timeRange: string = "24h"): Promise<any> {
-    const result = await this.callTool("analytics_healing_data", { timeRange });
-    return result.data || result;
+    try {
+      const result = await this.callTool("analytics_healing_data", { timeRange });
+      return result.data || result;
+    } catch {
+      const daysMap: Record<string, number> = { '1h': 1, '24h': 1, '7d': 7, '30d': 30 };
+      const days = daysMap[timeRange] || 1;
+      const fallback = await this.httpGet(`/api/analytics/healing-analytics?days=${days}`);
+      return fallback.data || fallback;
+    }
   }
 
   async getAnalyticsTrends(timeRange: string = "24h", metricType?: string): Promise<any> {
-    const result = await this.callTool("analytics_trends", { timeRange, metricType });
-    return result.data || result;
+    try {
+      const result = await this.callTool("analytics_trends", { timeRange, metricType });
+      return result.data || result;
+    } catch {
+      const query = new URLSearchParams({ timeRange, ...(metricType ? { metricType } : {}) }).toString();
+      const fallback = await this.httpGet(`/api/analytics/trends?${query}`);
+      return fallback.data || fallback;
+    }
   }
 
   async getFailurePatterns(timeRange: string = "24h", groupBy?: string): Promise<any> {
-    const result = await this.callTool("analytics_failure_patterns", { timeRange, groupBy });
-    return result.data || result;
+    try {
+      const result = await this.callTool("analytics_failure_patterns", { timeRange, groupBy });
+      return result.data || result;
+    } catch {
+      const query = new URLSearchParams({ timeRange, ...(groupBy ? { groupBy } : {}) }).toString();
+      const fallback = await this.httpGet(`/api/analytics/failure-patterns?${query}`);
+      return fallback.data || fallback;
+    }
   }
 
   async getAIInsights(timeRange: string = "24h", insightType?: string): Promise<any> {
-    const result = await this.callTool("analytics_ai_insights", { timeRange, insightType });
-    return result.data || result;
+    try {
+      const result = await this.callTool("analytics_ai_insights", { timeRange, insightType });
+      return result.data || result;
+    } catch {
+      const query = new URLSearchParams({ timeRange, ...(insightType ? { insightType } : {}) }).toString();
+      const fallback = await this.httpGet(`/api/analytics/ai-insights?${query}`);
+      return fallback.data || fallback;
+    }
   }
 
   // Resource Access
@@ -647,8 +846,11 @@ export class MCPFrontendManager {
       await this.instance.connect();
       return this.instance;
     } catch (error) {
-      this.instance = null;
-      throw new Error("MCP server connection required - frontend cannot function without it");
+      // Keep a degraded instance so API methods can use HTTP fallbacks.
+      if (!this.instance) {
+        this.instance = new MCPFrontendClient();
+      }
+      return this.instance;
     } finally {
       this.isInitializing = false;
     }

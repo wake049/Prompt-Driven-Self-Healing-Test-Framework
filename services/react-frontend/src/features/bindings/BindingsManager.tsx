@@ -394,7 +394,7 @@ const BindingsManager: React.FC<BindingsManagerProps> = ({ promptId }) => {
                     style={{
                       padding: '4px 8px',
                       fontSize: '12px',
-                      backgroundColor: '#ef4444',
+                      backgroundColor: '#A32D2D',
                       color: 'white',
                       border: 'none',
                       borderRadius: '4px',

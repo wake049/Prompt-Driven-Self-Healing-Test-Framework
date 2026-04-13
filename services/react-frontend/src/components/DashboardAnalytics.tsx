@@ -6,7 +6,7 @@ import {
   FailurePattern,
   ActionFailureRate,
   PerformanceMetrics
-} from '../services/executionApiService';
+} from '../services/executionApiService-rest';
 const DashboardContainer = styled.div`
   padding: 24px;
   background: ${props => props.theme.colors.background};
@@ -86,6 +86,9 @@ const TrendChart = styled.div`
 `;
 const TrendBar = styled.div<{ height: number; success: boolean }>`
   flex: 1;
+  min-width: 8px;
+  max-width: 48px;
+  min-height: 2px;
   height: ${props => props.height}%;
   background: ${props => props.success 
     ? props.theme.colors.success 
@@ -93,6 +96,7 @@ const TrendBar = styled.div<{ height: number; success: boolean }>`
   border-radius: 2px 2px 0 0;
   transition: all 0.3s ease;
   position: relative;
+  cursor: default;
   &:hover {
     opacity: 0.8;
   }
@@ -303,7 +307,7 @@ export const DashboardAnalytics: React.FC<DashboardAnalyticsProps> = ({ classNam
         <ChartCard>
           <ChartTitle>Execution Trends</ChartTitle>
           <TrendChart>
-            {trends && trends.length > 0 ? trends.slice(0, 20).reverse().map((trend, index) => {
+            {trends && trends.length > 1 ? trends.slice(0, 20).reverse().map((trend, index) => {
               const maxExecutions = Math.max(...trends.map(t => t.total_executions));
               const height = maxExecutions > 0 ? (trend.total_executions / maxExecutions) * 100 : 0;
               return (
@@ -316,7 +320,9 @@ export const DashboardAnalytics: React.FC<DashboardAnalyticsProps> = ({ classNam
               );
             }) : (
               <div style={{ padding: '20px', textAlign: 'center', color: '#666' }}>
-                No trend data available
+                {trends && trends.length === 1
+                  ? 'Only 1 day of data — run more tests to see trends'
+                  : 'No trend data available'}
               </div>
             )}
           </TrendChart>

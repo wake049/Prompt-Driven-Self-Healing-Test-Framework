@@ -1,13 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
+import { gradientKeyframes } from '../../../shared/styles/keyframes';
 import { useNavigate } from 'react-router-dom';
 import { executionApiService } from '../api'; // Use the working authenticated API service
 import { MCPStatus } from '../../../components/MCPStatus';
 import { useAuth } from '../../../contexts/AuthContext';
 import { useTheme } from '../../../contexts/ThemeContext';
+import { useToast } from '../../../shared/ui/Toast';
+import { EmptyState } from '../../../shared/ui/EmptyState';
+import { Breadcrumb } from '../../../shared/ui/Breadcrumb';
 import { DashboardSkeleton, StatGridSkeleton, ExecutionListSkeleton } from '../../../shared/ui/SkeletonLoader';
 import { ProgressRing, SimpleBarChart } from '../../../shared/ui/Charts';
-import { RefreshCw, TrendingUp, TrendingDown, Clock, CheckCircle, XCircle, Activity, PieChart, MessageSquare, Sparkles, Link, Database } from 'lucide-react';
+import { RefreshCw, TrendingUp, TrendingDown, Clock, CheckCircle, XCircle, Activity, PieChart, MessageSquare, Sparkles, Link, Database, Play } from 'lucide-react';
 
 // Types
 interface ExecutionSummaryResponse {
@@ -29,14 +33,14 @@ interface ExecutionSummaryResponse {
 }
 const DashboardContainer = styled.div`
   padding: 32px 64px;
-  max-width: 1800px;
+  max-width: 100%;
   margin: 0 auto;
   background: ${props => props.theme.colors.background};
   min-height: 100vh;
   width: 100%;
+  box-sizing: border-box;
   @media (max-width: 768px) {
     padding: 16px;
-    max-width: 100%;
   }
 `;
 const DashboardHeader = styled.div`
@@ -65,7 +69,7 @@ const DashboardTitle = styled.h1`
   gap: 12px;
 `;
 const RefreshButton = styled.button`
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #185FA5;
   color: white;
   border: none;
   padding: 12px 24px;
@@ -206,6 +210,38 @@ const ExecutionListHeader = styled.div`
   align-items: center;
   gap: 12px;
 `;
+const PaginationBar = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 24px;
+  border-top: 1px solid ${props => props.theme.colors.border};
+`;
+
+const PaginationInfo = styled.div`
+  color: ${props => props.theme.colors.textSecondary};
+  font-size: 14px;
+`;
+
+const PaginationControls = styled.div`
+  display: flex;
+  gap: 8px;
+`;
+
+const PaginationButton = styled.button`
+  background: ${props => props.theme.colors.surface};
+  color: ${props => props.theme.colors.text};
+  border: 1px solid ${props => props.theme.colors.border};
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-weight: 600;
+  cursor: pointer;
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+`;
 const ExecutionItem = styled.div<{ $clickable?: boolean }>`
   display: grid;
   grid-template-columns: 140px 3fr 140px 120px 100px 100px 100px 140px 140px;
@@ -255,22 +291,23 @@ const StatusBadge = styled.span<{ $status: string }>`
   gap: 6px;
   background: ${props => {
     switch (props.$status) {
-      case 'success': return 'linear-gradient(135deg, #68d391, #38a169)';
-      case 'completed': return 'linear-gradient(135deg, #68d391, #38a169)';
+      case 'success': return 'linear-gradient(135deg, #68d391, #1D9E75)';
+      case 'completed': return 'linear-gradient(135deg, #68d391, #1D9E75)';
       case 'running': return 'linear-gradient(135deg, #fbd38d, #ed8936)';
-      case 'failed': return 'linear-gradient(135deg, #fc8181, #e53e3e)';
-      case 'error': return 'linear-gradient(135deg, #fc8181, #e53e3e)';
+      case 'failed': return 'linear-gradient(135deg, #d47070, #A32D2D)';
+      case 'error': return 'linear-gradient(135deg, #d47070, #A32D2D)';
+      case 'pending_review': return 'linear-gradient(135deg, #f6ad55, #dd6b20)';
       default: return 'linear-gradient(135deg, #cbd5e0, #a0aec0)';
     }
   }};
   color: white;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
   border: 2px solid rgba(255, 255, 255, 0.2);
-  min-width: 80px;
+  min-width: 100px;
   justify-content: center;
 `;
 const ActionButton = styled.button`
-  background: linear-gradient(135deg, #667eea, #764ba2);
+  background: linear-gradient(135deg, #185FA5, #185FA5);
   color: white;
   border: none;
   padding: 8px 16px;
@@ -361,7 +398,7 @@ const ErrorMessage = styled.div`
   border: 1px solid ${props => props.theme.colors.error}40;
 `;
 const SummaryButton = styled.button<{ $isGenerating?: boolean }>`
-  background: linear-gradient(135deg, #667eea, #764ba2);
+  background: linear-gradient(135deg, #185FA5, #185FA5);
   color: white;
   border: none;
   padding: 6px 12px;
@@ -386,15 +423,10 @@ const SummaryButton = styled.button<{ $isGenerating?: boolean }>`
     box-shadow: none;
   }
   ${props => props.$isGenerating && `
-    background: linear-gradient(45deg, #667eea, #764ba2, #667eea);
+    background: linear-gradient(45deg, #185FA5, #185FA5, #185FA5);
     background-size: 200% 200%;
-    animation: gradient 2s ease infinite;
+    animation: ${gradientKeyframes} 2s ease infinite;
   `}
-  @keyframes gradient {
-    0% { background-position: 0% 50%; }
-    50% { background-position: 100% 50%; }
-    100% { background-position: 0% 50%; }
-  }
 `;
 const SummaryCard = styled.div<{ isExpanded?: boolean }>`
   background: linear-gradient(135deg, rgba(102, 126, 234, 0.05), rgba(118, 75, 162, 0.05));
@@ -540,8 +572,10 @@ interface ExecutionRecord {
 const ExecutionDashboard: React.FC = () => {
   const { theme } = useTheme();
   const navigate = useNavigate();
+  const { showToast, showSuccess, showError, showWarning, showInfo } = useToast();
   const [stats, setStats] = useState<ExecutionStats | null>(null);
   const [executions, setExecutions] = useState<ExecutionRecord[]>([]);
+  const [currentPage, setCurrentPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   
@@ -554,10 +588,17 @@ const ExecutionDashboard: React.FC = () => {
   const [bindingUsages, setBindingUsages] = useState<Record<string, any>>({});
   const [loadingBindings, setLoadingBindings] = useState<Set<string>>(new Set());
   const [expandedBindings, setExpandedBindings] = useState<Set<string>>(new Set());
+  const executionsPerPage = 10;
+  const totalPages = Math.max(1, Math.ceil(executions.length / executionsPerPage));
+  const pageStartIndex = (currentPage - 1) * executionsPerPage;
+  const pageEndIndex = pageStartIndex + executionsPerPage;
+  const paginatedExecutions = executions.slice(pageStartIndex, pageEndIndex);
   const fetchDashboardData = async () => {
     try {
       setLoading(true);
       setError(null);
+      
+      showInfo('Loading Data', 'Fetching execution dashboard data...');
       
       console.log('🐛 Starting dashboard data fetch...');
       
@@ -608,9 +649,13 @@ const ExecutionDashboard: React.FC = () => {
       console.log('🐛 Final mapped executions:', realExecutions);
       setExecutions(realExecutions);
       
+      showSuccess('Data Loaded', `Successfully loaded ${realExecutions.length} execution records`);
+      
     } catch (err) {
       console.error('Dashboard fetch error:', err);
-      setError('Failed to load execution data. Please check your connection and try again.');
+      const errorMessage = 'Failed to load execution data. Please check your connection and try again.';
+      setError(errorMessage);
+      showError('Data Loading Failed', errorMessage);
     } finally {
       setLoading(false);
     }
@@ -618,6 +663,17 @@ const ExecutionDashboard: React.FC = () => {
   useEffect(() => {
     fetchDashboardData();
   }, []);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [executions.length]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
   const formatDuration = (seconds?: number) => {
     if (!seconds) return 'N/A';
     if (seconds < 60) return `${seconds}s`;
@@ -633,26 +689,59 @@ const ExecutionDashboard: React.FC = () => {
     }
   };
   const handleExecutionClick = (executionId: string) => {
-    navigate(`/execution/${executionId}`);
+    navigate(`/app/execution/${executionId}`);
   };
   // M7: LLM Summary Functions
   const generateSummary = async (executionId: string, style: "brief" | "detailed" = "brief") => {
     if (generatingSummaries.has(executionId)) return;
     setGeneratingSummaries(prev => new Set(prev).add(executionId));
     
+    showInfo('Generating Summary', 'Creating AI-powered execution summary...');
+    
     try {
-      // For now, just show a placeholder since the method doesn't exist in the authenticated API
+      const data = await executionApiService.getExecutionSummaryData(executionId);
+      const exec = data.execution || {};
+      const stepsSummary = data.summary || {};
+      const steps = data.steps || [];
+
+      const totalSteps = stepsSummary.total_steps || steps.length || 0;
+      const passedSteps = stepsSummary.passed_steps || 0;
+      const failedSteps = stepsSummary.failed_steps || 0;
+      const healedSteps = stepsSummary.healed_steps || 0;
+      const duration = stepsSummary.duration_seconds || 0;
+      const successRate = totalSteps > 0 ? Math.round((passedSteps / totalSteps) * 100) : 0;
+
+      const statusLabel = exec.status || 'unknown';
+      let summaryText = `Execution ${statusLabel}. ${totalSteps} steps: ${passedSteps} passed, ${failedSteps} failed`;
+      if (healedSteps > 0) summaryText += `, ${healedSteps} healed`;
+      summaryText += `. Duration: ${duration}s. Success rate: ${successRate}%.`;
+
+      const insights: Array<{ type: string; message: string; severity: string }> = [];
+      if (failedSteps > 0) {
+        const failedActions = steps.filter((s: any) => s.status === 'failed').map((s: any) => s.action).join(', ');
+        insights.push({ type: 'failure', message: `Failed actions: ${failedActions || 'unknown'}`, severity: 'high' });
+      }
+      if (healedSteps > 0) {
+        insights.push({ type: 'healing', message: `${healedSteps} step(s) were auto-healed during execution`, severity: 'info' });
+      }
+      if (successRate === 100) {
+        insights.push({ type: 'success', message: 'All steps passed successfully', severity: 'info' });
+      }
+
+      const stepTimes = steps.map((_: any, i: number) => (duration / Math.max(totalSteps, 1)));
+      const avgStepTime = totalSteps > 0 ? Math.round((duration / totalSteps) * 100) / 100 : 0;
+
       const summary: ExecutionSummaryResponse = {
         execution_id: executionId,
-        summary_text: "Summary generation not yet implemented for authenticated API",
+        summary_text: summaryText,
         generated_at: new Date().toISOString(),
-        model_used: "placeholder",
-        key_insights: [],
-        recommendations: [],
+        model_used: "execution-data",
+        key_insights: insights,
+        recommendations: failedSteps > 0 ? ['Review failed steps and update selectors if needed'] : [],
         performance_metrics: {
-          avg_step_time: 0,
-          slowest_step: '',
-          fastest_step: ''
+          avg_step_time: avgStepTime,
+          slowest_step: steps.length > 0 ? steps[steps.length - 1]?.action || '' : '',
+          fastest_step: steps.length > 0 ? steps[0]?.action || '' : ''
         }
       };
       
@@ -664,9 +753,12 @@ const ExecutionDashboard: React.FC = () => {
       if (style === "detailed") {
         setExpandedSummaries(prev => new Set(prev).add(executionId));
       }
+      
+      showSuccess('Summary Generated', 'Execution summary created successfully');
     } catch (err) {
       console.error(err);
       setError('Failed to generate summary. Please try again.');
+      showError('Summary Failed', 'Could not generate execution summary');
     } finally {
       setGeneratingSummaries(prev => {
         const newSet = new Set(prev);
@@ -677,8 +769,8 @@ const ExecutionDashboard: React.FC = () => {
   };
   const loadCachedSummary = async (executionId: string) => {
     try {
-      // Placeholder - method doesn't exist in authenticated API yet
-      console.log('loadCachedSummary not implemented for', executionId);
+      if (summaries[executionId]) return;
+      await generateSummary(executionId, "brief");
     } catch (err) {
       // No cached summary available, that's okay
     }
@@ -737,6 +829,12 @@ const ExecutionDashboard: React.FC = () => {
   if (loading) {
     return (
       <DashboardContainer>
+        <Breadcrumb 
+          items={[
+            { label: 'Home', path: '/' },
+            { label: 'Execution Dashboard', path: '/execution' }
+          ]}
+        />
         <DashboardHeader>
           <DashboardTitle>
             <Activity size={32} />
@@ -753,6 +851,12 @@ const ExecutionDashboard: React.FC = () => {
   }
   return (
     <DashboardContainer theme={theme}>
+      <Breadcrumb 
+        items={[
+          { label: 'Home', path: '/' },
+          { label: 'Execution Dashboard', path: '/execution' }
+        ]}
+      />
       <DashboardHeader theme={theme}>
         <div>
           <DashboardTitle theme={theme}>
@@ -761,7 +865,13 @@ const ExecutionDashboard: React.FC = () => {
           </DashboardTitle>
           <MCPStatus compact={true} />
         </div>
-        <RefreshButton onClick={fetchDashboardData} disabled={loading}>
+        <RefreshButton 
+          onClick={() => {
+            showInfo('Refreshing', 'Loading latest execution data...');
+            fetchDashboardData();
+          }} 
+          disabled={loading}
+        >
           <RefreshCw size={16} />
           {loading ? 'Refreshing...' : 'Refresh'}
         </RefreshButton>
@@ -821,8 +931,31 @@ const ExecutionDashboard: React.FC = () => {
           <Activity size={20} />
           Execution History
         </ExecutionListHeader>
-        {executions.length === 0 ? (
-          <LoadingSpinner>No execution records found</LoadingSpinner>
+        {executions.length === 0 && !loading ? (
+          <div style={{ gridColumn: '1 / -1' }}>
+            <EmptyState
+              icon={Play}
+              title="No Tests Run Yet"
+              description="Get started by creating your first test. Use our Chrome extension to record elements or write a test manually."
+              primaryAction={{
+                label: 'Create Your First Test',
+                onClick: () => {
+                  navigate('/app/prompts');
+                  showInfo('Getting Started', 'Navigate to Prompts to create a new test');
+                }
+              }}
+              secondaryActions={[
+                {
+                  label: 'View Elements',
+                  onClick: () => navigate('/app/elements')
+                },
+                {
+                  label: 'Learn More',
+                  onClick: () => navigate('/app/chrome-extension')
+                }
+              ]}
+            />
+          </div>
         ) : loading ? (
           <ExecutionListSkeleton count={5} />
         ) : (
@@ -843,7 +976,7 @@ const ExecutionDashboard: React.FC = () => {
               <div>Status</div>
               <div>Actions</div>
             </ExecutionItem>
-            {executions.map((execution, index) => (
+            {paginatedExecutions.map((execution, index) => (
               <React.Fragment key={execution.execution_id}>
                 <ExecutionItem 
                   $clickable={true}
@@ -877,13 +1010,14 @@ const ExecutionDashboard: React.FC = () => {
                      ((execution.total_steps || 0) - (execution.steps_completed || 0))}
                   </MetricValue>
                   <div>
-                    <StatusBadge $status={execution.status}>
-                      {execution.status === 'completed' && <CheckCircle size={12} />}
-                      {execution.status === 'failed' && <XCircle size={12} />}
+                    <StatusBadge $status={execution.failed_steps && execution.failed_steps > 0 ? 'failed' : execution.status}>
+                      {(execution.status === 'completed' && (!execution.failed_steps || execution.failed_steps === 0)) && <CheckCircle size={12} />}
+                      {(execution.status === 'failed' || (execution.failed_steps && execution.failed_steps > 0)) && <XCircle size={12} />}
                       {execution.status === 'running' && <Clock size={12} />}
-                      {execution.status === 'completed' ? 'Passed' : 
-                       execution.status === 'failed' ? 'Failed' : 
-                       execution.status}
+                      {(execution.failed_steps && execution.failed_steps > 0) ? 'Failed' :
+                       (execution.status === 'completed' ? 'Passed' : 
+                        execution.status === 'failed' ? 'Failed' : 
+                        execution.status)}
                     </StatusBadge>
                   </div>
                   <div>
@@ -1009,6 +1143,30 @@ const ExecutionDashboard: React.FC = () => {
               </React.Fragment>
             ))}
           </>
+        )}
+        {!loading && executions.length > executionsPerPage && (
+          <PaginationBar>
+            <PaginationInfo>
+              Showing {pageStartIndex + 1}-{Math.min(pageEndIndex, executions.length)} of {executions.length} executions
+            </PaginationInfo>
+            <PaginationControls>
+              <PaginationButton
+                onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                disabled={currentPage === 1}
+              >
+                Previous
+              </PaginationButton>
+              <PaginationButton disabled>
+                Page {currentPage} of {totalPages}
+              </PaginationButton>
+              <PaginationButton
+                onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                disabled={currentPage === totalPages}
+              >
+                Next
+              </PaginationButton>
+            </PaginationControls>
+          </PaginationBar>
         )}
       </ExecutionList>
     </DashboardContainer>

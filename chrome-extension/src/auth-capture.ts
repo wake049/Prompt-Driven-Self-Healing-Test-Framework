@@ -9,7 +9,7 @@
 const TEST_FRAMEWORK_DOMAINS = [
   'localhost:8000',
   'localhost:3000', 
-  'testhelix.com',
+  'fluxtest.io',
   'testframework.local',
   // Add your actual test framework domain here
 ];

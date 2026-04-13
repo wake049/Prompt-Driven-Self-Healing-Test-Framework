@@ -86,7 +86,7 @@ export const DashboardSkeleton: React.FC = () => (
   <>
     <StatGridSkeleton />
     <div style={{ background: 'white', borderRadius: '16px', overflow: 'hidden', boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)' }}>
-      <div style={{ padding: '20px 32px', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', color: 'white' }}>
+      <div style={{ padding: '20px 32px', background: '#185FA5', color: 'white' }}>
         <SkeletonText width="200px" height="24px" />
       </div>
       <ExecutionListSkeleton />

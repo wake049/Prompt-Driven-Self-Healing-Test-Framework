@@ -4,7 +4,7 @@ FROM eclipse-temurin:17-jdk-jammy
 # Create non-root user
 RUN groupadd -r javauser && useradd -r -g javauser javauser
 
-# Install Maven, Chrome, and dependencies for Selenium
+# Install Maven and dependencies for Selenium
 RUN apt-get update && apt-get upgrade -y && \
     apt-get install -y --no-install-recommends \
     maven \
@@ -14,6 +14,9 @@ RUN apt-get update && apt-get upgrade -y && \
     unzip \
     xvfb \
     netcat-openbsd \
+    libnss3 \
+    libgconf-2-4 \
+    libfontconfig1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Chrome
@@ -23,7 +26,18 @@ RUN wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | gpg --dearm
     && apt-get install -y --no-install-recommends google-chrome-stable \
     && rm -rf /var/lib/apt/lists/*
 
-# Install ChromeDriver (compatible version)
+# Install Firefox
+RUN apt-get update && apt-get install -y --no-install-recommends firefox \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Edge (Microsoft Edge for Linux)
+RUN curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /usr/share/keyrings/microsoft-edge.gpg \
+    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft-edge.gpg] https://packages.microsoft.com/repos/edge stable main" > /etc/apt/sources.list.d/microsoft-edge.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends microsoft-edge-stable \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install ChromeDriver, GeckoDriver (Firefox), and Edge Driver (WebDriverManager will handle this)
 RUN apt-get update && apt-get install -y chromium-chromedriver \
     && rm -rf /var/lib/apt/lists/*
 

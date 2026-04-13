@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import styled from 'styled-components';
+import { shimmerKeyframes } from '../styles/keyframes';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { 
@@ -25,10 +26,24 @@ import {
   Download,
   ExternalLink,
   Eye,
-  X
+  X,
+  Menu,
+  ChevronLeft,
+  Building2,
+  Package,
+  FileText,
+  List,
+  Play,
+  Zap,
+  Lock,
+  CheckCircle,
+  Database,
+  Monitor,
+  Key
 } from 'lucide-react';
-const SidebarContainer = styled.div`
-  width: 250px;
+import { config } from '../../app/config';
+const SidebarContainer = styled.div<{ $collapsed?: boolean }>`
+  width: ${props => props.$collapsed ? '60px' : '250px'};
   height: 100vh;
   background: #f8f9fa;
   border-right: 1px solid #e9ecef;
@@ -38,15 +53,18 @@ const SidebarContainer = styled.div`
   left: 0;
   top: 0;
   z-index: 1000;
+  transition: width 0.3s ease;
 `;
 
-const SidebarHeader = styled.div`
+const SidebarHeader = styled.div<{ $collapsed?: boolean }>`
   padding: 20px;
   border-bottom: 1px solid #e9ecef;
   background: #fff;
   display: flex;
   align-items: center;
+  justify-content: ${props => props.$collapsed ? 'center' : 'space-between'};
   gap: 12px;
+  position: relative;
 `;
 
 const SidebarIcon = styled.div`
@@ -54,18 +72,40 @@ const SidebarIcon = styled.div`
   color: #6c757d;
 `;
 
-const SidebarTitle = styled.h2`
+const SidebarTitle = styled.h2<{ $collapsed?: boolean }>`
   margin: 0;
   font-size: 18px;
   font-weight: 600;
   color: #212529;
+  opacity: ${props => props.$collapsed ? 0 : 1};
+  transition: opacity 0.2s ease;
+  white-space: nowrap;
+  overflow: hidden;
+`;
+
+const CollapseButton = styled.button`
+  background: transparent;
+  border: none;
+  color: #6c757d;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  
+  &:hover {
+    background: #f8f9fa;
+    color: #495057;
+  }
 `;
 
 const NavigationList = styled.div`
   padding: 20px 0;
   flex: 1;
 `;
-const NavItem = styled.div<{ $active?: boolean; $isSubmenu?: boolean; $themeColors?: any }>`
+const NavItem = styled.div<{ $active?: boolean; $isSubmenu?: boolean; $collapsed?: boolean; $themeColors?: any }>`
   display: flex;
   align-items: center;
   gap: 12px;
@@ -78,10 +118,18 @@ const NavItem = styled.div<{ $active?: boolean; $isSubmenu?: boolean; $themeColo
   font-weight: ${props => props.$active ? '600' : '500'};
   font-size: ${props => props.$isSubmenu ? '13px' : '14px'};
   transition: all 0.2s ease;
+  justify-content: ${props => props.$collapsed ? 'center' : 'flex-start'};
+  white-space: nowrap;
+  overflow: hidden;
 
   &:hover {
     background: ${props => props.$active ? '#f0f8ff' : '#f8f9fa'};
     color: ${props => props.$active ? '#0066cc' : '#495057'};
+  }
+  
+  span {
+    opacity: ${props => props.$collapsed ? 0 : 1};
+    transition: opacity 0.2s ease;
   }
 `;
 
@@ -124,7 +172,7 @@ const UserInfo = styled.div`
 const UserAvatar = styled.div`
   width: 32px;
   height: 32px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #185FA5;
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -156,6 +204,30 @@ const UserEmail = styled.div`
   text-overflow: ellipsis;
 `;
 
+const OrgInfo = styled.div`
+  padding: 8px 12px;
+  background: #f8f9fa;
+  border: 1px solid #e9ecef;
+  border-radius: 4px;
+  margin-bottom: 12px;
+  font-size: 11px;
+  color: #6c757d;
+  
+  strong {
+    display: block;
+    color: #495057;
+    font-size: 12px;
+    margin-bottom: 2px;
+  }
+  
+  code {
+    background: #e9ecef;
+    padding: 1px 4px;
+    border-radius: 2px;
+    font-size: 10px;
+  }
+`;
+
 const LogoutButton = styled.button`
   width: 100%;
   padding: 8px 12px;
@@ -177,7 +249,7 @@ const LogoutButton = styled.button`
 const ChromeExtensionPromo = styled.div`
   margin: 16px 20px;
   padding: 16px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #185FA5;
   border-radius: 12px;
   color: white;
   text-align: center;
@@ -192,12 +264,7 @@ const ChromeExtensionPromo = styled.div`
     width: 100%;
     height: 100%;
     background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
-    animation: shimmer 4s infinite;
-  }
-  
-  @keyframes shimmer {
-    0% { left: -100%; }
-    100% { left: 100%; }
+    animation: ${shimmerKeyframes} 4s infinite;
   }
 `;
 
@@ -271,15 +338,38 @@ const PromoCloseButton = styled.button`
 `;
 interface GlobalSidebarProps {
   className?: string;
+  onCollapseChange?: (collapsed: boolean) => void;
 }
 
-const GlobalSidebar: React.FC<GlobalSidebarProps> = ({ className }) => {
+const GlobalSidebar: React.FC<GlobalSidebarProps> = ({ className, onCollapseChange }) => {
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, logout } = useAuth();
+  const { user, tenant, logout } = useAuth();
   const { isDark, toggleTheme } = useTheme();
   const [analyticsExpanded, setAnalyticsExpanded] = useState(false);
+  const [executionExpanded, setExecutionExpanded] = useState(false);
+  const [promptsExpanded, setPromptsExpanded] = useState(false);
+  const [testSuitesExpanded, setTestSuitesExpanded] = useState(false);
+  const [policyExpanded, setPolicyExpanded] = useState(false);
   const [showChromeExtensionPromo, setShowChromeExtensionPromo] = useState(true);
+  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [licenseActive, setLicenseActive] = useState<boolean | null>(null);
+
+  // Fetch self-host license status for sidebar indicator
+  useEffect(() => {
+    const token = localStorage.getItem('auth_token');
+    if (!token) return;
+    fetch(`${config.apiBaseUrl}/api/v1/licensing/self-host/status`, {
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data && typeof data.license_active === 'boolean') {
+          setLicenseActive(data.license_active);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   // Check if Chrome extension is installed/connected
   useEffect(() => {
@@ -311,26 +401,49 @@ const GlobalSidebar: React.FC<GlobalSidebarProps> = ({ className }) => {
   }, []);
 
   const navigationItems = [
-    { path: '/', label: 'Execution Dashboard', icon: <Activity size={16} />, key: 'execution' },
+    { path: '/app/page-context', label: 'Page Context', icon: <Globe size={16} />, key: 'page-context' },
+    { path: '/app/elements', label: 'Elements', icon: <Box size={16} />, key: 'elements' },
     { 
-      path: '/analytics', 
+      path: '/app/prompts', 
+      label: 'Prompts & Tests', 
+      icon: <MessageSquare size={16} />, 
+      key: 'prompts',
+      hasSubmenu: true,
+      submenu: [
+        { path: '/app/prompts', label: 'All Prompts', icon: <List size={14} /> },
+        { path: '/app/test-suites', label: 'All Suites', icon: <Package size={14} /> },
+        { path: '/app/document-to-tests', label: 'Document to Tests', icon: <FileText size={14} /> },
+        { path: '/app/api-test-data', label: 'API Test Data', icon: <Database size={14} /> },
+        { path: '/app/', label: 'Execution Dashboard', icon: <Activity size={14} /> },
+      ]
+    },
+    { path: '/app/runners', label: 'Runners', icon: <Monitor size={16} />, key: 'runners' },
+    { path: '/app/review', label: 'Review Queue', icon: <ClipboardList size={16} />, key: 'review' },
+    { 
+      path: '/app/analytics', 
       label: 'Analytics & Insights', 
       icon: <TrendingUp size={16} />, 
       key: 'analytics',
       hasSubmenu: true,
       submenu: [
-        { path: '/analytics', label: 'Overview Dashboard', icon: <PieChart size={14} /> },
-        { path: '/analytics/trends', label: 'Trend Analysis', icon: <BarChart3 size={14} /> },
-        { path: '/analytics/ai-insights', label: 'AI Insights', icon: <Brain size={14} /> },
-        { path: '/analytics/healing-success', label: 'Healing Success', icon: <AlertTriangle size={14} /> }
+        { path: '/app/analytics', label: 'Overview Dashboard', icon: <PieChart size={14} /> },
+        { path: '/app/analytics/trends', label: 'Trend Analysis', icon: <BarChart3 size={14} /> },
+        { path: '/app/analytics/ai-insights', label: 'AI Insights', icon: <Brain size={14} /> },
+        { path: '/app/analytics/healing-success', label: 'Healing Success', icon: <AlertTriangle size={14} /> }
       ]
     },
-    { path: '/elements', label: 'Elements', icon: <Box size={16} />, key: 'elements' },
-    { path: '/review', label: 'Review Queue', icon: <ClipboardList size={16} />, key: 'review' },
-    { path: '/prompts', label: 'Prompts', icon: <MessageSquare size={16} />, key: 'prompts' },
-    { path: '/policy', label: 'Policy Dashboard', icon: <Shield size={16} />, key: 'dashboard' },
-    { path: '/policy-engine', label: 'Policy Engine', icon: <Settings size={16} />, key: 'policy-engine' },
-    { path: '/page-context', label: 'Page Context', icon: <Globe size={16} />, key: 'page-context' },
+    { 
+      path: '/app/policy', 
+      label: 'Policy & Rules', 
+      icon: <Shield size={16} />, 
+      key: 'policy',
+      hasSubmenu: true,
+      submenu: [
+        { path: '/app/policy', label: 'Policy Dashboard', icon: <Shield size={14} /> },
+        { path: '/app/policy-engine', label: 'Policy Engine', icon: <Settings size={14} /> },
+        { path: '/app/organization', label: 'Organization', icon: <Building2 size={14} /> },
+      ]
+    },
   ];
 
   const handleNavigation = (path: string) => {
@@ -338,8 +451,31 @@ const GlobalSidebar: React.FC<GlobalSidebarProps> = ({ className }) => {
   };
 
   const handleSubmenuToggle = (key: string) => {
-    if (key === 'analytics') {
+    if (key === 'execution') {
+      setExecutionExpanded(!executionExpanded);
+    } else if (key === 'analytics') {
       setAnalyticsExpanded(!analyticsExpanded);
+    } else if (key === 'prompts') {
+      setPromptsExpanded(!promptsExpanded);
+    } else if (key === 'test-suites') {
+      setTestSuitesExpanded(!testSuitesExpanded);
+    } else if (key === 'policy') {
+      setPolicyExpanded(!policyExpanded);
+    }
+  };
+  
+  const handleToggleCollapse = () => {
+    const newCollapsed = !isCollapsed;
+    setIsCollapsed(newCollapsed);
+    if (newCollapsed) {
+      setExecutionExpanded(false);
+      setAnalyticsExpanded(false);
+      setPromptsExpanded(false);
+      setTestSuitesExpanded(false);
+      setPolicyExpanded(false);
+    }
+    if (onCollapseChange) {
+      onCollapseChange(newCollapsed);
     }
   };
 
@@ -349,7 +485,7 @@ const GlobalSidebar: React.FC<GlobalSidebarProps> = ({ className }) => {
   };
 
   const handleGetChromeExtension = () => {
-    navigate('/chrome-extension');
+    navigate('/app/chrome-extension');
   };
 
   const handleDismissSidebarPromo = () => {
@@ -364,14 +500,42 @@ const GlobalSidebar: React.FC<GlobalSidebarProps> = ({ className }) => {
     return location.pathname === path;
   };
 
-  const isAnalyticsActive = () => {
-    return location.pathname.startsWith('/analytics');
+  const isExecutionActive = () => {
+    return location.pathname === '/app/' || location.pathname.startsWith('/app/execution');
   };
 
-  // Auto-expand analytics if on analytics page
+  const isAnalyticsActive = () => {
+    return location.pathname.startsWith('/app/analytics');
+  };
+
+  const isPromptsActive = () => {
+    return location.pathname.startsWith('/app/prompts');
+  };
+
+  const isTestSuitesActive = () => {
+    return location.pathname.startsWith('/app/test-suites');
+  };
+
+  const isPolicyActive = () => {
+    return location.pathname.startsWith('/app/policy') || location.pathname.startsWith('/app/organization');
+  };
+
+  // Auto-expand sections if on their pages
   React.useEffect(() => {
+    if (isExecutionActive()) {
+      setExecutionExpanded(true);
+    }
     if (isAnalyticsActive()) {
       setAnalyticsExpanded(true);
+    }
+    if (isPromptsActive()) {
+      setPromptsExpanded(true);
+    }
+    if (isTestSuitesActive()) {
+      setTestSuitesExpanded(true);
+    }
+    if (isPolicyActive()) {
+      setPolicyExpanded(true);
     }
   }, [location.pathname]);
 
@@ -385,61 +549,116 @@ const GlobalSidebar: React.FC<GlobalSidebarProps> = ({ className }) => {
   };
 
   return (
-    <SidebarContainer className={className}>
-      <SidebarHeader>
-        <SidebarIcon></SidebarIcon>
-        <SidebarTitle>Test Helix</SidebarTitle>
+    <SidebarContainer className={className} $collapsed={isCollapsed}>
+      <SidebarHeader $collapsed={isCollapsed}>
+        {!isCollapsed && (
+          <>
+            <SidebarIcon></SidebarIcon>
+            <SidebarTitle $collapsed={isCollapsed}>Test Helix</SidebarTitle>
+          </>
+        )}
+        <CollapseButton onClick={handleToggleCollapse} title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}>
+          {isCollapsed ? <Menu size={20} /> : <ChevronLeft size={20} />}
+        </CollapseButton>
       </SidebarHeader>
       
       <NavigationList>
-        {navigationItems.map((item) => (
+        {navigationItems.filter(item => {
+          // Filter admin-only items based on user role
+          if (item.adminOnly) {
+            return user && (user.role === 'owner' || user.role === 'admin');
+          }
+          return true;
+        }).map((item) => (
           <div key={item.key}>
             {item.hasSubmenu ? (
               <>
                 <NavItemWithSubmenu
-                  $active={isAnalyticsActive()}
-                  $expanded={analyticsExpanded}
-                  onClick={() => handleSubmenuToggle(item.key)}
+                  $active={(() => {
+                    if (item.key === 'execution') return isExecutionActive();
+                    if (item.key === 'analytics') return isAnalyticsActive();
+                    if (item.key === 'prompts') return isPromptsActive();
+                    if (item.key === 'test-suites') return isTestSuitesActive();
+                    if (item.key === 'policy') return isPolicyActive();
+                    return false;
+                  })()}
+                  $expanded={(() => {
+                    if (item.key === 'execution') return executionExpanded;
+                    if (item.key === 'analytics') return analyticsExpanded;
+                    if (item.key === 'prompts') return promptsExpanded;
+                    if (item.key === 'test-suites') return testSuitesExpanded;
+                    if (item.key === 'policy') return policyExpanded;
+                    return false;
+                  })()}
+                  $collapsed={isCollapsed}
+                  onClick={() => !isCollapsed && handleSubmenuToggle(item.key)}
                 >
                   <NavIcon>{item.icon}</NavIcon>
-                  {item.label}
-                  <ChevronDown 
-                    size={14} 
-                    className="chevron"
-                    style={{
-                      transform: analyticsExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',
-                      transition: 'transform 0.2s ease'
-                    }}
-                  />
+                  {!isCollapsed && <span>{item.label}</span>}
+                  {!isCollapsed && (
+                    <ChevronDown 
+                      size={14} 
+                      className="chevron"
+                      style={{
+                        transform: (() => {
+                          if (item.key === 'execution') return executionExpanded ? 'rotate(0deg)' : 'rotate(-90deg)';
+                          if (item.key === 'analytics') return analyticsExpanded ? 'rotate(0deg)' : 'rotate(-90deg)';
+                          if (item.key === 'prompts') return promptsExpanded ? 'rotate(0deg)' : 'rotate(-90deg)';
+                          if (item.key === 'test-suites') return testSuitesExpanded ? 'rotate(0deg)' : 'rotate(-90deg)';
+                          if (item.key === 'policy') return policyExpanded ? 'rotate(0deg)' : 'rotate(-90deg)';
+                          return 'rotate(-90deg)';
+                        })(),
+                        transition: 'transform 0.2s ease'
+                      }}
+                    />
+                  )}
                 </NavItemWithSubmenu>
-                <SubmenuContainer $expanded={analyticsExpanded}>
-                  {item.submenu?.map((subItem) => (
-                    <NavItem
-                      key={subItem.path}
-                      $active={isActive(subItem.path)}
-                      $isSubmenu={true}
-                      onClick={() => handleNavigation(subItem.path)}
-                    >
-                      <NavIcon>{subItem.icon}</NavIcon>
-                      {subItem.label}
-                    </NavItem>
-                  ))}
-                </SubmenuContainer>
+                {!isCollapsed && (
+                  <SubmenuContainer $expanded={(() => {
+                    if (item.key === 'execution') return executionExpanded;
+                    if (item.key === 'analytics') return analyticsExpanded;
+                    if (item.key === 'prompts') return promptsExpanded;
+                    if (item.key === 'test-suites') return testSuitesExpanded;
+                    if (item.key === 'policy') return policyExpanded;
+                    return false;
+                  })()}>
+                    {item.submenu?.filter(subItem => {
+                      // Filter admin-only submenu items based on user role
+                      if (subItem.adminOnly) {
+                        return user && (user.role === 'owner' || user.role === 'admin');
+                      }
+                      return true;
+                    }).map((subItem) => (
+                      <NavItem
+                        key={subItem.path}
+                        $active={isActive(subItem.path)}
+                        $isSubmenu={true}
+                        $collapsed={isCollapsed}
+                        onClick={() => handleNavigation(subItem.path)}
+                      >
+                        <NavIcon>{subItem.icon}</NavIcon>
+                        <span>{subItem.label}</span>
+                      </NavItem>
+                    ))}
+                  </SubmenuContainer>
+                )}
               </>
             ) : (
               <NavItem
                 $active={isActive(item.path)}
+                $collapsed={isCollapsed}
                 onClick={() => handleNavigation(item.path)}
+                title={isCollapsed ? item.label : undefined}
               >
                 <NavIcon>{item.icon}</NavIcon>
-                {item.label}
+                {!isCollapsed && <span>{item.label}</span>}
               </NavItem>
             )}
           </div>
         ))}
       </NavigationList>
       
-      {showChromeExtensionPromo && (
+      {showChromeExtensionPromo && !isCollapsed && (
         <ChromeExtensionPromo>
           <PromoCloseButton onClick={handleDismissSidebarPromo} title="Dismiss">
             <X size={10} />
@@ -458,8 +677,31 @@ const GlobalSidebar: React.FC<GlobalSidebarProps> = ({ className }) => {
         </ChromeExtensionPromo>
       )}
       
-      {user && (
+      {user && !isCollapsed && (
         <UserSection>
+          {tenant && (
+            <OrgInfo>
+              <strong>{tenant.name}</strong>
+              <div>fluxtest.io/<code>{tenant.slug}</code></div>
+            </OrgInfo>
+          )}
+          {licenseActive !== null && (
+            <div
+              style={{
+                display: 'flex', alignItems: 'center', gap: '6px',
+                padding: '6px 10px', margin: '0 0 8px 0',
+                borderRadius: '6px', fontSize: '11px', fontWeight: 600,
+                background: licenseActive ? '#d4edda' : '#f8f9fa',
+                color: licenseActive ? '#155724' : '#6c757d',
+                cursor: 'pointer',
+              }}
+              onClick={() => navigate('/app/organization')}
+              title="Manage self-host license"
+            >
+              <Key size={12} />
+              {licenseActive ? 'Self-Host License Active' : 'No Active License'}
+            </div>
+          )}
           <UserInfo>
             <UserAvatar>
               {getInitials(user.full_name)}
@@ -472,6 +714,13 @@ const GlobalSidebar: React.FC<GlobalSidebarProps> = ({ className }) => {
           <LogoutButton onClick={handleLogout}>
             🚪 Sign Out
           </LogoutButton>
+        </UserSection>
+      )}
+      {user && isCollapsed && (
+        <UserSection>
+          <UserAvatar onClick={handleToggleCollapse} style={{ cursor: 'pointer', margin: '0 auto' }} title={user.full_name}>
+            {getInitials(user.full_name)}
+          </UserAvatar>
         </UserSection>
       )}
     </SidebarContainer>

@@ -5,7 +5,6 @@ import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.entity.StringEntity;
 import org.apache.http.impl.client.CloseableHttpClient;
-import org.apache.http.impl.client.HttpClients;
 
 import java.io.IOException;
 import java.util.Arrays;
@@ -16,7 +15,7 @@ import java.util.Map;
 public class SqlBackendSeeder {
     private static final String SQL_BACKEND_URL = System.getenv("UNIFIED_API_URL") != null ? 
         System.getenv("UNIFIED_API_URL") : 
-        "https://testhelix.com";
+        "https://fluxtest.io";
     private static final ObjectMapper objectMapper = new ObjectMapper();
 
     public static void main(String[] args) {
@@ -195,7 +194,7 @@ public class SqlBackendSeeder {
     }
 
     private String makePostRequest(String endpoint, Object data) throws IOException {
-        try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
+        try (CloseableHttpClient httpClient = HttpClientFactory.create()) {
             HttpPost httpPost = new HttpPost(SQL_BACKEND_URL + endpoint);
             httpPost.setHeader("Content-Type", "application/json");
             

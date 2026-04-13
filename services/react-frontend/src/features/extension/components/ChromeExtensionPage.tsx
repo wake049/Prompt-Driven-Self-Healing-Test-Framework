@@ -83,7 +83,7 @@ const HeroIcon = styled.div`
   justify-content: center;
   width: 80px;
   height: 80px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #185FA5;
   border-radius: 20px;
   margin-bottom: 24px;
   box-shadow: 0 8px 32px rgba(102, 126, 234, 0.3);
@@ -115,7 +115,7 @@ const ActionButtons = styled.div`
 `;
 
 const PrimaryButton = styled.button`
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #185FA5;
   color: white;
   border: none;
   padding: 16px 32px;
@@ -208,7 +208,7 @@ const FeatureIcon = styled.div<{ $color?: string }>`
   justify-content: center;
   width: 48px;
   height: 48px;
-  background: ${props => props.$color || 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'};
+  background: ${props => props.$color || '#185FA5'};
   border-radius: 12px;
   margin-bottom: 16px;
   color: white;
@@ -248,7 +248,7 @@ const StepNumber = styled.div`
   left: 20px;
   width: 24px;
   height: 24px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #185FA5;
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -299,7 +299,7 @@ const StatusBadge = styled.div<{ $status: 'available' | 'installed' | 'connected
       default:
         return `
           background: rgba(102, 126, 234, 0.1);
-          color: #667eea;
+          color: #185FA5;
           border: 1px solid rgba(102, 126, 234, 0.3);
         `;
     }
@@ -359,7 +359,7 @@ const ChromeExtensionPage: React.FC<ChromeExtensionPageProps> = ({ className }) 
   };
 
   const handleViewDocs = () => {
-    window.open('https://github.com/wake049/capstone-self-healing/blob/main/chrome-extension/README.md', '_blank');
+    navigate('/docs');
   };
 
   const getStatusText = () => {
@@ -379,7 +379,7 @@ const ChromeExtensionPage: React.FC<ChromeExtensionPageProps> = ({ className }) 
         <MainContent>
           <Header>
             <Breadcrumb>
-              <BreadcrumbLink onClick={() => navigate('/')}>
+              <BreadcrumbLink onClick={() => navigate('/app')}>
                 <ArrowLeft size={16} />
                 Dashboard
               </BreadcrumbLink>
@@ -430,7 +430,7 @@ const ChromeExtensionPage: React.FC<ChromeExtensionPageProps> = ({ className }) 
               
               <FeatureGrid>
                 <FeatureCard>
-                  <FeatureIcon $color="linear-gradient(135deg, #10b981, #059669)">
+                  <FeatureIcon $color="linear-gradient(135deg, #1D9E75, #0F6E56)">
                     <MousePointer size={24} />
                   </FeatureIcon>
                   <FeatureTitle>One-Click Element Recording</FeatureTitle>
@@ -463,7 +463,7 @@ const ChromeExtensionPage: React.FC<ChromeExtensionPageProps> = ({ className }) 
                 </FeatureCard>
                 
                 <FeatureCard>
-                  <FeatureIcon $color="linear-gradient(135deg, #ef4444, #dc2626)">
+                  <FeatureIcon $color="linear-gradient(135deg, #A32D2D, #8a2222)">
                     <Database size={24} />
                   </FeatureIcon>
                   <FeatureTitle>Automatic Sync</FeatureTitle>
