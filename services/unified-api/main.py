@@ -25,8 +25,12 @@ import time
 # Performance monitoring
 from performance_profiler import get_global_profiler, track_performance
 
-# Load environment variables from .env file
-load_dotenv()
+# Load environment variables from repo-root .env first, then fallback to cwd.
+# override=True prevents empty inherited env vars from masking root .env values.
+REPO_ROOT = Path(__file__).resolve().parents[2]
+load_dotenv(REPO_ROOT / ".env", override=True)
+# Fallback load from current working directory without overriding existing values.
+load_dotenv(override=False)
 
 # Import all API modules
 from api.policy_engine import router as policy_router
