@@ -195,6 +195,11 @@ const PromptTitle = styled.div`
   font-size: 15px;
   margin-bottom: 4px;
 `;
+const TraceabilityText = styled.div`
+  color: ${props => props.theme.colors.textSecondary};
+  font-size: 12px;
+  margin-top: 6px;
+`;
 const PromptDescription = styled.div`
   color: ${props => props.theme.colors.textSecondary};
   line-height: 1.5;
@@ -451,6 +456,17 @@ const getTagColor = (tag: string): string => {
   const hash = tag.split('').reduce((a, b) => a + b.charCodeAt(0), 0);
   return colors[hash % colors.length];
 };
+
+const extractSourceSectionFromTags = (tags: string[] = []): string | undefined => {
+  const sourceSectionTag = tags.find(tag => tag.toLowerCase().startsWith('source_section:'));
+  if (!sourceSectionTag) {
+    return undefined;
+  }
+
+  const sourceSection = sourceSectionTag.substring('source_section:'.length).trim();
+  return sourceSection.length > 0 ? sourceSection : undefined;
+};
+
 interface PromptData {
   id: string; // Changed from number to string to match API UUID
   title: string;
@@ -464,6 +480,7 @@ interface PromptData {
   content?: string;
   category?: string;
   usage_count?: number;
+  source_section?: string;
 }
 export const PromptsTable: React.FC = () => {
   const navigate = useNavigate();
@@ -486,6 +503,7 @@ export const PromptsTable: React.FC = () => {
   const filteredPrompts = prompts.filter(prompt =>
     prompt.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
     prompt.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (prompt.source_section || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
     prompt.tags.some(tag => tag.name.toLowerCase().includes(searchTerm.toLowerCase()))
   );
   const promptsPerPage = 20;
@@ -515,7 +533,8 @@ export const PromptsTable: React.FC = () => {
         dateModified: apiPrompt.dateModified || apiPrompt.updated_at || apiPrompt.created_at || '',
         content: apiPrompt.content || '',
         category: apiPrompt.category,
-        usage_count: apiPrompt.usage_count
+        usage_count: apiPrompt.usage_count,
+        source_section: extractSourceSectionFromTags(apiPrompt.tags || [])
       }));
       console.log('🔍 Mapped prompts:', mappedPrompts);
       setPrompts(mappedPrompts);
@@ -560,7 +579,8 @@ export const PromptsTable: React.FC = () => {
         dateModified: createdPrompt.created_at,
         content: createdPrompt.content,
         category: createdPrompt.category,
-        usage_count: createdPrompt.usage_count || 0
+        usage_count: createdPrompt.usage_count || 0,
+        source_section: extractSourceSectionFromTags(createdPrompt.tags || [])
       };
       // Add the new prompt to the beginning of the list
       setPrompts(prevPrompts => [localPrompt, ...prevPrompts]);
@@ -719,6 +739,11 @@ export const PromptsTable: React.FC = () => {
                       <Tag color="#1D9E75" style={{ marginTop: '8px' }}>
                         {prompt.category}
                       </Tag>
+                    )}
+                    {prompt.source_section && (
+                      <TraceabilityText>
+                        Generated from: {prompt.source_section}
+                      </TraceabilityText>
                     )}
                   </TableCell>
                   <TableCell>

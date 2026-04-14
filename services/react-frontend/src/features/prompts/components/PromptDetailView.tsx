@@ -603,6 +603,13 @@ interface PromptData {
   updated_at?: string;
 }
 
+const extractSourceSectionFromTags = (tags: string[] = []): string | null => {
+  const tag = tags.find((t) => t.startsWith('source_section:'));
+  if (!tag) return null;
+  const value = tag.replace('source_section:', '').trim();
+  return value || null;
+};
+
 // Step editing components  
 const StepEditForm: React.FC<{
   step: any;
@@ -4012,6 +4019,21 @@ export const PromptDetailView: React.FC = () => {
                 )}
 
                 <div style={detailStyles.tagsSection}>
+                  {extractSourceSectionFromTags(prompt.tags) && (
+                    <div
+                      style={{
+                        marginBottom: 12,
+                        padding: '10px 12px',
+                        borderRadius: 8,
+                        border: `1px solid ${theme.colors.border}`,
+                        backgroundColor: theme.colors.surface,
+                        fontSize: 13,
+                        color: theme.colors.text,
+                      }}
+                    >
+                      <strong>Generated from:</strong> {extractSourceSectionFromTags(prompt.tags)}
+                    </div>
+                  )}
                   <h2 style={{...detailStyles.sectionTitle, color: theme.colors.text}}>Tags</h2>
                   <div>
                     {prompt.tags.map((tag, index) => (

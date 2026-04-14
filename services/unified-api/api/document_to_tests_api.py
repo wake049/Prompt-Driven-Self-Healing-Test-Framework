@@ -37,6 +37,55 @@ logger = logging.getLogger("document_to_tests_api")
 router = APIRouter()
 
 
+def _build_ac_description_map(acceptance_criteria: List[Dict[str, Any]]) -> Dict[str, str]:
+    """Build AC id -> description map for traceability enrichment."""
+    ac_map: Dict[str, str] = {}
+    for ac in acceptance_criteria or []:
+        ac_id = str(ac.get("id") or "").strip()
+        ac_desc = str(ac.get("description") or "").strip()
+        if ac_id and ac_desc:
+            ac_map[ac_id] = ac_desc
+    return ac_map
+
+
+def _format_source_section(ac_id: str, ac_desc: str) -> str:
+    """Format a human-readable source section label."""
+    short_desc = ac_desc.strip()
+    if len(short_desc) > 160:
+        short_desc = short_desc[:157].rstrip() + "..."
+    return f"{ac_id} - {short_desc}" if short_desc else ac_id
+
+
+def _enrich_scenarios_with_traceability(result: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Ensure each scenario has a `source_section` value.
+    Preference order:
+    1) existing scenario.source_section
+    2) map first covers_ac entry to AC description
+    """
+    scenarios = result.get("scenarios") or []
+    if not isinstance(scenarios, list):
+        return result
+
+    ac_map = _build_ac_description_map(result.get("acceptance_criteria") or [])
+    for scenario in scenarios:
+        if not isinstance(scenario, dict):
+            continue
+
+        existing = str(scenario.get("source_section") or "").strip()
+        if existing:
+            continue
+
+        covers_ac = scenario.get("covers_ac") or []
+        if isinstance(covers_ac, list) and covers_ac:
+            primary_ac = str(covers_ac[0]).strip()
+            if primary_ac:
+                scenario["source_section"] = _format_source_section(primary_ac, ac_map.get(primary_ac, ""))
+
+    result["scenarios"] = scenarios
+    return result
+
+
 class PlaceholderMappingModel(BaseModel):
     """Placeholder mapping from client-side anonymization"""
     placeholder: str
@@ -668,6 +717,7 @@ async def _generate_scenarios_via_ai(
         
         # Parse the AI response
         result = TestScenarioGenerator.parse_ai_response(response)
+        result = _enrich_scenarios_with_traceability(result)
         
         logger.info(f"✅ AI generated {len(result.get('scenarios', []))} test scenarios")
         
@@ -722,6 +772,7 @@ async def _refine_scenarios_via_ai(
         
         # Parse the AI response
         result = TestScenarioGenerator.parse_ai_response(response)
+        result = _enrich_scenarios_with_traceability(result)
         
         logger.info(f"✅ AI refined scenarios: {len(result.get('scenarios', []))} total")
         

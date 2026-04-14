@@ -631,6 +631,7 @@ interface TestScenario {
   id: string;
   title: string;
   description: string;
+  source_section?: string;
   steps: string[];
   preconditions?: string[];
   expected_result?: string;
@@ -1331,6 +1332,22 @@ export function DocumentToTestsPage() {
                     <ScenarioDescription $isDark={isDark}>
                       {scenario.description}
                     </ScenarioDescription>
+                    {scenario.source_section && (
+                      <ScenarioDescription
+                        $isDark={isDark}
+                        style={{
+                          marginTop: -4,
+                          marginBottom: 10,
+                          padding: '6px 10px',
+                          borderRadius: 6,
+                          background: isDark ? 'rgba(24, 95, 165, 0.18)' : 'rgba(24, 95, 165, 0.08)',
+                          color: isDark ? '#cfe3ff' : '#185FA5',
+                          fontStyle: 'normal'
+                        }}
+                      >
+                        <strong>Generated from:</strong> {scenario.source_section}
+                      </ScenarioDescription>
+                    )}
                     {scenario.expected_result && (
                       <ScenarioDescription $isDark={isDark} style={{ fontStyle: 'italic' }}>
                         <strong>Expected:</strong> {scenario.expected_result}

@@ -699,6 +699,7 @@ Do NOT generate API-specific test scenarios.
         
         for i, scenario in enumerate(scenarios):
             title = scenario.get('title', f'Test Scenario {i+1}')
+            source_section = (scenario.get('source_section') or '').strip()
             # Support both 'intent' (old format) and 'description' (new format)
             description = scenario.get('description') or scenario.get('intent', '')
             
@@ -722,6 +723,9 @@ Do NOT generate API-specific test scenarios.
             
             # Build the prompt text
             text_parts = [title, '', description]
+
+            if source_section:
+                text_parts.extend(['', f'Generated from: {source_section}'])
             
             if preconditions:
                 text_parts.extend(['', 'Preconditions:'])
@@ -738,6 +742,19 @@ Do NOT generate API-specific test scenarios.
             # Add source document as a tag
             if document_name and f"doc:{document_name[:30]}" not in tags:
                 tags.append(f"doc:{document_name[:30]}")
+
+            if source_section:
+                source_tag = f"source_section:{source_section[:80]}"
+                if source_tag not in tags:
+                    tags.append(source_tag)
+
+            covers_ac = scenario.get('covers_ac') or []
+            if covers_ac:
+                primary_ac = str(covers_ac[0]).strip()
+                if primary_ac:
+                    ac_tag = f"source_ac:{primary_ac[:40]}"
+                    if ac_tag not in tags:
+                        tags.append(ac_tag)
             
             prompt = {
                 "title": title,
@@ -751,6 +768,7 @@ Do NOT generate API-specific test scenarios.
                 "status": "draft",
                 "source": "document_generation",
                 "source_document": document_name,
+                "source_section": source_section,
                 "scenario_type": scenario_type
             }
             prompts.append(prompt)
