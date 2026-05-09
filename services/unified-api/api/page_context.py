@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
 import json
+import os
 import logging
 
 from core.auth import get_current_active_user
@@ -47,7 +48,7 @@ async def get_page_context_repository():
 
 @router.post("/upload", response_model=Dict[str, Any])
 async def upload_page_context(
-    page_url: str = Form(...),
+    page_url: Optional[str] = Form(None),
     page_title: str = Form(...),
     page_type: str = Form(...),
     page_description: str = Form(...),
@@ -56,7 +57,8 @@ async def upload_page_context(
     user_notes: Optional[str] = Form(None),
     created_by: Optional[str] = Form(None),
     screenshot: Optional[UploadFile] = File(None),
-    repository: PageContextRepository = Depends(get_page_context_repository)
+    repository: PageContextRepository = Depends(get_page_context_repository),
+    current_user: CurrentUser = Depends(get_current_active_user),
 ):
     """
     Upload a new page context with optional screenshot
@@ -88,7 +90,8 @@ async def upload_page_context(
             'screenshot_url': screenshot_url,
             'screenshot_filename': screenshot_filename,
             'user_uploaded': True,
-            'created_by': created_by
+            'created_by': created_by,
+            'project_id': str(current_user.project.id) if current_user.project else None,
         }
         
         # Save to database
@@ -583,3 +586,341 @@ async def get_context_examples():
             }
         ]
     }
+
+
+# ---------------------------------------------------------------------------
+# Internal helper: call the AI enrichment endpoint logic directly
+# ---------------------------------------------------------------------------
+async def _enrich_elements_internal(elements: list, page_id: str, config_type: str, context_id: str) -> dict:
+    """Call AI enrichment logic directly (no HTTP round-trip)."""
+    from api.ai_service import enrich_elements_core
+
+    page_info = {
+        "page_id": page_id,
+        "config_type": config_type,
+        "context_id": context_id,
+    }
+    data = await enrich_elements_core(elements, page_info)
+    return {
+        "enriched_elements": data.get("elements", []),
+        "ai_processed": data.get("ai_processed", False),
+    }
+
+
+def _score_weighted_selector_choice(selectors: dict, selector_scores: dict, config_type: str) -> tuple[dict, list]:
+    """Return (primary_selector, fallback_selectors) using score-driven ranking."""
+    selector_candidates = []
+
+    if not selectors:
+        return {}, []
+
+    for key in ("accessibility_id", "id", "name", "improved_xpath", "xpath", "class_name"):
+        value = selectors.get(key)
+        if value is None:
+            continue
+        value_str = str(value).strip()
+        if not value_str or value_str.lower() == "null":
+            continue
+
+        score_key = "xpath" if key == "improved_xpath" else key
+        base_score = float((selector_scores or {}).get(score_key, 0.45))
+
+        # Mild policy weighting by platform/type, but confidence remains primary driver.
+        if config_type and "android" in config_type:
+            if key == "accessibility_id":
+                base_score += 0.05
+            elif key == "id":
+                base_score += 0.03
+        elif config_type and "ios" in config_type:
+            if key == "accessibility_id":
+                base_score += 0.06
+            elif key == "id":
+                base_score += 0.01
+        elif config_type and "web" in config_type:
+            if key == "id":
+                base_score += 0.03
+            elif key in ("xpath", "improved_xpath"):
+                base_score -= 0.02
+
+        selector_candidates.append((round(base_score, 4), key, value_str))
+
+    if not selector_candidates:
+        return {}, []
+
+    selector_candidates.sort(key=lambda x: x[0], reverse=True)
+    _, best_key, best_value = selector_candidates[0]
+
+    primary = {best_key: best_value}
+    fallbacks = [{k: v} for _, k, v in selector_candidates[1:]]
+    return primary, fallbacks
+
+
+# ---------------------------------------------------------------------------
+# Gather Mobile Elements — scan the current screen via Appium and store
+# elements against this page context's page_id.
+# ---------------------------------------------------------------------------
+
+class GatherElementsRequest(BaseModel):
+    appium_config_id: str
+
+@router.post("/{context_id}/gather-elements")
+async def gather_mobile_elements(
+    context_id: str,
+    body: GatherElementsRequest,
+    current_user: CurrentUser = Depends(get_current_active_user),
+):
+    """
+    Gather mobile elements via Appium for a specific page context.
+    The elements are stored in repo.elements linked to the page context's page_id.
+    """
+    import httpx
+
+    db = await get_database()
+
+    # 1. Look up the page context to get its page_id
+    ctx_row = await db.fetchrow(
+        "SELECT id, page_id FROM repo.page_contexts WHERE id = $1::uuid",
+        context_id,
+    )
+    if not ctx_row:
+        raise HTTPException(404, "Page context not found")
+    page_id = ctx_row["page_id"]
+
+    # 2. Resolve the Appium config
+    config_row = await db.fetchrow(
+        "SELECT * FROM exec.appium_configs WHERE id = $1::uuid",
+        body.appium_config_id,
+    )
+    if not config_row:
+        raise HTTPException(404, "Appium config not found")
+    config = dict(config_row)
+
+    BUILTIN_ORG_ID = "00000000-0000-0000-0000-000000000000"
+    org = str(config["organization_id"])
+    user_org = str(current_user.tenant.id) if current_user.tenant else None
+    if org != BUILTIN_ORG_ID and org != user_org:
+        raise HTTPException(403, "Access denied to Appium config")
+
+    CONFIG_TO_BROWSER = {
+        "android-web": "appium-android-web",
+        "ios-web": "appium-ios-web",
+        "android-native": "appium-android-native",
+        "ios-native": "appium-ios-native",
+        "flutter": "appium-flutter",
+        "windows": "appium-windows",
+        "mac": "appium-mac",
+    }
+    config_type = config["config_type"]
+    browser_type = CONFIG_TO_BROWSER.get(config_type)
+    if not browser_type:
+        raise HTTPException(400, f"Unsupported config_type: {config_type}")
+
+    appium_config: Dict[str, Any] = {
+        "appium_server_url": config.get("appium_server_url") or "http://localhost:4723",
+        "platform_name": config.get("platform_name") or "",
+        "platform_version": config.get("platform_version") or "",
+        "device_name": config.get("device_name") or "",
+        "automation_name": config.get("automation_name") or "",
+        "app_path": config.get("app_path") or "",
+        "app_package": config.get("app_package") or "",
+        "app_activity": config.get("app_activity") or "",
+        "bundle_id": config.get("bundle_id") or "",
+        "browser_name": config.get("browser_name") or "",
+        "no_reset": True,
+    }
+    extras = config.get("extra_capabilities")
+    if extras:
+        if isinstance(extras, str):
+            extras = json.loads(extras)
+        if isinstance(extras, dict):
+            appium_config["extra_capabilities"] = extras
+    if config.get("cloud_provider"):
+        appium_config["cloud_provider"] = config["cloud_provider"]
+        appium_config["cloud_username"] = config.get("cloud_username") or ""
+        appium_config["cloud_access_key"] = config.get("cloud_access_key") or ""
+
+    # 3. Call the Java runner — prefer WebSocket, fallback to HTTP
+    from api.runner_ws import runner_registry
+
+    runner_timeout = float(os.getenv("RUNNER_TIMEOUT", "600"))
+    payload = {"browserType": browser_type, "appiumConfig": appium_config}
+
+    # Try WebSocket-connected runner first
+    ws_runner = runner_registry.find_by_org(
+        str(current_user.tenant.id) if current_user.tenant else "",
+        capability=browser_type,
+    )
+
+    if ws_runner:
+        logger.info("Gather-elements (WebSocket) → runner=%s  context=%s config=%s",
+                     ws_runner.runner_id, context_id, body.appium_config_id)
+        try:
+            runner_result = await ws_runner.send_command(
+                "gather-elements", payload, timeout=runner_timeout,
+            )
+        except TimeoutError:
+            raise HTTPException(504, f"Runner timed out via WebSocket ({runner_timeout}s limit)")
+        except RuntimeError as e:
+            raise HTTPException(502, f"Runner error: {e}")
+        except Exception as e:
+            raise HTTPException(502, f"Runner WebSocket error: {e}")
+    else:
+        # Fallback to HTTP (runner not connected via WS)
+        java_runner_url = os.getenv("JAVA_RUNNER_URL", "http://localhost:8080")
+        target = f"{java_runner_url}/api/v1/gather-elements"
+        logger.info("Gather-elements (HTTP fallback) → %s  context=%s config=%s  timeout=%ss",
+                     target, context_id, body.appium_config_id, runner_timeout)
+        try:
+            async with httpx.AsyncClient(timeout=runner_timeout) as client:
+                resp = await client.post(target, json=payload)
+                runner_result = resp.json()
+        except httpx.ConnectError:
+            raise HTTPException(502, "Cannot reach the Java runner. Is it running? (No WebSocket or HTTP connection)")
+        except httpx.ReadTimeout:
+            raise HTTPException(504, f"Runner timed out via HTTP ({runner_timeout}s limit)")
+        except Exception as e:
+            raise HTTPException(502, f"Runner communication error: {e}")
+
+    if not runner_result.get("success"):
+        raise HTTPException(502, runner_result.get("error", "Unknown runner error"))
+
+    # 4. Send elements through AI enrichment pipeline (enrich → format → store)
+    elements = runner_result.get("elements", [])
+    stored_count = 0
+    ai_processed = False
+
+    try:
+        # Step A: AI enrichment
+        enrich_result = await _enrich_elements_internal(elements, str(page_id), config_type, context_id)
+        enriched = enrich_result.get("enriched_elements", [])
+        ai_processed = enrich_result.get("ai_processed", False)
+
+        # Step B: Format enriched elements and store
+        store_elements = []
+        for elem in enriched:
+            selectors = elem.get("selectors", {})
+            attrs = elem.get("attributes", {})
+            attrs["tag"] = elem.get("tag", "")
+            if elem.get("text"):
+                attrs["text"] = elem["text"]
+            attrs["interactive"] = str(elem.get("interactive", False))
+            attrs["selector_confidence_scores"] = elem.get("selector_confidence_scores", {})
+
+            is_dynamic = elem.get("is_dynamic", False)
+            if elem.get("skip", False) or is_dynamic:
+                continue
+
+            # Build primary selector using confidence-driven ranking.
+            selector_scores = elem.get("selector_confidence_scores", {})
+            primary, fallbacks = _score_weighted_selector_choice(selectors, selector_scores, config_type)
+
+            # Keep xpath fallback if available and not already present.
+            if "xpath" in selectors and "xpath" not in primary:
+                xpath_fallback = {"xpath": selectors.get("xpath")}
+                if xpath_fallback not in fallbacks and selectors.get("xpath"):
+                    fallbacks.append(xpath_fallback)
+
+            # Use AI logical_name if available, else fallback (never use long/dynamic content-desc)
+            _logical = elem.get("logical_name") or ""
+            _acc_short = acc_id if (acc_id and len(acc_id) <= 60 and not is_dynamic) else ""
+            _res = res_id if res_id else ""
+            element_key = (
+                _logical
+                or _acc_short
+                or _res
+                or f"element_{elem.get('index', stored_count)}"
+            )
+
+            store_elements.append({
+                "name": element_key,
+                "primary_selector": primary,
+                "fallback_selectors": fallbacks,
+                "attributes": attrs,
+            })
+
+        # Derive platform from config_type
+        if config_type and "android" in config_type:
+            element_platform = "android"
+        elif config_type and "ios" in config_type:
+            element_platform = "ios"
+        elif config_type and config_type in ("flutter", "windows", "mac"):
+            element_platform = "universal"
+        else:
+            element_platform = "web"
+
+        # Step C: Bulk store
+        for se in store_elements:
+            await db.execute(
+                """
+                INSERT INTO repo.elements (page_id, name, platform, primary_selector,
+                                           fallback_selectors, attributes, is_active)
+                VALUES ($1::uuid, $2, $3, $4::jsonb, $5::jsonb, $6::jsonb, true)
+                ON CONFLICT (page_id, name, platform) DO UPDATE
+                    SET primary_selector = EXCLUDED.primary_selector,
+                        fallback_selectors = EXCLUDED.fallback_selectors,
+                        attributes = EXCLUDED.attributes,
+                        updated_at = NOW()
+                """,
+                str(page_id),
+                se["name"],
+                element_platform,
+                json.dumps(se["primary_selector"]),
+                json.dumps(se["fallback_selectors"]),
+                json.dumps(se["attributes"]),
+            )
+            stored_count += 1
+    except Exception as e:
+        logger.error("AI enrichment pipeline failed: %s", e)
+        raise HTTPException(502, f"AI enrichment pipeline failed: {e}. Ensure an AI provider (OPENAI_API_KEY, ANTHROPIC_API_KEY, or Ollama) is configured.")
+
+    stats = runner_result.get("stats", {})
+    return {
+        "success": True,
+        "context_id": context_id,
+        "page_id": str(page_id),
+        "config_type": config_type,
+        "ai_processed": ai_processed,
+        "stats": {**stats, "stored_count": stored_count},
+        "elements": elements,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Get Elements — return stored elements for a page context
+# ---------------------------------------------------------------------------
+@router.get("/{context_id}/elements")
+async def get_page_context_elements(
+    context_id: str,
+    current_user: CurrentUser = Depends(get_current_active_user),
+):
+    """Return all elements stored for this page context's page."""
+    db = await get_database()
+
+    ctx_row = await db.fetchrow(
+        "SELECT page_id FROM repo.page_contexts WHERE id = $1::uuid",
+        context_id,
+    )
+    if not ctx_row:
+        raise HTTPException(404, "Page context not found")
+
+    rows = await db.fetch(
+        """
+        SELECT id, name, primary_selector, fallback_selectors, attributes,
+               is_active, created_at, updated_at
+        FROM repo.elements
+        WHERE page_id = $1::uuid
+        ORDER BY name
+        """,
+        str(ctx_row["page_id"]),
+    )
+
+    elements = []
+    for r in rows:
+        d = dict(r)
+        d["id"] = str(d["id"])
+        for k in ("created_at", "updated_at"):
+            if d.get(k):
+                d[k] = d[k].isoformat()
+        elements.append(d)
+
+    return {"success": True, "context_id": context_id, "elements": elements, "count": len(elements)}

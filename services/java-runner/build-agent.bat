@@ -94,6 +94,15 @@ echo.
 echo # Run browsers in headless mode? ^(true/false^)
 echo HEADLESS=false
 echo.
+echo # Appium server URL ^(required for appium-* capabilities^)
+echo runner.appium-server-url=http://localhost:4723
+echo.
+echo # Auto-start Appium server when appium-* capabilities are configured
+echo runner.appium-auto-start=true
+echo.
+echo # Max seconds to wait for Appium to start
+echo runner.appium-startup-timeout-seconds=120
+echo.
 echo # Port for health check endpoint
 echo server.port=8080
 ) > "%STAGE_DIR%\runner-config.properties"

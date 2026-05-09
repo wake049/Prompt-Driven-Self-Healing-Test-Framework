@@ -152,7 +152,7 @@ class UnifiedApiClient {
     try {
       const response = await fetch(url, config);
       if (!response.ok) {
-        if (response.status === 401 || response.status === 403) {
+        if (response.status === 401) {
           // For long work sessions, don't automatically logout
           // Instead, show a more user-friendly error message
           throw new Error('Authentication error - please refresh the page or login again if needed');
@@ -164,6 +164,10 @@ class UnifiedApiClient {
           backendDetail = errorBody?.detail || errorBody?.message || errorBody?.error || '';
         } catch {
           // Ignore JSON parse issues and fall back to status text.
+        }
+
+        if (response.status === 403 && backendDetail) {
+          window.dispatchEvent(new CustomEvent('subscription-limit-error', { detail: backendDetail }));
         }
 
         const suffix = backendDetail ? ` - ${backendDetail}` : '';
@@ -445,10 +449,11 @@ class UnifiedApiClient {
     });
   }
   // Test Execution API methods
-  async executePrompt(promptId: string, options?: { browser?: string; runner_id?: string }): Promise<any> {
+  async executePrompt(promptId: string, options?: { browser?: string; runner_id?: string; appium_config_id?: string }): Promise<any> {
     const params = new URLSearchParams();
     if (options?.browser) params.set('browser', options.browser);
     if (options?.runner_id) params.set('runner_id', options.runner_id);
+    if (options?.appium_config_id) params.set('appium_config_id', options.appium_config_id);
     const qs = params.toString() ? `?${params.toString()}` : '';
     return this.request(`/api/v1/execution/execute-prompt/${promptId}${qs}`, {
       method: 'POST'

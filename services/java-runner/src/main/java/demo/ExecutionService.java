@@ -546,6 +546,122 @@ public class ExecutionService {
                 case "waitforapiresponse":
                     success = performWaitForApiResponse(step, result);
                     break;
+
+                // ============== APPIUM / MOBILE GESTURES ==============
+                case "appium_tap":
+                case "tap":
+                    success = performAppiumTap(step, result);
+                    break;
+
+                case "appium_long_press":
+                case "long_press":
+                case "longpress":
+                    success = performAppiumLongPress(step, result);
+                    break;
+
+                case "appium_swipe_up":
+                case "swipe_up":
+                case "swipeup":
+                    success = performAppiumSwipeUp(step, result);
+                    break;
+
+                case "appium_swipe_down":
+                case "swipe_down":
+                case "swipedown":
+                    success = performAppiumSwipeDown(step, result);
+                    break;
+
+                case "appium_swipe_left":
+                case "swipe_left":
+                case "swipeleft":
+                    success = performAppiumSwipeLeft(step, result);
+                    break;
+
+                case "appium_swipe_right":
+                case "swipe_right":
+                case "swiperight":
+                    success = performAppiumSwipeRight(step, result);
+                    break;
+
+                case "appium_pinch":
+                case "pinch":
+                    success = performAppiumPinch(step, result);
+                    break;
+
+                case "appium_spread":
+                case "spread":
+                case "zoom_in":
+                    success = performAppiumSpread(step, result);
+                    break;
+
+                case "appium_hide_keyboard":
+                case "hide_keyboard":
+                    success = performAppiumHideKeyboard(step, result);
+                    break;
+
+                case "appium_press_back":
+                case "press_back":
+                    success = performAppiumPressBack(step, result);
+                    break;
+
+                case "appium_press_home":
+                case "press_home":
+                    success = performAppiumPressHome(step, result);
+                    break;
+
+                case "appium_set_orientation":
+                case "set_orientation":
+                    success = performAppiumSetOrientation(step, result);
+                    break;
+
+                case "appium_switch_to_webview":
+                case "switch_to_webview":
+                    success = performAppiumSwitchToWebView(step, result);
+                    break;
+
+                case "appium_switch_to_native":
+                case "switch_to_native":
+                    success = performAppiumSwitchToNative(step, result);
+                    break;
+
+                case "appium_launch_app":
+                case "launch_app":
+                    success = performAppiumLaunchApp(step, result);
+                    break;
+
+                case "appium_close_app":
+                case "close_app":
+                    success = performAppiumCloseApp(step, result);
+                    break;
+
+                case "appium_background_app":
+                case "background_app":
+                    success = performAppiumBackgroundApp(step, result);
+                    break;
+
+                case "appium_activate_app":
+                case "activate_app":
+                    success = performAppiumActivateApp(step, result);
+                    break;
+
+                case "appium_terminate_app":
+                case "terminate_app":
+                    success = performAppiumTerminateApp(step, result);
+                    break;
+
+                // Aliases for native mobile actions
+                case "scroll":
+                case "scroll_down":
+                    success = performAppiumSwipeUp(step, result);
+                    break;
+
+                case "scroll_up":
+                    success = performAppiumSwipeDown(step, result);
+                    break;
+
+                case "type_text":
+                    success = performEnterText(step, result);
+                    break;
                     
                 default:
                     result.setError("Unsupported action: " + step.getAction());
@@ -865,6 +981,10 @@ public class ExecutionService {
             return By.className(locator.substring(6));
         } else if (locator.startsWith("tag=")) {
             return By.tagName(locator.substring(4));
+        } else if (locator.startsWith("accessibility-id:")) {
+            return io.appium.java_client.AppiumBy.accessibilityId(locator.substring(17));
+        } else if (locator.startsWith("accessibility-id=")) {
+            return io.appium.java_client.AppiumBy.accessibilityId(locator.substring(17));
         } else {
             // Default to CSS selector if no prefix
             return By.cssSelector(locator);
@@ -3138,6 +3258,253 @@ public class ExecutionService {
         } catch (IOException e) {
             System.err.println("    Failed to capture screenshot: " + e.getMessage());
             return null;
+        }
+    }
+
+    // =======================================================================
+    // Appium / Mobile Gesture Action Handlers
+    // =======================================================================
+
+    private AppiumActions appiumActions() {
+        return new AppiumActions(driver);
+    }
+
+    private boolean performAppiumTap(Step step, StepResult result) {
+        try {
+            WebElement el = findElementWithHealing(step, result);
+            if (el == null) return false;
+            appiumActions().tap(el);
+            result.setDetails("Tapped element");
+            return true;
+        } catch (Exception e) {
+            result.setError("Tap failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    private boolean performAppiumLongPress(Step step, StepResult result) {
+        try {
+            WebElement el = findElementWithHealing(step, result);
+            if (el == null) return false;
+            StepParser sp = new StepParser(step);
+            int duration = sp.getIntValue("duration", 1500);
+            appiumActions().longPress(el, duration);
+            result.setDetails("Long-pressed element for " + duration + "ms");
+            return true;
+        } catch (Exception e) {
+            result.setError("Long press failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    private boolean performAppiumSwipeUp(Step step, StepResult result) {
+        try {
+            StepParser sp = new StepParser(step);
+            double fraction = sp.getDoubleValue("fraction", 0.5);
+            appiumActions().swipeUp(fraction);
+            result.setDetails("Swiped up " + (int)(fraction * 100) + "% of screen");
+            return true;
+        } catch (Exception e) {
+            result.setError("Swipe up failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    private boolean performAppiumSwipeDown(Step step, StepResult result) {
+        try {
+            StepParser sp = new StepParser(step);
+            double fraction = sp.getDoubleValue("fraction", 0.5);
+            appiumActions().swipeDown(fraction);
+            result.setDetails("Swiped down " + (int)(fraction * 100) + "% of screen");
+            return true;
+        } catch (Exception e) {
+            result.setError("Swipe down failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    private boolean performAppiumSwipeLeft(Step step, StepResult result) {
+        try {
+            StepParser sp = new StepParser(step);
+            double fraction = sp.getDoubleValue("fraction", 0.5);
+            appiumActions().swipeLeft(fraction);
+            result.setDetails("Swiped left " + (int)(fraction * 100) + "% of screen");
+            return true;
+        } catch (Exception e) {
+            result.setError("Swipe left failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    private boolean performAppiumSwipeRight(Step step, StepResult result) {
+        try {
+            StepParser sp = new StepParser(step);
+            double fraction = sp.getDoubleValue("fraction", 0.5);
+            appiumActions().swipeRight(fraction);
+            result.setDetails("Swiped right " + (int)(fraction * 100) + "% of screen");
+            return true;
+        } catch (Exception e) {
+            result.setError("Swipe right failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    private boolean performAppiumPinch(Step step, StepResult result) {
+        try {
+            appiumActions().pinch();
+            result.setDetails("Pinch (zoom out) gesture performed");
+            return true;
+        } catch (Exception e) {
+            result.setError("Pinch failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    private boolean performAppiumSpread(Step step, StepResult result) {
+        try {
+            appiumActions().spread();
+            result.setDetails("Spread (zoom in) gesture performed");
+            return true;
+        } catch (Exception e) {
+            result.setError("Spread failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    private boolean performAppiumHideKeyboard(Step step, StepResult result) {
+        try {
+            appiumActions().hideKeyboard();
+            result.setDetails("Keyboard hidden");
+            return true;
+        } catch (Exception e) {
+            result.setError("Hide keyboard failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    private boolean performAppiumPressBack(Step step, StepResult result) {
+        try {
+            appiumActions().pressBack();
+            result.setDetails("Pressed back button");
+            return true;
+        } catch (Exception e) {
+            result.setError("Press back failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    private boolean performAppiumPressHome(Step step, StepResult result) {
+        try {
+            appiumActions().pressHome();
+            result.setDetails("Pressed home button");
+            return true;
+        } catch (Exception e) {
+            result.setError("Press home failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    private boolean performAppiumSetOrientation(Step step, StepResult result) {
+        try {
+            StepParser sp = new StepParser(step);
+            String orientation = sp.getStringValue("value", "LANDSCAPE");
+            appiumActions().setOrientation(orientation);
+            result.setDetails("Orientation set to " + orientation);
+            return true;
+        } catch (Exception e) {
+            result.setError("Set orientation failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    private boolean performAppiumSwitchToWebView(Step step, StepResult result) {
+        try {
+            appiumActions().switchToWebView();
+            result.setDetails("Switched to WEBVIEW context");
+            return true;
+        } catch (Exception e) {
+            result.setError("Switch to webview failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    private boolean performAppiumSwitchToNative(Step step, StepResult result) {
+        try {
+            appiumActions().switchToNativeContext();
+            result.setDetails("Switched to NATIVE_APP context");
+            return true;
+        } catch (Exception e) {
+            result.setError("Switch to native failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    private boolean performAppiumLaunchApp(Step step, StepResult result) {
+        try {
+            appiumActions().launchApp();
+            result.setDetails("App launched");
+            return true;
+        } catch (Exception e) {
+            result.setError("Launch app failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    private boolean performAppiumCloseApp(Step step, StepResult result) {
+        try {
+            appiumActions().closeApp();
+            result.setDetails("App closed");
+            return true;
+        } catch (Exception e) {
+            result.setError("Close app failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    private boolean performAppiumBackgroundApp(Step step, StepResult result) {
+        try {
+            StepParser sp = new StepParser(step);
+            int seconds = sp.getIntValue("duration", 5);
+            appiumActions().backgroundApp(seconds);
+            result.setDetails("App backgrounded for " + seconds + "s");
+            return true;
+        } catch (Exception e) {
+            result.setError("Background app failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    private boolean performAppiumActivateApp(Step step, StepResult result) {
+        try {
+            StepParser sp = new StepParser(step);
+            String appId = sp.getStringValue("value", "");
+            if (appId.isEmpty()) {
+                result.setError("activate_app requires 'value' (app package/bundle ID)");
+                return false;
+            }
+            appiumActions().activateApp(appId);
+            result.setDetails("Activated app: " + appId);
+            return true;
+        } catch (Exception e) {
+            result.setError("Activate app failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    private boolean performAppiumTerminateApp(Step step, StepResult result) {
+        try {
+            StepParser sp = new StepParser(step);
+            String appId = sp.getStringValue("value", "");
+            if (appId.isEmpty()) {
+                result.setError("terminate_app requires 'value' (app package/bundle ID)");
+                return false;
+            }
+            appiumActions().terminateApp(appId);
+            result.setDetails("Terminated app: " + appId);
+            return true;
+        } catch (Exception e) {
+            result.setError("Terminate app failed: " + e.getMessage());
+            return false;
         }
     }
 }

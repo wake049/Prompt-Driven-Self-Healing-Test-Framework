@@ -15,6 +15,7 @@ export interface PromptData {
   priority?: number;
   estimated_duration?: number;
   starting_url?: string;
+  test_type?: 'web' | 'app';
   author_id?: string;
   version?: number;
 }
@@ -26,6 +27,7 @@ export interface CreatePromptRequest {
   category?: string;
   tags?: string[];
   starting_url?: string;
+  test_type?: 'web' | 'app';
 }
 
 export interface PromptsResponse {
@@ -49,12 +51,20 @@ class AuthenticatedPromptsApiService {
     });
 
     if (!response.ok) {
-      if (response.status === 401 || response.status === 403) {
+      if (response.status === 401) {
         // For long work sessions, don't automatically logout
         // Let the user handle re-authentication manually if needed
         throw new Error('Authentication error - please refresh the page or login again if needed');
       }
-      throw new Error(`API Error: ${response.status} ${response.statusText}`);
+      let errorDetail = '';
+      try {
+        const errorBody = await response.json();
+        errorDetail = errorBody?.detail || errorBody?.message || errorBody?.error || '';
+      } catch { /* ignore */ }
+      if (response.status === 403 && errorDetail) {
+        window.dispatchEvent(new CustomEvent('subscription-limit-error', { detail: errorDetail }));
+      }
+      throw new Error(errorDetail || `API Error: ${response.status} ${response.statusText}`);
     }
 
     return response.json();

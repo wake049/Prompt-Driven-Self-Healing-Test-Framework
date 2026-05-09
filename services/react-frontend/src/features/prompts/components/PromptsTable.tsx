@@ -497,7 +497,8 @@ export const PromptsTable: React.FC = () => {
     content: '',
     category: '',
     tags: '',
-    startingUrl: ''
+    startingUrl: '',
+    testType: 'web' as 'web' | 'app'
   });
   // Filter prompts based on search term
   const filteredPrompts = prompts.filter(prompt =>
@@ -553,6 +554,7 @@ export const PromptsTable: React.FC = () => {
     category: string;
     tags: string[];
     startingUrl: string;
+    testType: 'web' | 'app';
   }) => {
     try {
       setSubmitting(true);
@@ -564,6 +566,7 @@ export const PromptsTable: React.FC = () => {
         category: promptData.category,
         tags: promptData.tags,
         starting_url: promptData.startingUrl,
+        test_type: promptData.testType,
       };
       const createdPrompt = await promptsApiService.createPrompt(apiPromptData);
       // Map API response back to local format
@@ -612,7 +615,7 @@ export const PromptsTable: React.FC = () => {
   const handleCloseModal = () => {
     setShowModal(false);
     setSubmitting(false);
-    setNewPrompt({ title: '', description: '', content: '', category: '', tags: '', startingUrl: '' });
+    setNewPrompt({ title: '', description: '', content: '', category: '', tags: '', startingUrl: '', testType: 'web' });
   };
   const handleSubmitPrompt = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -634,7 +637,8 @@ export const PromptsTable: React.FC = () => {
         content: newPrompt.content.trim(),
         category: newPrompt.category.trim(),
         tags: tagsArray,
-        startingUrl: newPrompt.startingUrl.trim()
+        startingUrl: newPrompt.testType === 'web' ? newPrompt.startingUrl.trim() : '',
+        testType: newPrompt.testType
       });
       console.log('✅ Prompt created successfully');
       handleCloseModal();
@@ -820,6 +824,44 @@ export const PromptsTable: React.FC = () => {
                 />
               </FormGroup>
               <FormGroup>
+                <Label>Test Type *</Label>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button
+                    type="button"
+                    onClick={() => handleInputChange('testType', 'web')}
+                    style={{
+                      flex: 1,
+                      padding: '10px',
+                      border: `2px solid ${newPrompt.testType === 'web' ? '#3b82f6' : '#d1d5db'}`,
+                      borderRadius: '6px',
+                      background: newPrompt.testType === 'web' ? '#eff6ff' : 'transparent',
+                      cursor: 'pointer',
+                      fontWeight: newPrompt.testType === 'web' ? 600 : 400,
+                      fontSize: '14px'
+                    }}
+                  >
+                    🌐 Web Testing
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleInputChange('testType', 'app')}
+                    style={{
+                      flex: 1,
+                      padding: '10px',
+                      border: `2px solid ${newPrompt.testType === 'app' ? '#3b82f6' : '#d1d5db'}`,
+                      borderRadius: '6px',
+                      background: newPrompt.testType === 'app' ? '#eff6ff' : 'transparent',
+                      cursor: 'pointer',
+                      fontWeight: newPrompt.testType === 'app' ? 600 : 400,
+                      fontSize: '14px'
+                    }}
+                  >
+                    📱 App / Desktop
+                  </button>
+                </div>
+              </FormGroup>
+              {newPrompt.testType === 'web' && (
+              <FormGroup>
                 <Label>Starting URL</Label>
                 <Input
                   type="url"
@@ -829,6 +871,14 @@ export const PromptsTable: React.FC = () => {
                   disabled={submitting}
                 />
               </FormGroup>
+              )}
+              {newPrompt.testType === 'app' && (
+              <FormGroup>
+                <Label style={{ color: '#6b7280', fontSize: '13px', fontStyle: 'italic' }}>
+                  App launch is handled by your Appium configuration — no starting URL needed.
+                </Label>
+              </FormGroup>
+              )}
               <FormGroup>
                 <Label>Description *</Label>
                 <TextArea

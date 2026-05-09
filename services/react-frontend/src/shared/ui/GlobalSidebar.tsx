@@ -39,7 +39,9 @@ import {
   CheckCircle,
   Database,
   Monitor,
-  Key
+  Key,
+  Smartphone,
+  Puzzle
 } from 'lucide-react';
 import { config } from '../../app/config';
 const SidebarContainer = styled.div<{ $collapsed?: boolean }>`
@@ -418,6 +420,8 @@ const GlobalSidebar: React.FC<GlobalSidebarProps> = ({ className, onCollapseChan
       ]
     },
     { path: '/app/runners', label: 'Runners', icon: <Monitor size={16} />, key: 'runners' },
+    { path: '/app/mobile-testing', label: 'Mobile Testing', icon: <Smartphone size={16} />, key: 'mobile-testing' },
+    { path: '/app/appium-testing', label: 'Appium Testing', icon: <Puzzle size={16} />, key: 'appium-testing' },
     { path: '/app/review', label: 'Review Queue', icon: <ClipboardList size={16} />, key: 'review' },
     { 
       path: '/app/analytics', 

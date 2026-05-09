@@ -15,7 +15,10 @@ import java.io.IOException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 public class SqlElementRepository {
     private static final String SQL_BACKEND_URL = System.getenv("UNIFIED_API_URL") != null ? 
@@ -59,8 +62,6 @@ public class SqlElementRepository {
 
     private List<String> fetchAlternativesFromApi(String elementId, String page, String selectorPolicy) throws IOException {
         List<String> alternatives = new ArrayList<>();
-        List<String> preferredSelectors = new ArrayList<>();
-        List<String> fallbackSelectors = new ArrayList<>();
         
         try (CloseableHttpClient httpClient = HttpClientFactory.create()) {
             // Build query parameters
@@ -90,13 +91,32 @@ public class SqlElementRepository {
                                 
                                 // Check if this is the element we're looking for
                                 if (dbElementId.equals(elementId)) {
-                                    // Extract selectors from the element
+                                    // Build policy + AI confidence weighted selector candidates.
+                                    Map<String, Double> scoredSelectors = new LinkedHashMap<>();
+
+                                    JsonNode attributesNode = elementNode.get("attributes");
+                                    JsonNode selectorScoreNode = attributesNode != null
+                                            ? attributesNode.get("selector_confidence_scores")
+                                            : null;
+
+                                    JsonNode primarySelectorNode = elementNode.get("primary_selector");
+                                    if (primarySelectorNode != null && primarySelectorNode.isObject()) {
+                                        appendScoredSelector(scoredSelectors, "accessibility_id", primarySelectorNode.get("accessibility_id"), selectorScoreNode, selectorPolicy);
+                                        appendScoredSelector(scoredSelectors, "id", primarySelectorNode.get("id"), selectorScoreNode, selectorPolicy);
+                                        appendScoredSelector(scoredSelectors, "name", primarySelectorNode.get("name"), selectorScoreNode, selectorPolicy);
+                                        appendScoredSelector(scoredSelectors, "css", primarySelectorNode.get("css"), selectorScoreNode, selectorPolicy);
+                                        appendScoredSelector(scoredSelectors, "css", primarySelectorNode.get("css_selector"), selectorScoreNode, selectorPolicy);
+                                        appendScoredSelector(scoredSelectors, "xpath", primarySelectorNode.get("xpath"), selectorScoreNode, selectorPolicy);
+                                        appendScoredSelector(scoredSelectors, "class_name", primarySelectorNode.get("class_name"), selectorScoreNode, selectorPolicy);
+                                    }
+
                                     JsonNode selectorsNode = elementNode.get("selectors");
                                     if (selectorsNode != null && selectorsNode.isArray()) {
                                         for (JsonNode selectorNode : selectorsNode) {
                                             String selector = selectorNode.asText();
                                             if (selector != null && !selector.trim().isEmpty()) {
-                                                alternatives.add(selector);
+                                                String family = inferSelectorFamily(selector);
+                                                appendScoredSelector(scoredSelectors, family, selector, selectorScoreNode, selectorPolicy);
                                             }
                                         }
                                     }
@@ -107,11 +127,7 @@ public class SqlElementRepository {
                                         String xpath = xpathNode.asText();
                                         if (xpath != null && !xpath.trim().isEmpty()) {
                                             String selector = "xpath=" + xpath;
-                                            if ("robust".equals(selectorPolicy)) {
-                                                preferredSelectors.add(selector);
-                                            } else {
-                                                fallbackSelectors.add(selector);
-                                            }
+                                            appendScoredSelector(scoredSelectors, "xpath", selector, selectorScoreNode, selectorPolicy);
                                         }
                                     }
                                     
@@ -120,26 +136,17 @@ public class SqlElementRepository {
                                         String cssSelector = cssSelectorNode.asText();
                                         if (cssSelector != null && !cssSelector.trim().isEmpty()) {
                                             String selector = cssSelector.startsWith("css=") ? cssSelector : "css=" + cssSelector;
-                                            if ("fast".equals(selectorPolicy) || "balanced".equals(selectorPolicy)) {
-                                                preferredSelectors.add(selector);
-                                            } else {
-                                                fallbackSelectors.add(selector);
-                                            }
+                                            appendScoredSelector(scoredSelectors, "css", selector, selectorScoreNode, selectorPolicy);
                                         }
                                     }
-                                    
-                                    // Add preferred selectors first, then fallback selectors
-                                    alternatives.addAll(preferredSelectors);
-                                    alternatives.addAll(fallbackSelectors);
-                                    
-                                    System.out.println("  Policy-aware selection: " + preferredSelectors.size() + " preferred (" + selectorPolicy + "), " + fallbackSelectors.size() + " fallback");
-                                    
-                                    // Log detailed selector analysis for debugging
-                                    if (preferredSelectors.size() > 0) {
-                                        System.out.println("  ✓ Preferred " + selectorPolicy + " selectors: " + preferredSelectors);
-                                    }
-                                    if (fallbackSelectors.size() > 0) {
-                                        System.out.println("  ⚠ Fallback selectors (policy mismatch): " + fallbackSelectors);
+
+                                    scoredSelectors.entrySet().stream()
+                                            .sorted(Map.Entry.<String, Double>comparingByValue(Comparator.reverseOrder()))
+                                            .forEachOrdered(entry -> alternatives.add(entry.getKey()));
+
+                                    System.out.println("  Confidence+policy ranked " + alternatives.size() + " selectors (policy=" + selectorPolicy + ")");
+                                    if (!alternatives.isEmpty()) {
+                                        System.out.println("  ✓ Ranked selectors: " + alternatives);
                                     }
                                     
                                     break; // Found the element, no need to continue
@@ -154,6 +161,144 @@ public class SqlElementRepository {
         }
         
         return alternatives;
+    }
+
+    private void appendScoredSelector(
+            Map<String, Double> scoredSelectors,
+            String selectorFamily,
+            JsonNode selectorNode,
+            JsonNode selectorScoreNode,
+            String selectorPolicy
+    ) {
+        if (selectorNode == null || selectorNode.isNull()) {
+            return;
+        }
+        appendScoredSelector(scoredSelectors, selectorFamily, selectorNode.asText(), selectorScoreNode, selectorPolicy);
+    }
+
+    private void appendScoredSelector(
+            Map<String, Double> scoredSelectors,
+            String selectorFamily,
+            String rawSelector,
+            JsonNode selectorScoreNode,
+            String selectorPolicy
+    ) {
+        if (rawSelector == null || rawSelector.trim().isEmpty()) {
+            return;
+        }
+
+        String selector = normalizeSelector(selectorFamily, rawSelector.trim());
+        if (selector == null || selector.isEmpty()) {
+            return;
+        }
+
+        double baseScore = getScoreForFamily(selectorFamily, selectorScoreNode);
+        double finalScore = applyPolicyBoost(baseScore, selectorFamily, selectorPolicy);
+
+        Double previous = scoredSelectors.get(selector);
+        if (previous == null || finalScore > previous) {
+            scoredSelectors.put(selector, finalScore);
+        }
+    }
+
+    private String normalizeSelector(String family, String rawSelector) {
+        if (rawSelector == null || rawSelector.isEmpty()) {
+            return null;
+        }
+
+        if (rawSelector.startsWith("css=") || rawSelector.startsWith("xpath=") ||
+                rawSelector.startsWith("accessibility-id:") || rawSelector.startsWith("resource-id:") ||
+                rawSelector.startsWith("android-uiautomator=")) {
+            return rawSelector;
+        }
+
+        switch ((family == null ? "" : family.toLowerCase())) {
+            case "xpath":
+                return "xpath=" + rawSelector;
+            case "accessibility_id":
+                return "accessibility-id:" + rawSelector;
+            case "id":
+                return "resource-id:" + rawSelector;
+            case "css":
+            case "class_name":
+            case "name":
+                return rawSelector.startsWith("css=") ? rawSelector : "css=" + rawSelector;
+            default:
+                return rawSelector;
+        }
+    }
+
+    private double getScoreForFamily(String family, JsonNode selectorScoreNode) {
+        String normalizedFamily = family == null ? "" : family.toLowerCase();
+
+        if (selectorScoreNode != null && selectorScoreNode.isObject()) {
+            JsonNode v = selectorScoreNode.get(normalizedFamily);
+            if (v != null && v.isNumber()) {
+                return clamp(v.asDouble());
+            }
+        }
+
+        switch (normalizedFamily) {
+            case "accessibility_id":
+                return 0.92;
+            case "id":
+                return 0.87;
+            case "name":
+                return 0.72;
+            case "xpath":
+                return 0.55;
+            case "class_name":
+                return 0.45;
+            case "css":
+                return 0.64;
+            default:
+                return 0.50;
+        }
+    }
+
+    private double applyPolicyBoost(double base, String family, String selectorPolicy) {
+        String f = family == null ? "" : family.toLowerCase();
+        String p = selectorPolicy == null ? "balanced" : selectorPolicy.toLowerCase();
+        double score = base;
+
+        if ("fast".equals(p) || "balanced".equals(p)) {
+            if ("css".equals(f) || "id".equals(f) || "accessibility_id".equals(f)) {
+                score += 0.04;
+            }
+        }
+        if ("robust".equals(p)) {
+            if ("xpath".equals(f) || "accessibility_id".equals(f) || "id".equals(f)) {
+                score += 0.04;
+            }
+        }
+        if ("mobile".equals(p)) {
+            if ("accessibility_id".equals(f)) {
+                score += 0.06;
+            } else if ("id".equals(f)) {
+                score += 0.04;
+            } else if ("xpath".equals(f)) {
+                score -= 0.03;
+            }
+        }
+
+        return clamp(score);
+    }
+
+    private double clamp(double value) {
+        return Math.max(0.0, Math.min(1.0, value));
+    }
+
+    private String inferSelectorFamily(String selector) {
+        if (selector == null) return "css";
+        String s = selector.toLowerCase();
+        if (s.startsWith("xpath=") || s.startsWith("//")) return "xpath";
+        if (s.startsWith("accessibility-id:") || s.startsWith("accessibility-id=")) return "accessibility_id";
+        if (s.startsWith("resource-id:") || s.startsWith("resource-id=")) return "id";
+        if (s.startsWith("android-uiautomator=")) return "xpath";
+        if (s.startsWith("id=")) return "id";
+        if (s.startsWith("name=")) return "name";
+        if (s.startsWith("class=")) return "class_name";
+        return "css";
     }
 
     public void saveHealingSuccess(String elementId, String page, String originalLocator, String healedLocator) {

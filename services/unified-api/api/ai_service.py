@@ -1591,7 +1591,7 @@ class EnterpriseAIService:
         logger.info(f" Starting AI plan generation with {len(ranked_elements)} elements")
         
         # Build optimized prompts with full context
-        system_prompt = self._build_enhanced_system_prompt()
+        system_prompt = self._build_enhanced_system_prompt(test_type=getattr(prompt_envelope, 'test_type', 'web'))
         user_prompt = self._build_enhanced_user_prompt(prompt_envelope, ranked_elements)
         
         logger.debug(f"📝 System prompt length: {len(system_prompt)} chars")
@@ -1754,9 +1754,16 @@ class EnterpriseAIService:
             # Detect multi-page workflow by checking if open_url is in the steps
             has_navigation = any(step.get('action') == 'open_url' for step in raw_steps)
             
+            # Detect native app test — skip strict selector validation since native
+            # selectors (resource-id:, content-desc:, xpath:) won't match CSS selectors
+            is_native_app = getattr(prompt_envelope, 'test_type', 'web') == 'app'
+            
             if has_navigation:
                 logger.info("🌐 Multi-page workflow detected (contains open_url) - relaxing element validation")
                 logger.info("   Elements from future pages may not be in current page_slice")
+            
+            if is_native_app:
+                logger.info("📱 Native app test detected - skipping strict selector validation")
             
             # Convert to PlanStep objects with smart element validation
             steps = []
@@ -1766,7 +1773,8 @@ class EnterpriseAIService:
                 action = raw_step.get("action", "")
                 
                 # Skip validation for actions that don't need specific elements
-                if action in ["open_url", "wait", "screenshot", "navigate_back", "navigate_forward", "refresh"]:
+                if action in ["open_url", "wait", "screenshot", "navigate_back", "navigate_forward", "refresh",
+                              "back", "scroll", "swipe", "wait_for_page_load"]:
                     logger.debug(f"✅ Step {i+1} accepted (no element needed) - {action}")
                     step = PlanStep(
                         action=action,
@@ -1792,6 +1800,20 @@ class EnterpriseAIService:
                     validated_step = self.variable_validator.validate_step_variables(step)
                     if validated_step:
                         steps.append(validated_step)
+                    continue
+                
+                # For native app tests, accept all steps — native selectors (resource-id:, content-desc:, xpath:)
+                # use a different format than web CSS selectors and can't be validated against the element repo
+                if is_native_app:
+                    logger.debug(f"✅ Step {i+1} accepted (native app) - {action} -> {original_target}")
+                    step = PlanStep(
+                        action=raw_step.get("action", ""),
+                        target=original_target,
+                        args=raw_step.get("args", {}),
+                        confidence=raw_step.get("confidence", 0.8),
+                        description=raw_step.get("description")
+                    )
+                    steps.append(step)
                     continue
                 
                 # For element-based actions, validate against available elements
@@ -2318,13 +2340,110 @@ class EnterpriseAIService:
     # UTILITY METHODS
     # =========================
     
-    def _build_enhanced_system_prompt(self) -> str:
+    def _build_native_app_system_prompt(self, current_date: str, current_year: int) -> str:
+        """Build system prompt specifically for native mobile app testing via Appium"""
+        return f"""You are a QA automation engineer specializing in NATIVE MOBILE APP testing via Appium.
+Generate test steps in valid JSON format for a native mobile application.
+
+**CRITICAL: This is a NATIVE MOBILE APP test, NOT a web test.**
+- Do NOT use open_url, click_css, type_css, or any web/CSS selectors
+- Do NOT generate CSS selectors like .class, #id, input[type='text']
+- Use ONLY native app actions: tap, type_text, scroll, swipe, long_press, assert_visible, assert_text, back, screenshot
+- Use ONLY native app selectors provided in the elements list
+
+**CURRENT CONTEXT:**
+- Today's date: {current_date}
+- Current year: {current_year}
+- Test type: Native Mobile App (Appium)
+
+ABSOLUTE RULE — SELECTOR INTEGRITY:
+- You will be given a list of REAL elements gathered from the device
+- You MUST copy selectors EXACTLY as provided — character for character
+- Do NOT fabricate, guess, or invent selectors
+- Do NOT modify package names, resource IDs, or accessibility labels
+- If you need an element that isn't in the provided list, use "scroll" to reveal more content
+
+**AVAILABLE ACTIONS FOR NATIVE APP:**
+
+=== TAP & INTERACTION ===
+- tap: Tap on an element
+  * Example: {{"action": "tap", "target": "accessibility-id:Search YouTube", "args": {{"selector": "accessibility-id:Search YouTube"}}, "description": "Tap search button"}}
+- long_press: Long press on an element
+  * Example: {{"action": "long_press", "target": "accessibility-id:Video thumbnail", "args": {{"selector": "accessibility-id:Video thumbnail", "duration": 2000}}, "description": "Long press video"}}
+
+=== TEXT INPUT ===
+- type_text: Enter text into a focused field
+  * MUST tap the field first, then use type_text
+  * Example: {{"action": "type_text", "target": "accessibility-id:Search YouTube", "args": {{"selector": "accessibility-id:Search YouTube", "text": "search query"}}, "description": "Type search query"}}
+- clear_text: Clear text from a field
+
+=== SCROLLING & NAVIGATION ===
+- scroll: Scroll in a direction to find content
+  * Example: {{"action": "scroll", "target": "", "args": {{"direction": "down"}}, "description": "Scroll down"}}
+- swipe: Swipe gesture (for carousels, dismiss, etc.)
+  * Args: direction (up, down, left, right)
+- back: Press the device back button
+  * Example: {{"action": "back", "target": "", "args": {{}}, "description": "Press back"}}
+
+=== VERIFICATION ===
+- assert_visible: Verify an element is visible on screen
+  * Example: {{"action": "assert_visible", "target": "accessibility-id:Home", "args": {{"selector": "accessibility-id:Home", "timeout": 5000}}, "description": "Verify Home tab is visible"}}
+- assert_text: Verify text content of an element
+  * Example: {{"action": "assert_text", "target": "accessibility-id:Home", "args": {{"selector": "accessibility-id:Home", "text": "Home"}}, "description": "Verify Home text"}}
+
+=== DATA & SCREENSHOTS ===
+- extract_data: Extract text from a native element
+  * Example: {{"action": "extract_data", "target": "accessibility-id:Home", "args": {{"selector": "accessibility-id:Home", "variable": "tabName"}}, "description": "Extract tab name"}}
+- screenshot: Capture current app screen
+
+**NATIVE SELECTOR FORMAT (as provided in elements list):**
+- accessibility-id:Label  (preferred — human-readable, stable across environments)
+- resource-id:com.package:id/element_id  (Android resource ID — may vary across app builds)
+- xpath://*[@content-desc='...']  (XPath — use only when provided)
+
+**SELECTOR PRIORITY (prefer in this order):**
+1. accessibility-id / content-desc — Most stable across environments and app builds
+2. resource-id — Stable within an app version but package name may differ across environments
+3. xpath — Use only when directly provided in the elements list
+
+**RESPONSE FORMAT:**
+Return valid JSON with this structure:
+{{
+  "steps": [
+    {{
+      "action": "tap",
+      "target": "accessibility-id:Search",
+      "args": {{
+        "selector": "accessibility-id:Search"
+      }},
+      "description": "Tap search button",
+      "confidence": 0.9
+    }}
+  ],
+  "clarifications": []
+}}
+
+CRITICAL CONSTRAINTS:
+- The app is already launched - start testing from the CURRENT SCREEN
+- Use ONLY elements from the PROVIDED ELEMENTS list
+- Copy selectors EXACTLY as provided - do not modify, guess, or fabricate
+- Prefer accessibility-id selectors over resource-id when both are available
+- Generate a logical mobile app workflow that matches the user's test request
+- End with a screenshot for documentation"""
+    
+    def _build_enhanced_system_prompt(self, test_type: str = "web") -> str:
         """Build enhanced system prompt for intelligent test generation"""
         
         # Add current date context
         from datetime import datetime
         current_date = datetime.now().strftime("%Y-%m-%d")
         current_year = datetime.now().year
+        
+        # =====================================================
+        # NATIVE APP TEST MODE
+        # =====================================================
+        if test_type == 'app':
+            return self._build_native_app_system_prompt(current_date, current_year)
         
         base_prompt = f"""You are a QA automation engineer. Generate test steps in valid JSON format.
 
@@ -2714,8 +2833,144 @@ CRITICAL: When generating login steps, use the predefined constant values above,
 
         return base_prompt
     
+    def _extract_native_selector(self, el: Any) -> tuple:
+        """Extract the best native selector from an element.
+        
+        Returns (selector_string, accessibility_id, resource_id) tuple.
+        Priority: accessibility_id/content-desc (stable across envs) > resource-id > xpath
+        """
+        import re
+        
+        el_attrs = {}
+        if hasattr(el, 'attributes') and el.attributes:
+            el_attrs = el.attributes if isinstance(el.attributes, dict) else {}
+        elif isinstance(el, dict):
+            el_attrs = el.get('attributes', {})
+            if isinstance(el_attrs, str):
+                try:
+                    import json
+                    el_attrs = json.loads(el_attrs)
+                except:
+                    el_attrs = {}
+        
+        # Check attributes for native selectors (enriched by API)
+        accessibility_id = (el_attrs.get('accessibility_id', '') or 
+                           el_attrs.get('content-desc', '') or 
+                           el_attrs.get('contentDescription', '') or '')
+        resource_id = (el_attrs.get('resource_id', '') or 
+                      el_attrs.get('resource-id', '') or 
+                      el_attrs.get('resourceId', '') or '')
+        
+        # Get xpath from the element
+        xpath_sel = ''
+        if hasattr(el, 'selector_xpath'):
+            xpath_sel = el.selector_xpath or ''
+        elif isinstance(el, dict):
+            xpath_sel = el.get('selector_xpath', '') or el.get('xpath', '')
+        
+        # Parse xpath to extract content-desc or resource-id if not found in attributes
+        if xpath_sel and not accessibility_id:
+            m = re.search(r"@content-desc=['\"]([^'\"]+)['\"]", xpath_sel)
+            if m:
+                accessibility_id = m.group(1)
+        if xpath_sel and not resource_id:
+            m = re.search(r"@resource-id=['\"]([^'\"]+)['\"]", xpath_sel)
+            if m:
+                resource_id = m.group(1)
+        
+        # Build selector string — prefer content-desc (stable across environments)
+        # over resource-id (may contain package names that differ in dev/prod)
+        selector = ""
+        if accessibility_id and accessibility_id != 'null':
+            selector = f"accessibility-id:{accessibility_id}"
+        elif resource_id and resource_id != 'null':
+            selector = f"resource-id:{resource_id}"
+        elif xpath_sel:
+            selector = f"xpath:{xpath_sel}"
+        
+        return selector, accessibility_id, resource_id
+
+    def _build_native_app_user_prompt(self, prompt_envelope: PromptEnvelope, ranked_elements: List[Any]) -> str:
+        """Build user prompt for native mobile app testing with native selectors"""
+        
+        # Categorize elements by native app functionality
+        interactive_elements = []
+        text_elements = []
+        layout_elements = []
+        
+        for el in ranked_elements:
+            tag = self._get_element_tag(el)
+            text = self._get_element_text(el)
+            
+            selector, accessibility_id, resource_id = self._extract_native_selector(el)
+            
+            if not selector:
+                continue
+            
+            # Build element description
+            element_desc = f"{tag} [{selector}]"
+            if text and text.strip():
+                element_desc += f' "{text[:50]}"'
+            
+            # Categorize by native element type
+            tag_lower = tag.lower() if tag else ''
+            if tag_lower in ['edittext', 'input', 'android.widget.edittext', 'textfield']:
+                interactive_elements.append(element_desc)
+            elif tag_lower in ['button', 'imagebutton', 'android.widget.button', 'android.widget.imagebutton',
+                              'android.widget.imageview'] or 'button' in tag_lower:
+                interactive_elements.append(element_desc)
+            elif tag_lower in ['textview', 'android.widget.textview', 'android.view.view']:
+                if accessibility_id or (text and len(text.strip()) > 0):
+                    text_elements.append(element_desc)
+                else:
+                    layout_elements.append(element_desc)
+            else:
+                if text and text.strip():
+                    text_elements.append(element_desc)
+                else:
+                    layout_elements.append(element_desc)
+        
+        # Build categorized element lists for native app
+        elements_context = ""
+        if interactive_elements:
+            elements_context += f"\nINTERACTIVE ELEMENTS (tappable, input fields, buttons):\n"
+            elements_context += "\n".join([f"- {elem}" for elem in interactive_elements])
+        if text_elements:
+            elements_context += f"\nTEXT/CONTENT ELEMENTS (labels, titles, descriptions):\n"
+            elements_context += "\n".join([f"- {elem}" for elem in text_elements[:30]])
+        if layout_elements and len(layout_elements) <= 10:
+            elements_context += f"\nLAYOUT ELEMENTS:\n"
+            elements_context += "\n".join([f"- {elem}" for elem in layout_elements[:10]])
+        
+        platform = getattr(prompt_envelope, 'platform', 'android') or 'android'
+        
+        return f"""Request: {prompt_envelope.prompt}
+
+**TEST TYPE: NATIVE MOBILE APP ({platform.upper()})**
+The app is already open on the device. Do NOT use open_url or any web actions.
+
+{elements_context}
+
+CRITICAL REQUIREMENTS FOR NATIVE APP:
+1. The app is ALREADY RUNNING - start interacting with the current screen
+2. Use ONLY the selectors from the PROVIDED ELEMENTS list above — do NOT invent selectors
+3. Copy selectors EXACTLY as shown (accessibility-id:..., resource-id:..., xpath:...)
+4. Do NOT guess or fabricate resource IDs or content descriptions
+5. Use native actions only: tap, type_text, scroll, swipe, back, assert_visible, assert_text, extract_data, screenshot
+6. For text input: first TAP the input field, then use type_text
+7. For scrolling: use scroll with direction (up/down/left/right)
+8. End with a screenshot for documentation
+9. If no element matches what you need, use scroll to reveal more elements rather than guessing selectors
+
+Generate a logical mobile app workflow based on the user's request and the available elements."""
+    
     def _build_enhanced_user_prompt(self, prompt_envelope: PromptEnvelope, ranked_elements: List[Any]) -> str:
         """Build enhanced user prompt with rich context for AI"""
+        
+        # Check if this is a native app test
+        test_type = getattr(prompt_envelope, 'test_type', 'web')
+        if test_type == 'app':
+            return self._build_native_app_user_prompt(prompt_envelope, ranked_elements)
         
         # Categorize elements by general functionality (website-agnostic)
         input_elements = []
@@ -4830,6 +5085,444 @@ async def analyze_element_failure_patterns(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to analyze element failures: {str(e)}")
+
+
+# ---------------------------------------------------------------------------
+# AI Element Enrichment — called by MCP after runner gathers raw elements
+# ---------------------------------------------------------------------------
+
+async def enrich_elements_core(raw_elements: list, page_info: dict) -> dict:
+    """
+    Core enrichment logic — callable directly (no HTTP).
+    Pipeline:
+      1. Raw capture                          (all elements)
+      2. Drop non-interactive with no text    (~60% cut)
+      3. Drop dynamic content patterns        (~60% cut)
+      4. AI processing pass on survivors      (~20-30 elements)
+      5. Apply heuristics to everything else
+    """
+    try:
+        if not raw_elements:
+            return {"success": True, "elements": [], "ai_processed": False}
+
+        total_raw = len(raw_elements)
+
+        # ----- Stage 1: Classify each element -----
+        ai_candidates = []       # indices that survive filtering → sent to AI
+        pre_skipped = set()      # indices dropped in stage 2
+        pre_dynamic = set()      # indices dropped in stage 3
+
+        for i, elem in enumerate(raw_elements):
+            tag = (elem.get("tag") or "").lower()
+            text = (elem.get("text") or "").strip()
+            interactive = elem.get("interactive", False)
+            sel = elem.get("selectors", {})
+            attrs = elem.get("attributes", {})
+            content_desc = sel.get("accessibility_id", "")
+
+            # Stage 2: Drop non-interactive elements with no text/content-desc
+            if not interactive and not text and not content_desc:
+                pre_skipped.add(i)
+                continue
+
+            # Stage 2b: Drop known layout containers
+            if _heuristic_should_skip(elem):
+                pre_skipped.add(i)
+                continue
+
+            # Stage 3: Drop elements with dynamic content patterns
+            if _heuristic_is_dynamic(elem):
+                pre_dynamic.add(i)
+                continue
+
+            # Survivor → send to AI
+            ai_candidates.append(i)
+
+        logger.info(
+            "Pre-filter pipeline: %d raw → %d dropped (non-interactive/layout) "
+            "→ %d dropped (dynamic) → %d candidates for AI",
+            total_raw, len(pre_skipped), len(pre_dynamic), len(ai_candidates),
+        )
+
+        # ----- Stage 4: AI pass on survivors only -----
+        ai_processed = False
+        ai_enrichments = {}  # original_index → AI result
+
+        if ai_candidates:
+            # Build compact summaries only for AI candidates
+            element_summaries = []
+            for idx in ai_candidates:
+                elem = raw_elements[idx]
+                sel = elem.get("selectors", {})
+                attrs = elem.get("attributes", {})
+                s = {"i": idx, "tag": elem.get("tag", "")}
+                text = (elem.get("text", "") or "")[:60]
+                if text: s["txt"] = text
+                cd = sel.get("accessibility_id", "")
+                if cd: s["cd"] = cd[:60]
+                rid = sel.get("id", "")
+                if rid: s["rid"] = rid
+                if elem.get("interactive"): s["click"] = True
+                if elem.get("sticky"): s["sticky"] = True
+                element_summaries.append(s)
+
+            system_prompt = """You are a mobile test automation engineer. Classify UI elements as STABLE or DYNAMIC for test automation.
+
+Input format: {"i":index,"tag":"class","txt":"text","cd":"content-desc","rid":"resource-id","click":true,"sticky":true}
+
+STABLE elements have selectors that will be identical every time the app is opened, regardless of user, time, or content. Examples: generic labels like "Home", "Search", "Back", "Settings", "Play".
+
+DYNAMIC elements have selectors containing content that could change between sessions — any proper noun, specific name, title, description, user-generated text, or content fetched from a server. If a different user opened the app and saw different content, the selector would break.
+
+Ask yourself: "If I opened this app on a different device, logged in as a different user, would this exact selector still work?" If no → DYNAMIC.
+
+SKIP elements that are generic layout containers with no meaningful identity (only positional xpath) or system chrome.
+
+For each element return:
+- index: the "i" value
+- logical_name: short camelCase name (max 40 chars) based on the element's PURPOSE, never its content
+- is_dynamic: true if the selector would break on a different session/user/device
+- skip: true if the element has no test value
+- selector_confidence_scores: object with confidence 0.0-1.0 for selector families when available
+    Keys may include: accessibility_id, id, name, xpath, class_name
+    Score guidance:
+    - stable generic accessibility_id/id/name: 0.85-0.99
+    - class_name selectors: 0.35-0.65
+    - improved/stable xpath: 0.6-0.85
+    - dynamic/content-based xpath: 0.1-0.45
+
+Return JSON only: {"elements":[{"index":0,"logical_name":"homeTab","is_dynamic":false,"skip":false}]}"""
+
+            BATCH_SIZE = 50
+            ai_model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+
+            try:
+                for batch_start in range(0, len(element_summaries), BATCH_SIZE):
+                    batch = element_summaries[batch_start:batch_start + BATCH_SIZE]
+                    user_prompt = f"""Platform: {page_info.get('platform', 'Android')}
+{len(batch)} elements:
+{json.dumps(batch, ensure_ascii=False)}"""
+
+                    response_text = await enterprise_ai_service._chat_json(
+                        model=ai_model,
+                        system=system_prompt,
+                        user=user_prompt,
+                        max_tokens=2000,
+                        temperature=0.1,
+                        retries=3,
+                        timeout_ms=120000,
+                    )
+                    ai_result = json.loads(response_text)
+                    for ae in ai_result.get("elements", []):
+                        ai_enrichments[ae.get("index", -1)] = ae
+
+                ai_processed = True
+                logger.info(
+                    "AI enriched %d/%d candidates in %d batch(es) using %s",
+                    len(ai_enrichments), len(ai_candidates),
+                    (len(element_summaries) + BATCH_SIZE - 1) // BATCH_SIZE,
+                    ai_model,
+                )
+            except Exception as e:
+                logger.warning(f"AI enrichment failed, using heuristic fallback: {e}")
+
+        # ----- Stage 5: Merge results for ALL elements -----
+        enriched_elements = []
+        for i, elem in enumerate(raw_elements):
+            enriched = dict(elem)
+
+            if i in pre_skipped:
+                # Non-interactive/layout → skip, assign heuristic name
+                enriched["skip"] = True
+                enriched["is_dynamic"] = False
+                enriched["logical_name"] = _heuristic_logical_name(elem, i)
+                enriched["element_type"] = ""
+                enriched["selector_strategy"] = ""
+            elif i in pre_dynamic:
+                # Dynamic content → skip, don't store in element repo
+                enriched["skip"] = True
+                enriched["is_dynamic"] = True
+                enriched["logical_name"] = _heuristic_logical_name(elem, i)
+                enriched["element_type"] = "dynamic_content"
+                enriched["selector_strategy"] = "class_index"
+            elif ai_processed and i in ai_enrichments:
+                # AI processed
+                ai = ai_enrichments[i]
+                enriched["logical_name"] = ai.get("logical_name", "")
+                enriched["is_dynamic"] = ai.get("is_dynamic", False)
+                enriched["skip"] = ai.get("skip", False)
+                enriched["element_type"] = ai.get("element_type", "")
+                enriched["selector_strategy"] = ai.get("selector_strategy", "")
+                if ai.get("improved_xpath"):
+                    enriched.setdefault("selectors", {})["improved_xpath"] = ai["improved_xpath"]
+                enriched["selector_confidence_scores"] = _build_selector_confidence_scores(
+                    enriched,
+                    ai_selector_scores=ai.get("selector_confidence_scores")
+                )
+            else:
+                # AI candidate but AI failed → heuristic fallback
+                enriched["is_dynamic"] = False
+                enriched["skip"] = False
+                enriched["logical_name"] = _heuristic_logical_name(elem, i)
+                enriched["element_type"] = ""
+                enriched["selector_strategy"] = ""
+                enriched["selector_confidence_scores"] = _build_selector_confidence_scores(enriched)
+
+            if "selector_confidence_scores" not in enriched:
+                enriched["selector_confidence_scores"] = _build_selector_confidence_scores(enriched)
+
+            enriched_elements.append(enriched)
+
+        return {
+            "success": True,
+            "ai_processed": ai_processed,
+            "total": len(enriched_elements),
+            "pre_filtered": len(pre_skipped),
+            "dynamic_filtered": len(pre_dynamic),
+            "ai_candidates": len(ai_candidates),
+            "skipped": sum(1 for e in enriched_elements if e.get("skip")),
+            "dynamic": sum(1 for e in enriched_elements if e.get("is_dynamic")),
+            "elements": enriched_elements,
+        }
+
+    except Exception as e:
+        logger.error(f"Element enrichment failed: {e}")
+        raise
+
+
+@router.post("/enrich-elements")
+async def enrich_elements_endpoint(request: Request):
+    """HTTP wrapper around enrich_elements_core."""
+    try:
+        body = await request.json()
+        raw_elements = body.get("elements", [])
+        page_info = body.get("page_info", {})
+        return await enrich_elements_core(raw_elements, page_info)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Element enrichment failed: {str(e)}")
+
+
+def _heuristic_is_dynamic(elem: dict) -> bool:
+    """Detect dynamic elements by content-desc length and common live-data patterns."""
+    sel = elem.get("selectors", {})
+    cd = sel.get("accessibility_id", "")
+    text = elem.get("text", "") or ""
+    combined = cd + " " + text
+
+    # Long content-desc usually means server-fetched/dynamic content
+    if len(cd) > 60:
+        return True
+    import re
+
+    # Temporal patterns (durations, relative time, dates)
+    if re.search(r'\d+\s*(minute|second|hour|day|week|month|year|ago|hr|min|sec)s?\b', combined, re.I):
+        return True
+    # Large numbers with units (views, likes, followers, downloads, ratings, reviews)
+    if re.search(r'\d[\d,\.]*\s*(thousand|million|billion|K|M|B)?\s*(view|like|follower|download|rating|review|subscriber|comment|share|retweet|reaction|upvote|point)s?\b', combined, re.I):
+        return True
+    # Currency / prices
+    if re.search(r'[\$\€\£\¥]\s*\d', combined) or re.search(r'\d+\.\d{2}\b', combined):
+        return True
+    # Percentage patterns
+    if re.search(r'\d+\.?\d*\s*%', combined):
+        return True
+    # Star ratings (e.g. "4.5 stars", "★")
+    if re.search(r'\d\.\d\s*star|★|⭐', combined, re.I):
+        return True
+    return False
+
+
+def _heuristic_should_skip(elem: dict) -> bool:
+    """Skip layout containers and system UI."""
+    tag = (elem.get("tag") or "").lower()
+    attrs = elem.get("attributes", {})
+    cls = (attrs.get("class") or "").lower()
+
+    skip_tags = {"android.view.view", "android.widget.framelayout",
+                 "android.widget.linearlayout", "android.widget.relativelayout"}
+    if tag in skip_tags and not elem.get("text") and not elem.get("interactive"):
+        return True
+    if "statusbar" in cls or "navigationbar" in cls:
+        return True
+    return False
+
+
+def _heuristic_logical_name(elem: dict, index: int) -> str:
+    """Generate a fallback logical name without AI."""
+    sel = elem.get("selectors", {})
+    cd = sel.get("accessibility_id", "")
+    rid = sel.get("id", "")
+    text = (elem.get("text") or "")[:30]
+    tag = elem.get("tag", "element")
+
+    # Short accessibility_id → use it directly
+    if cd and len(cd) <= 40 and not _heuristic_is_dynamic(elem):
+        # camelCase it
+        words = cd.split()
+        if len(words) <= 4:
+            name = words[0].lower() + "".join(w.capitalize() for w in words[1:])
+            return name[:40]
+
+    # Resource-id → extract meaningful part
+    if rid:
+        part = rid.split("/")[-1] if "/" in rid else rid
+        part = part.split(":")[-1] if ":" in part else part
+        return part[:40]
+
+    # Short text
+    if text and len(text) <= 30:
+        words = text.split()[:3]
+        name = words[0].lower() + "".join(w.capitalize() for w in words[1:])
+        clean = "".join(c for c in name if c.isalnum())
+        if clean:
+            return clean[:40]
+
+    return f"element_{index}"
+
+
+def _build_selector_confidence_scores(elem: dict, ai_selector_scores: dict = None) -> dict:
+    """
+    Build per-attribute selector confidence scores (0.0-1.0).
+    AI scores, when available, are blended with heuristic scores for stability.
+    """
+    selectors = elem.get("selectors", {}) or {}
+    attrs = elem.get("attributes", {}) or {}
+
+    text = (elem.get("text") or "").strip()
+    is_dynamic = bool(elem.get("is_dynamic", False))
+
+    def _clip(v: float) -> float:
+        return max(0.0, min(1.0, round(float(v), 3)))
+
+    scores = {}
+
+    acc_id = selectors.get("accessibility_id")
+    if acc_id:
+        base = 0.92
+        if is_dynamic:
+            base -= 0.28
+        if len(str(acc_id)) > 60:
+            base -= 0.22
+        if text and str(acc_id).strip().lower() == text.lower():
+            base -= 0.10
+        scores["accessibility_id"] = _clip(base)
+
+    resource_id = selectors.get("id")
+    if resource_id:
+        rid = str(resource_id).lower()
+        base = 0.88
+        if is_dynamic:
+            base -= 0.20
+        if any(t in rid for t in ["tmp", "temp", "dynamic", "random", "generated"]):
+            base -= 0.18
+        scores["id"] = _clip(base)
+
+    name = selectors.get("name") or attrs.get("name")
+    if name:
+        base = 0.76
+        if is_dynamic:
+            base -= 0.18
+        scores["name"] = _clip(base)
+
+    improved_xpath = selectors.get("improved_xpath")
+    xpath = improved_xpath or selectors.get("xpath")
+    if xpath:
+        xp = str(xpath)
+        base = 0.62 if improved_xpath else 0.52
+        if "contains(" in xp or "starts-with(" in xp:
+            base -= 0.12
+        if "@text=" in xp or "contains(@text" in xp:
+            base -= 0.18
+        if is_dynamic:
+            base -= 0.12
+        scores["xpath"] = _clip(base)
+
+    class_name = selectors.get("class_name") or attrs.get("class")
+    if class_name:
+        base = 0.46
+        if is_dynamic:
+            base -= 0.08
+        scores["class_name"] = _clip(base)
+
+    if isinstance(ai_selector_scores, dict):
+        for key, ai_val in ai_selector_scores.items():
+            if ai_val is None:
+                continue
+            try:
+                ai_score = _clip(float(ai_val))
+            except Exception:
+                continue
+
+            if key in scores:
+                # Blend AI + heuristic so AI can steer but not dominate unstable patterns.
+                scores[key] = _clip((scores[key] * 0.55) + (ai_score * 0.45))
+            else:
+                scores[key] = ai_score
+
+    return scores
+
+
+@router.post("/store-enriched-elements")
+async def store_enriched_elements_endpoint(request: Request):
+    """
+    Store pre-enriched elements into repo.elements.
+    Called by the MCP server after AI enrichment is complete.
+
+    Expects JSON body:
+    {
+        "page_id": "uuid",
+        "elements": [
+            {
+                "name": "homeTab",
+                "primary_selector": {"accessibility_id": "Home", "xpath": "..."},
+                "fallback_selectors": [...],
+                "attributes": {...}
+            }
+        ]
+    }
+    """
+    try:
+        body = await request.json()
+        page_id = body.get("page_id")
+        elements = body.get("elements", [])
+
+        if not page_id:
+            raise HTTPException(400, "page_id is required")
+
+        from core.database import get_database
+        db = await get_database()
+
+        stored_count = 0
+        for elem in elements:
+            try:
+                await db.execute(
+                    """
+                    INSERT INTO repo.elements (page_id, name, primary_selector,
+                                               fallback_selectors, attributes, is_active)
+                    VALUES ($1::uuid, $2, $3::jsonb, $4::jsonb, $5::jsonb, true)
+                    ON CONFLICT (page_id, name) DO UPDATE
+                        SET primary_selector = EXCLUDED.primary_selector,
+                            fallback_selectors = EXCLUDED.fallback_selectors,
+                            attributes = EXCLUDED.attributes,
+                            updated_at = NOW()
+                    """,
+                    str(page_id),
+                    elem["name"],
+                    json.dumps(elem.get("primary_selector", {})),
+                    json.dumps(elem.get("fallback_selectors", [])),
+                    json.dumps(elem.get("attributes", {})),
+                )
+                stored_count += 1
+            except Exception as e:
+                logger.warning(f"Failed to store element '{elem.get('name')}': {e}")
+
+        return {"success": True, "stored_count": stored_count, "page_id": page_id}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Failed to store enriched elements: {str(e)}")
+
 
 @router.post("/analyze-page-elements")
 async def analyze_page_elements(request: Request):

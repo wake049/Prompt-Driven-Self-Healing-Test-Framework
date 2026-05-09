@@ -58,6 +58,9 @@ from api.collaborative_review_api import router as collaborative_review_router  
 from api.document_to_tests_api import router as document_to_tests_router  # Document-to-Test Scenario Generation
 from api.api_test_data_api import router as api_test_data_router  # API Testing for Test Data Creation
 from api.runner_api import router as runner_router  # Remote runner agent registration and polling
+from api.runner_ws import router as runner_ws_router  # WebSocket hub for persistent runner connections
+from api.device_profiles_api import router as device_profiles_router  # Mobile device profile management
+from api.appium_config_api import router as appium_config_router  # Appium testing configuration
 from core.database import get_database_manager, close_database
 
 # Configure logging
@@ -66,6 +69,18 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+class SuppressPollFilter(logging.Filter):
+    """Suppress noisy 204 responses from /runners/poll in access logs."""
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        if "/runners/poll" in msg and "204" in msg:
+            return False
+        return True
+
+
+logging.getLogger("uvicorn.access").addFilter(SuppressPollFilter())
 
 
 def _env_list(name: str, default: str) -> list[str]:
@@ -460,6 +475,27 @@ app.include_router(
     tags=["Runner Agents"]
 )
 
+# Runner WebSocket Hub - persistent connections from runner agents
+app.include_router(
+    runner_ws_router,
+    prefix="/ws",
+    tags=["Runner WebSocket"]
+)
+
+# Mobile Device Profiles API - manage device profiles for responsive testing
+app.include_router(
+    device_profiles_router,
+    prefix="/api/v1/device-profiles",
+    tags=["Device Profiles"]
+)
+
+# Appium Configuration API - manage Appium server and capability profiles
+app.include_router(
+    appium_config_router,
+    prefix="/api/v1/appium-configs",
+    tags=["Appium Configurations"]
+)
+
 # Performance monitoring endpoints
 @app.get("/api/v1/performance/metrics")
 async def get_performance_metrics():
@@ -694,5 +730,6 @@ if __name__ == "__main__":
         host=host,
         port=port,
         reload=reload,
-        log_level="info"
+        log_level="info",
+        ws_max_size=16 * 1024 * 1024,  # 16 MB — element gather results can be large
     )

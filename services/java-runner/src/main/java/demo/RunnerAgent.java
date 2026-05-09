@@ -66,6 +66,9 @@ public class RunnerAgent {
     @Autowired
     private TestExecutionService testExecutionService;
 
+    @Autowired
+    private AppiumServerManager appiumServerManager;
+
     private final ObjectMapper mapper = new ObjectMapper();
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(3);
     private final ExecutorService workExecutor = Executors.newFixedThreadPool(5);
@@ -77,6 +80,8 @@ public class RunnerAgent {
     private final List<Map<String, String>> logBuffer = Collections.synchronizedList(new ArrayList<>());
     private volatile String currentExecutionId = null;
 
+    private RunnerWebSocketClient wsClient;
+
     @EventListener(ApplicationReadyEvent.class)
     public void start() {
         log.info("=== Runner Agent starting ===");
@@ -84,29 +89,54 @@ public class RunnerAgent {
         log.info("Organization: {}", organizationId);
 
         try {
+            // Auto-start Appium server if needed
+            boolean appiumOk = appiumServerManager.startIfNeeded(capabilitiesRaw);
+            if (!appiumOk) {
+                log.warn("Appium server not available — mobile tests may fail");
+            }
+
             runnerToken = loadOrRegister();
             log.info("Runner ID: {}", runnerId);
             log.info("Capabilities: {}", capabilitiesRaw);
-            log.info("Poll interval: {}ms", pollIntervalMs);
 
-            // Start polling loop
-            scheduler.scheduleWithFixedDelay(this::pollOnce, 0, pollIntervalMs, TimeUnit.MILLISECONDS);
+            // Connect to backend via WebSocket (persistent connection)
+            wsClient = new RunnerWebSocketClient(apiUrl, runnerToken, testExecutionService, (level, msg) -> bufferLog(level, msg, null));
+            wsClient.connectBlocking(15, TimeUnit.SECONDS);
 
-            // Start heartbeat loop
-            scheduler.scheduleWithFixedDelay(this::heartbeat, 5000, heartbeatIntervalMs, TimeUnit.MILLISECONDS);
+            if (wsClient.isOpen()) {
+                log.info("=== Runner Agent connected via WebSocket — waiting for commands ===");
+                bufferLog("INFO", "WebSocket connected to " + apiUrl, null);
+            } else {
+                log.warn("WebSocket connection failed — falling back to HTTP polling");
+            }
 
-            // Start log flush loop — batches logs to API every 5 seconds
+            // Keep the HTTP poll loop running even when WebSocket is open.
+            // The backend still claims queued executions through /runners/poll.
+            startHttpPolling();
+
+            // Keep log flush running (sends buffered logs via HTTP as backup)
             scheduler.scheduleWithFixedDelay(this::flushLogs, 10000, 5000, TimeUnit.MILLISECONDS);
 
-            log.info("=== Runner Agent ready — waiting for work ===");
         } catch (Exception e) {
             log.error("Failed to start runner agent", e);
         }
     }
 
+    /**
+     * Fallback: start the original HTTP polling + heartbeat loops.
+     */
+    private void startHttpPolling() {
+        log.info("Starting HTTP polling fallback (poll={}ms, heartbeat={}ms)", pollIntervalMs, heartbeatIntervalMs);
+        scheduler.scheduleWithFixedDelay(this::pollOnce, 0, pollIntervalMs, TimeUnit.MILLISECONDS);
+        scheduler.scheduleWithFixedDelay(this::heartbeat, 5000, heartbeatIntervalMs, TimeUnit.MILLISECONDS);
+    }
+
     @PreDestroy
     public void stop() {
         running = false;
+        if (wsClient != null) {
+            wsClient.shutdown();
+        }
         scheduler.shutdownNow();
         workExecutor.shutdownNow();
         log.info("Runner agent stopped");
@@ -281,6 +311,17 @@ public class RunnerAgent {
             if (work.has("policyConfig")) {
                 Map<String, Object> policyConfig = mapper.convertValue(work.get("policyConfig"), Map.class);
                 request.setPolicyConfig(policyConfig);
+            }
+
+            // Parse mobile/runtime configs for Appium-based executions
+            if (work.has("deviceConfig")) {
+                Map<String, Object> deviceConfig = mapper.convertValue(work.get("deviceConfig"), Map.class);
+                request.setDeviceConfig(deviceConfig);
+            }
+
+            if (work.has("appiumConfig")) {
+                Map<String, Object> appiumConfig = mapper.convertValue(work.get("appiumConfig"), Map.class);
+                request.setAppiumConfig(appiumConfig);
             }
 
             // Execute using the existing service — results are PUT back to the API by

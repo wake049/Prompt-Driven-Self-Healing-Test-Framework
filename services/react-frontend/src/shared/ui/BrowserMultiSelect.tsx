@@ -19,6 +19,18 @@ const BrowserGrid = styled.div`
   gap: 12px;
 `;
 
+const SectionLabel = styled.div`
+  grid-column: 1 / -1;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #6c757d;
+  margin-top: 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #e9ecef;
+`;
+
 const BrowserOption = styled.label<{ checked: boolean }>`
   display: flex;
   align-items: center;
@@ -67,10 +79,19 @@ interface BrowserMultiSelectProps {
 }
 
 const browsers = [
-  { value: 'chrome', label: 'Chrome', emoji: '🌐' },
-  { value: 'firefox', label: 'Firefox', emoji: '🦊' },
-  { value: 'edge', label: 'Microsoft Edge', emoji: '🌊' },
-  { value: 'safari', label: 'Safari', emoji: '🧭' }
+  { value: 'chrome', label: 'Chrome', emoji: '🌐', section: 'desktop' },
+  { value: 'firefox', label: 'Firefox', emoji: '🦊', section: 'desktop' },
+  { value: 'edge', label: 'Microsoft Edge', emoji: '🌊', section: 'desktop' },
+  { value: 'safari', label: 'Safari', emoji: '🧭', section: 'desktop' },
+  { value: 'chrome-mobile', label: 'Chrome Mobile', emoji: '📱', section: 'mobile' },
+  { value: 'chrome-tablet', label: 'Chrome Tablet', emoji: '📲', section: 'mobile' },
+  { value: 'appium-android-web', label: 'Android Web', emoji: '🤖', section: 'appium' },
+  { value: 'appium-ios-web', label: 'iOS Web', emoji: '🍎', section: 'appium' },
+  { value: 'appium-android-native', label: 'Android Native', emoji: '📦', section: 'appium' },
+  { value: 'appium-ios-native', label: 'iOS Native', emoji: '📦', section: 'appium' },
+  { value: 'appium-flutter', label: 'Flutter App', emoji: '💙', section: 'appium' },
+  { value: 'appium-windows', label: 'Windows Desktop', emoji: '🪟', section: 'appium' },
+  { value: 'appium-mac', label: 'Mac Desktop', emoji: '🍏', section: 'appium' },
 ];
 
 export const BrowserMultiSelect: React.FC<BrowserMultiSelectProps> = ({
@@ -95,7 +116,40 @@ export const BrowserMultiSelect: React.FC<BrowserMultiSelectProps> = ({
     <BrowserMultiSelectContainer>
       <Label>Preferred Browsers</Label>
       <BrowserGrid>
-        {browsers.map(browser => (
+        <SectionLabel>Desktop Browsers</SectionLabel>
+        {browsers.filter(b => b.section === 'desktop').map(browser => (
+          <BrowserOption
+            key={browser.value}
+            checked={value.includes(browser.value)}
+          >
+            <input
+              type="checkbox"
+              checked={value.includes(browser.value)}
+              onChange={() => handleToggle(browser.value)}
+              disabled={disabled}
+            />
+            <span className="browser-emoji">{browser.emoji}</span>
+            <span>{browser.label}</span>
+          </BrowserOption>
+        ))}
+        <SectionLabel>Mobile &amp; Tablet</SectionLabel>
+        {browsers.filter(b => b.section === 'mobile').map(browser => (
+          <BrowserOption
+            key={browser.value}
+            checked={value.includes(browser.value)}
+          >
+            <input
+              type="checkbox"
+              checked={value.includes(browser.value)}
+              onChange={() => handleToggle(browser.value)}
+              disabled={disabled}
+            />
+            <span className="browser-emoji">{browser.emoji}</span>
+            <span>{browser.label}</span>
+          </BrowserOption>
+        ))}
+        <SectionLabel>Appium (Real Devices &amp; Desktop)</SectionLabel>
+        {browsers.filter(b => b.section === 'appium').map(browser => (
           <BrowserOption
             key={browser.value}
             checked={value.includes(browser.value)}
@@ -112,7 +166,7 @@ export const BrowserMultiSelect: React.FC<BrowserMultiSelectProps> = ({
         ))}
       </BrowserGrid>
       <Description>
-        Select browsers for test execution. Tests will run on the first available browser from this list.
+        Select browsers for test execution. Mobile options use Chrome DevTools emulation. Appium options require an Appium server.
       </Description>
     </BrowserMultiSelectContainer>
   );

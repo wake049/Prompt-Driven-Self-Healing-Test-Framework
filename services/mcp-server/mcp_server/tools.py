@@ -88,6 +88,8 @@ class ToolExecutor:
                 result_data = await self._execute_bulk_generate_locators(args, tenant_context)
             elif tool_name == "analyze_page_elements":
                 result_data = await self._execute_analyze_page_elements(args, tenant_context)
+            elif tool_name == "elements.process_gathered":
+                result_data = await self._execute_elements_process_gathered(args, tenant_context)
             elif tool_name == "analytics_healing_data":
                 result_data = await self._execute_analytics_healing_data(args, tenant_context)
             elif tool_name == "analytics_trends":
@@ -558,6 +560,144 @@ class ToolExecutor:
             return result
         except httpx.HTTPError as e:
             raise Exception(f"Failed to analyze page elements: AI service unavailable ({str(e)})")
+
+    async def _execute_elements_process_gathered(self, args: Dict[str, Any], tenant_context: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Process raw gathered elements through the full pipeline:
+        1. Format raw elements for AI consumption
+        2. Send to AI enrichment endpoint for stable naming / dynamic detection
+        3. Format enriched elements for DB storage
+        4. Store in repo.elements via the unified API
+
+        This tool is the MCP orchestrator — once it receives elements from
+        the runner, no further runner calls are made.
+        """
+        raw_elements = args.get("elements", [])
+        page_info = args.get("page_info", {})
+        page_id = args["page_id"]
+        auth_token = args.get("auth_token", "")
+
+        if not raw_elements:
+            return {"success": True, "stored_count": 0, "message": "No elements to process"}
+
+        headers = {}
+        if auth_token:
+            headers["Authorization"] = f"Bearer {auth_token}"
+
+        # ---- Step 1: Send to AI enrichment ----
+        enrich_payload = {
+            "elements": raw_elements,
+            "page_info": page_info,
+        }
+
+        enriched_elements = raw_elements  # fallback if AI fails
+        ai_processed = False
+
+        try:
+            enrich_resp = await self.unified_api_client.post(
+                "/api/v1/ai/enrich-elements",
+                json=enrich_payload,
+                headers=headers,
+                timeout=60.0,
+            )
+            enrich_resp.raise_for_status()
+            enrich_result = enrich_resp.json()
+            if enrich_result.get("success"):
+                enriched_elements = enrich_result.get("elements", raw_elements)
+                ai_processed = enrich_result.get("ai_processed", False)
+        except Exception as e:
+            # AI enrichment failed — proceed with raw elements
+            pass
+
+        # ---- Step 2: Format and store in DB ----
+        import json as _json
+
+        store_payload = {
+            "page_id": page_id,
+            "elements": [],
+        }
+
+        for elem in enriched_elements:
+            if elem.get("skip"):
+                continue
+
+            selectors = elem.get("selectors", {})
+            attrs = elem.get("attributes", {})
+            attrs["tag"] = elem.get("tag", "")
+            if elem.get("text"):
+                attrs["text"] = elem["text"]
+            attrs["interactive"] = str(elem.get("interactive", False))
+            if elem.get("is_dynamic"):
+                attrs["is_dynamic"] = "true"
+            if elem.get("sticky"):
+                attrs["sticky"] = "true"
+            if elem.get("element_type"):
+                attrs["element_type"] = elem["element_type"]
+
+            # Build primary selector
+            primary = {}
+            improved_xpath = selectors.get("improved_xpath")
+            if selectors.get("accessibility_id") and not elem.get("is_dynamic"):
+                primary["accessibility_id"] = selectors["accessibility_id"]
+                primary["xpath"] = improved_xpath or selectors.get("xpath", "")
+            elif selectors.get("id"):
+                primary["id"] = selectors["id"]
+                primary["xpath"] = improved_xpath or selectors.get("xpath", "")
+            elif improved_xpath:
+                primary["xpath"] = improved_xpath
+            elif "class_name" in selectors:
+                primary["class_name"] = selectors["class_name"]
+                if selectors.get("xpath"):
+                    primary["xpath"] = selectors["xpath"]
+            elif selectors.get("xpath"):
+                primary["xpath"] = selectors["xpath"]
+
+            # Fallbacks
+            fallbacks = []
+            for k, v in selectors.items():
+                if k not in ("improved_xpath",) and {k: v} != primary:
+                    fallbacks.append({k: v})
+
+            # Use AI logical name if available, else heuristic
+            element_key = (
+                elem.get("logical_name")
+                or selectors.get("accessibility_id")
+                or (selectors.get("id") if selectors.get("id", "").lower() != "null" else None)
+                or selectors.get("name")
+                or f"element_{elem.get('index', 0)}"
+            )
+
+            store_payload["elements"].append({
+                "name": element_key,
+                "primary_selector": primary,
+                "fallback_selectors": fallbacks,
+                "attributes": attrs,
+            })
+
+        # ---- Step 3: Bulk store via unified API ----
+        try:
+            store_resp = await self.unified_api_client.post(
+                "/api/v1/ai/store-enriched-elements",
+                json=store_payload,
+                headers=headers,
+                timeout=30.0,
+            )
+            store_resp.raise_for_status()
+            store_result = store_resp.json()
+            stored_count = store_result.get("stored_count", 0)
+        except Exception as e:
+            raise Exception(f"Failed to store enriched elements: {str(e)}")
+
+        return {
+            "success": True,
+            "ai_processed": ai_processed,
+            "total_elements": len(raw_elements),
+            "skipped": sum(1 for e in enriched_elements if e.get("skip")),
+            "stored_count": stored_count,
+            "message": f"Processed {len(raw_elements)} elements"
+                       f" (AI: {'yes' if ai_processed else 'no'},"
+                       f" stored: {stored_count})"
+        }
 
     async def _execute_analytics_healing_data(self, args: Dict[str, Any], tenant_context: Dict[str, Any]) -> Dict[str, Any]:
         """Get healing analytics data"""

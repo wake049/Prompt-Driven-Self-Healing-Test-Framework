@@ -169,6 +169,10 @@ class PromptEnvelope(BaseEnterpriseModel):
     page_id: Optional[str] = Field(None, description="Unique page identifier")
     page_url: Optional[str] = Field(None, description="Page URL for context")
     
+    # Test type
+    test_type: Optional[str] = Field(default="web", description="Test type: 'web' for browser tests, 'app' for native mobile app tests")
+    platform: Optional[str] = Field(default=None, description="Target platform for app tests: 'android', 'ios'")
+    
     # Request options
     max_steps: int = Field(default=20, ge=1, le=100, description="Maximum steps to generate")
     include_screenshots: bool = Field(default=False, description="Include screenshot steps")

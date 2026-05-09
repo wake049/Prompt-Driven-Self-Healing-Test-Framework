@@ -246,18 +246,24 @@ async def poll_for_work(
             "description": s["description"] or "",
         })
 
-    # Load policy config from runner_meta if available
+    # Load policy config and device config from runner_meta if available
     policy_config = runner_meta.get("policy_config", {})
+    device_config = runner_meta.get("device_config", None)
+    appium_config = runner_meta.get("appium_config", None)
 
     logger.info(
-        "Runner %s claimed execution %s (%s, %d steps)",
+        "Runner %s claimed execution %s (%s, %d steps%s%s)",
         runner_id, execution_id, browser_type, len(step_list),
+        f", device: {device_config.get('device_name')}" if device_config else "",
+        f", appium: {appium_config.get('config_type')}" if appium_config else "",
     )
 
     return {
         "executionId": execution_id,
         "promptId": prompt_id,
         "browserType": browser_type,
+        "deviceConfig": device_config,
+        "appiumConfig": appium_config,
         "steps": step_list,
         "policyConfig": policy_config,
         "authToken": "",
@@ -326,6 +332,40 @@ async def list_runners(
         runners.append(runner_dict)
 
     return {"runners": runners, "count": len(runners)}
+
+
+@router.delete("/{runner_id}")
+async def delete_runner(
+    runner_id: str,
+    db: DatabaseManager = Depends(_get_db),
+):
+    """Delete a runner and its logs."""
+    row = await db.execute_one(
+        "SELECT id FROM exec.runners WHERE id = $1",
+        runner_id,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Runner not found")
+
+    # Delete logs first (FK), then the runner
+    await db.execute_one(
+        "DELETE FROM exec.runner_logs WHERE runner_id = $1 RETURNING runner_id",
+        runner_id,
+    ) if await db.fetchval(
+        "SELECT 1 FROM information_schema.tables WHERE table_schema='exec' AND table_name='runner_logs'"
+    ) else None
+
+    # Detach this runner from any execution runs that reference it
+    await db.execute(
+        "UPDATE exec.runs SET assigned_runner_id = NULL WHERE assigned_runner_id = $1",
+        runner_id,
+    )
+
+    await db.execute_one(
+        "DELETE FROM exec.runners WHERE id = $1 RETURNING id",
+        runner_id,
+    )
+    return {"id": runner_id, "status": "deleted"}
 
 
 @router.post("/logs")
@@ -462,11 +502,20 @@ runner.name=
 # API key (if required by your server)
 runner.api-key=
 
-# Browsers this runner supports (comma-separated: chrome,firefox,edge)
+# Browsers this runner supports
+# (comma-separated: chrome,firefox,edge,chrome-mobile,chrome-tablet,
+#  appium-android-web,appium-ios-web,appium-android-native,
+#  appium-ios-native,appium-flutter,appium-windows,appium-mac)
 runner.capabilities=chrome
 
 # Run browsers in headless mode? (true/false)
 HEADLESS=false
+
+# Appium server URL (required for appium-* capabilities)
+# runner.appium-server-url=http://localhost:4723
+
+# Auto-start Appium server when runner starts (true/false)
+# runner.appium-auto-start=true
 
 # Port for health check endpoint
 server.port=8080
@@ -542,6 +591,31 @@ echo "Starting Self-Healing Test Runner Agent..."
 - Chrome, Firefox, or Edge installed on this machine
 - Java 17+ (or place a JRE in the jre/ folder)
 - Outbound access to your platform API
+
+## Mobile & Tablet Emulation
+
+This runner supports Chrome-based mobile and tablet emulation.
+Set `runner.capabilities=chrome-mobile,chrome-tablet` in config to advertise
+mobile support. Device profiles are managed via the web dashboard and passed
+automatically when tests are executed with a device profile selected.
+
+## Appium Testing
+
+For real-device and desktop app testing, this runner supports Appium integration.
+Add the desired Appium capabilities to `runner.capabilities`:
+
+- `appium-android-web` — Android mobile browser via Appium
+- `appium-ios-web` — iOS Safari via Appium
+- `appium-android-native` — Android native app (UiAutomator2)
+- `appium-ios-native` — iOS native app (XCUITest)
+- `appium-flutter` — Flutter app testing
+- `appium-windows` — Windows desktop app (WinAppDriver)
+- `appium-mac` — Mac desktop app (Mac2)
+
+Prerequisites for Appium capabilities:
+- Appium server running locally or a cloud endpoint (BrowserStack, Sauce Labs)
+- Configure `runner.appium-server-url` in properties
+- Appium configurations are managed in the web dashboard under Appium Testing
 """
         zf.writestr("self-healing-runner/README.md", readme)
     

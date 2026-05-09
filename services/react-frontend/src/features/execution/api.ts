@@ -73,13 +73,21 @@ class AuthenticatedApiService {
     });
 
     if (!response.ok) {
-      if (response.status === 401 || response.status === 403) {
+      if (response.status === 401) {
         // Redirect to login on auth failure
         localStorage.removeItem('auth_token');
         window.location.href = '/login';
         throw new Error('Authentication required');
       }
-      throw new Error(`API Error: ${response.status} ${response.statusText}`);
+      let errorDetail = '';
+      try {
+        const errorBody = await response.json();
+        errorDetail = errorBody?.detail || errorBody?.message || errorBody?.error || '';
+      } catch { /* ignore */ }
+      if (response.status === 403 && errorDetail) {
+        window.dispatchEvent(new CustomEvent('subscription-limit-error', { detail: errorDetail }));
+      }
+      throw new Error(errorDetail || `API Error: ${response.status} ${response.statusText}`);
     }
 
     return response.json();
@@ -94,7 +102,7 @@ class AuthenticatedApiService {
       if (params.toString()) url += `?${params.toString()}`;
     }
     return this.fetchWithAuth<ExecutionStats>(url);
-  }
+  };
 
   async getRecentExecutions(options?: { limit?: number; test_case_id?: string; prompt_id?: string }): Promise<ExecutionRecord[]> {
     let url = '/api/v1/dashboard/execution/recent';

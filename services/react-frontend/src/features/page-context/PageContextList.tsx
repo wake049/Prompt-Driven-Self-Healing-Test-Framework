@@ -127,6 +127,9 @@ const TypeBadge = styled.span<{ pageType: string }>`
       social: '#fce4ec',
       search: '#f8f9fa',
       streaming: '#e1f5fe',
+      'mobile-android': '#e8f5e9',
+      'mobile-ios': '#f3e5f5',
+      'mobile-web': '#e0f2f1',
       other: '#f8f9fa'
     };
     return colors[props.pageType] || colors.other;
@@ -141,6 +144,9 @@ const TypeBadge = styled.span<{ pageType: string }>`
       social: '#880e4f',
       search: '#6c757d',
       streaming: '#01579b',
+      'mobile-android': '#2e7d32',
+      'mobile-ios': '#6a1b9a',
+      'mobile-web': '#00695c',
       other: '#6c757d'
     };
     return colors[props.pageType] || colors.other;
@@ -472,6 +478,9 @@ export const PageContextList: React.FC<PageContextListProps> = ({
     social: 'Social Media',
     search: 'Search',
     streaming: 'Streaming',
+    'mobile-android': 'Android App',
+    'mobile-ios': 'iOS App',
+    'mobile-web': 'Mobile Web',
     other: 'Other',
   };
 

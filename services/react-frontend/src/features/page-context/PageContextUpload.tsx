@@ -367,15 +367,18 @@ interface PageContextUploadProps {
 }
 
 const PAGE_TYPES = [
-  { value: 'ecommerce', label: 'E-commerce', description: 'Online shopping sites' },
-  { value: 'airline', label: 'Airlines', description: 'Flight booking and travel' },
-  { value: 'banking', label: 'Banking', description: 'Financial services' },
-  { value: 'form', label: 'Forms', description: 'Data collection forms' },
-  { value: 'news', label: 'News', description: 'News and content sites' },
-  { value: 'social', label: 'Social Media', description: 'Social platforms' },
-  { value: 'search', label: 'Search', description: 'Search engines' },
-  { value: 'streaming', label: 'Streaming', description: 'Video/media platforms' },
-  { value: 'other', label: 'Other', description: 'Other website types' },
+  { value: 'ecommerce', label: 'E-commerce', description: 'Online shopping sites', mobile: false },
+  { value: 'airline', label: 'Airlines', description: 'Flight booking and travel', mobile: false },
+  { value: 'banking', label: 'Banking', description: 'Financial services', mobile: false },
+  { value: 'form', label: 'Forms', description: 'Data collection forms', mobile: false },
+  { value: 'news', label: 'News', description: 'News and content sites', mobile: false },
+  { value: 'social', label: 'Social Media', description: 'Social platforms', mobile: false },
+  { value: 'search', label: 'Search', description: 'Search engines', mobile: false },
+  { value: 'streaming', label: 'Streaming', description: 'Video/media platforms', mobile: false },
+  { value: 'mobile-android', label: 'Android App', description: 'Android native or hybrid app', mobile: true },
+  { value: 'mobile-ios', label: 'iOS App', description: 'iOS native or hybrid app', mobile: true },
+  { value: 'mobile-web', label: 'Mobile Web', description: 'Mobile browser web app', mobile: true },
+  { value: 'other', label: 'Other', description: 'Other website types', mobile: false },
 ];
 
 // ================================
@@ -478,10 +481,14 @@ export const PageContextUpload: React.FC<PageContextUploadProps> = ({ onSubmit, 
   const validateForm = (): boolean => {
     const newErrors: Record<string, string> = {};
 
-    if (!formData.pageUrl.trim()) {
-      newErrors.pageUrl = 'Page URL is required';
-    } else if (!formData.pageUrl.match(/^https?:\/\/.+/)) {
-      newErrors.pageUrl = 'Please enter a valid URL';
+    const isMobileType = PAGE_TYPES.find(t => t.value === formData.pageType)?.mobile;
+
+    if (!isMobileType) {
+      if (!formData.pageUrl.trim()) {
+        newErrors.pageUrl = 'Page URL is required';
+      } else if (!formData.pageUrl.match(/^https?:\/\/.+/)) {
+        newErrors.pageUrl = 'Please enter a valid URL';
+      }
     }
 
     if (!formData.pageTitle.trim()) {
@@ -535,18 +542,61 @@ export const PageContextUpload: React.FC<PageContextUploadProps> = ({ onSubmit, 
       </Header>
 
       <Form onSubmit={handleSubmit}>
+        {/* Page Type — shown first so mobile toggle can affect URL */}
+        <FormSection>
+          <FormField>
+            <Label>
+              Page Type<RequiredIndicator>*</RequiredIndicator>
+            </Label>
+            <Select
+              value={formData.pageType}
+              onChange={handleInputChange('pageType')}
+              hasError={!!errors.pageType}
+            >
+              <option value="">Select page type...</option>
+              <optgroup label="Web">
+                {PAGE_TYPES.filter(t => !t.mobile).map(type => (
+                  <option key={type.value} value={type.value}>
+                    {type.label} — {type.description}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="Mobile">
+                {PAGE_TYPES.filter(t => t.mobile).map(type => (
+                  <option key={type.value} value={type.value}>
+                    {type.label} — {type.description}
+                  </option>
+                ))}
+              </optgroup>
+            </Select>
+            {errors.pageType && (
+              <ErrorMessage>
+                <AlertCircle size={16} />
+                {errors.pageType}
+              </ErrorMessage>
+            )}
+          </FormField>
+        </FormSection>
+
         {/* URL and Title */}
         <FormSection>
           <FormGrid>
             <FormField>
               <Label>
-                Page URL<RequiredIndicator>*</RequiredIndicator>
+                {PAGE_TYPES.find(t => t.value === formData.pageType)?.mobile
+                  ? <>Page URL<HelpText>(optional for mobile apps)</HelpText></>
+                  : <>Page URL<RequiredIndicator>*</RequiredIndicator></>
+                }
               </Label>
               <Input
-                type="url"
+                type="text"
                 value={formData.pageUrl}
                 onChange={handleInputChange('pageUrl')}
-                placeholder="https://example.com"
+                placeholder={
+                  PAGE_TYPES.find(t => t.value === formData.pageType)?.mobile
+                    ? 'e.g. com.example.app or leave blank'
+                    : 'https://example.com'
+                }
                 hasError={!!errors.pageUrl}
               />
               {errors.pageUrl && (
@@ -565,7 +615,11 @@ export const PageContextUpload: React.FC<PageContextUploadProps> = ({ onSubmit, 
                 type="text"
                 value={formData.pageTitle}
                 onChange={handleInputChange('pageTitle')}
-                placeholder="Page Title"
+                placeholder={
+                  PAGE_TYPES.find(t => t.value === formData.pageType)?.mobile
+                    ? 'e.g. Login Screen, Home Dashboard'
+                    : 'Page Title'
+                }
                 hasError={!!errors.pageTitle}
               />
               {errors.pageTitle && (
@@ -576,33 +630,6 @@ export const PageContextUpload: React.FC<PageContextUploadProps> = ({ onSubmit, 
               )}
             </FormField>
           </FormGrid>
-        </FormSection>
-
-        {/* Page Type */}
-        <FormSection>
-          <FormField>
-            <Label>
-              Page Type<RequiredIndicator>*</RequiredIndicator>
-            </Label>
-            <Select
-              value={formData.pageType}
-              onChange={handleInputChange('pageType')}
-              hasError={!!errors.pageType}
-            >
-              <option value="">Select page type...</option>
-              {PAGE_TYPES.map(type => (
-                <option key={type.value} value={type.value}>
-                  {type.label} - {type.description}
-                </option>
-              ))}
-            </Select>
-            {errors.pageType && (
-              <ErrorMessage>
-                <AlertCircle size={16} />
-                {errors.pageType}
-              </ErrorMessage>
-            )}
-          </FormField>
         </FormSection>
 
         {/* Description */}

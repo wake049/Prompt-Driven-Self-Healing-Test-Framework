@@ -27,6 +27,8 @@ import { TestSuiteDetailView } from "../features/test-suites/components/TestSuit
 import { DocumentToTestsPage } from "../features/document-to-tests";
 import { ApiTestDataPage } from "../features/api-test-data";
 import { RunnersPage } from "../features/runners";
+import { MobileTestingPage } from "../features/mobile-testing";
+import { AppiumTestingPage } from "../features/appium-testing";
 
 /**
  * Route guard: redirects unauthenticated users to /onboarding.
@@ -71,6 +73,8 @@ export function AppRoutes() {
       <Route path="/document-to-tests" element={<PrivateRoute><DocumentToTestsPage /></PrivateRoute>} />
       <Route path="/api-test-data" element={<PrivateRoute><ApiTestDataPage /></PrivateRoute>} />
       <Route path="/runners" element={<PrivateRoute><RunnersPage /></PrivateRoute>} />
+      <Route path="/mobile-testing" element={<PrivateRoute><MobileTestingPage /></PrivateRoute>} />
+      <Route path="/appium-testing" element={<PrivateRoute><AppiumTestingPage /></PrivateRoute>} />
       <Route path="*" element={<Navigate to="/onboarding" replace />} />
     </Routes>
   );

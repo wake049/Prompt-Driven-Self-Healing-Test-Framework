@@ -198,6 +198,12 @@ class MCPServer:
                 "inputSchema": TOOL_SCHEMAS["analyze_page_elements"]
             },
             {
+                "name": "elements.process_gathered",
+                "description": "Process raw elements from the Appium/browser runner: format → AI enrich → format → store in DB. "
+                               "Handles dynamic element detection, stable naming, and selector improvement.",
+                "inputSchema": TOOL_SCHEMAS["elements.process_gathered"]
+            },
+            {
                 "name": "sql_get_all_elements",
                 "description": "Get all elements from the SQL database",
                 "inputSchema": TOOL_SCHEMAS["sql_get_all_elements"]

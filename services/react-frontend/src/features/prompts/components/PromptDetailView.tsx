@@ -589,6 +589,7 @@ interface PromptData {
   description: string;
   content: string;
   starting_url?: string;
+  test_type?: 'web' | 'app';
   external_id?: string;  // Jira/Xray ID - editable by user
   category: string;
   tags: string[];  // Changed to match API response
@@ -2169,6 +2170,7 @@ export const PromptDetailView: React.FC = () => {
   const [editedContent, setEditedContent] = useState('');
   const [editedDescription, setEditedDescription] = useState('');
   const [editedStartingUrl, setEditedStartingUrl] = useState('');
+  const [editedTestType, setEditedTestType] = useState<'web' | 'app'>('web');
   const [editedExternalId, setEditedExternalId] = useState('');
   
   // Failure analysis state
@@ -2194,6 +2196,8 @@ export const PromptDetailView: React.FC = () => {
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [syncElementsPage, setSyncElementsPage] = useState(1);
   const [syncStepsPage, setSyncStepsPage] = useState(1);
+  const [activePlatformTab, setActivePlatformTab] = useState<'shared' | 'android' | 'ios'>('shared');
+  const [platformVariants, setPlatformVariants] = useState<{ android?: any[]; ios?: any[] }>({});
 
   // Sync functionality
   const {
@@ -2287,6 +2291,7 @@ export const PromptDetailView: React.FC = () => {
         description: apiData.description || '',
         content: apiData.content || '',
         starting_url: apiData.starting_url,
+        test_type: apiData.test_type || 'web',
         external_id: apiData.external_id || '',
         category: apiData.category || '',
         tags: apiData.tags || [],
@@ -2385,6 +2390,17 @@ export const PromptDetailView: React.FC = () => {
             }
           });
           setTestPlanSaved(true);
+
+          // Load platform variants if present
+          if (selectedPlan.platform_variants) {
+            let variants = selectedPlan.platform_variants;
+            if (typeof variants === 'string') {
+              try { variants = JSON.parse(variants); } catch { variants = {}; }
+            }
+            if (variants && typeof variants === 'object') {
+              setPlatformVariants(variants);
+            }
+          }
         }
       } else if (response.status === 404) {
         // This is normal - not all prompts have saved test plans
@@ -2404,6 +2420,7 @@ export const PromptDetailView: React.FC = () => {
   const handleEdit = () => {setEditedDescription(prompt?.description || '');
     setEditedContent(prompt?.content || '');
     setEditedStartingUrl(prompt?.starting_url || '');
+    setEditedTestType(prompt?.test_type || 'web');
     setEditedExternalId(prompt?.external_id || '');
     setIsEditing(true);
   };
@@ -2417,7 +2434,8 @@ export const PromptDetailView: React.FC = () => {
         title: prompt.title,
         content: editedContent,  // Changed from 'text' to 'content'
         description: editedDescription,  // Changed from 'intent' to 'description'
-        starting_url: editedStartingUrl,
+        starting_url: editedTestType === 'web' ? editedStartingUrl : '',
+        test_type: editedTestType,
         external_id: editedExternalId || null,  // Jira/Xray ID
         category: prompt.category
       };
@@ -2428,6 +2446,7 @@ export const PromptDetailView: React.FC = () => {
         description: savedPrompt.description || '',
         content: savedPrompt.content || '',
         starting_url: savedPrompt.starting_url || '',
+        test_type: savedPrompt.test_type || 'web',
         external_id: savedPrompt.external_id || '',
         dateModified: savedPrompt.updated_at || new Date().toISOString()
       };
@@ -2452,8 +2471,34 @@ export const PromptDetailView: React.FC = () => {
     setEditedDescription('');
     setEditedContent('');
     setEditedStartingUrl('');
+    setEditedTestType('web');
     setEditedExternalId('');
   };
+
+  // Fetch available Appium configs when test_type is 'app'
+  useEffect(() => {
+    if (prompt?.test_type !== 'app') return;
+    const fetchAppiumConfigs = async () => {
+      try {
+        const tok = localStorage.getItem('auth_token');
+        const resp = await fetch(`${config.apiBaseUrl}/api/v1/appium-configs`, {
+          headers: tok ? { Authorization: `Bearer ${tok}` } : {},
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          setAppiumConfigs(data || []);
+          // Auto-select first config if none selected
+          if (!selectedAppiumConfigId && data?.length > 0) {
+            const defaultCfg = data.find((c: any) => c.is_default) || data[0];
+            setSelectedAppiumConfigId(defaultCfg.id);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to fetch Appium configs:', err);
+      }
+    };
+    fetchAppiumConfigs();
+  }, [prompt?.test_type]);
 
   // Fetch available runner agents for the runner picker
   useEffect(() => {
@@ -2483,9 +2528,12 @@ export const PromptDetailView: React.FC = () => {
     try {
       setIsRunning(true);
       
-      // Call the test execution API - no browser param needed, uses policy config
-      const execOptions: { browser?: string; runner_id?: string } = {};
+      // Call the test execution API
+      const execOptions: { browser?: string; runner_id?: string; appium_config_id?: string } = {};
       if (selectedRunnerId) execOptions.runner_id = selectedRunnerId;
+      if (prompt?.test_type === 'app' && selectedAppiumConfigId) {
+        execOptions.appium_config_id = selectedAppiumConfigId;
+      }
       const result = await unifiedApiClient.executePrompt(id, Object.keys(execOptions).length ? execOptions : undefined);
       
       if (result.success && result.executions) {
@@ -2536,6 +2584,8 @@ export const PromptDetailView: React.FC = () => {
   const [selectedBrowser, setSelectedBrowser] = useState<string>('chrome'); // Multi-browser support
   const [selectedRunnerId, setSelectedRunnerId] = useState<string>(''); // Runner agent selection
   const [availableRunners, setAvailableRunners] = useState<Array<{ id: string; runner_name: string; status: string; capabilities: string[] | string }>>([]);
+  const [appiumConfigs, setAppiumConfigs] = useState<Array<{ id: string; name: string; config_type: string; device_name?: string; app_package?: string }>>([]);
+  const [selectedAppiumConfigId, setSelectedAppiumConfigId] = useState<string>('');
 
   // Poll execution status
   const pollExecutionStatus = async (executionId: string) => {
@@ -2772,12 +2822,21 @@ export const PromptDetailView: React.FC = () => {
       // Extract key terms from prompt for relevance scoring
       const promptWords = promptText.toLowerCase().split(/\s+/)
         .filter(word => word.length > 2)
-        .filter(word => !['the', 'and', 'but', 'for', 'are', 'with', 'this', 'that'].includes(word));// Phase 1: Get available elements for step generation
+        .filter(word => !['the', 'and', 'but', 'for', 'are', 'with', 'this', 'that'].includes(word));
+
+      const isAppTest = prompt.test_type === 'app';
+
+      // Phase 1: Get available elements for step generation
       let availableElements: any[] = [];
       
       try {// First, get available elements using authenticated request
         const token = localStorage.getItem('auth_token');
-        const elementsResponse = await fetch(`${config.apiBaseUrl}/api/v1/sql/elements?limit=1000`, {
+        // For app tests, filter elements by platform
+        let elementsUrl = `${config.apiBaseUrl}/api/v1/sql/elements?limit=1000`;
+        if (isAppTest) {
+          elementsUrl += '&platform=android'; // Default to android; can be made dynamic later
+        }
+        const elementsResponse = await fetch(elementsUrl, {
           method: 'GET',
           headers: {
             'Content-Type': 'application/json',
@@ -3037,14 +3096,16 @@ export const PromptDetailView: React.FC = () => {
         : `${prompt.title}: ${prompt.description}`;
       
       // Transform to new enterprise PromptEnvelope format
-      const promptEnvelope = {
+      const promptEnvelope: Record<string, any> = {
         prompt: primaryPrompt,
         prompt_id: prompt.id,  // Include prompt ID so AI can load existing bindings
         tenant_id: "frontend-user", // Default tenant for frontend usage
-        page_url: pageUrl,
+        page_url: isAppTest ? undefined : pageUrl, // No URL for native app tests
         max_steps: 50,
         include_screenshots: false,
         include_assertions: true,
+        test_type: prompt.test_type || 'web',
+        ...(isAppTest && { platform: 'android' }), // Include platform for app tests
         // page_context is now handled automatically by the backend's two-phase AI system
         page_slice: availableElements.length > 0 ? {
           slice_strategy: "heuristicFilter",
@@ -3087,19 +3148,38 @@ export const PromptDetailView: React.FC = () => {
       const legacyResponse = {
         success: true,
         plan: {
-          actions: data.steps?.map((step: any) => ({
-            name: step.action || step.name || 'unknown',
-            params: {
-              // For open_url actions, put target in url field, not selector
-              selector: step.action === 'open_url' ? '' : (step.target || step.args?.selector || ''),
-              url: step.action === 'open_url' ? step.target : (step.args?.url || ''),
-              text: step.args?.text || '',
-              timeout: step.args?.timeout || 5000,
-              description: step.description || '',
-              confidence: step.confidence || 0.8,
+          actions: data.steps?.map((step: any) => {
+            if (isAppTest) {
+              // Native app actions: preserve native selectors and action types
+              return {
+                name: step.action || step.name || 'unknown',
+                params: {
+                  selector: step.target || step.args?.selector || '',
+                  text: step.args?.text || '',
+                  timeout: step.args?.timeout || 5000,
+                  description: step.description || '',
+                  confidence: step.confidence || 0.8,
+                  direction: step.args?.direction || '',
+                  duration: step.args?.duration || '',
+                  variable: step.args?.variable || '',
+                  ...step.args
+                }
+              };
+            }
+            return {
+              name: step.action || step.name || 'unknown',
+              params: {
+                // For open_url actions, put target in url field, not selector
+                selector: step.action === 'open_url' ? '' : (step.target || step.args?.selector || ''),
+                url: step.action === 'open_url' ? step.target : (step.args?.url || ''),
+                text: step.args?.text || '',
+                timeout: step.args?.timeout || 5000,
+                description: step.description || '',
+                confidence: step.confidence || 0.8,
               ...step.args
             }
-          })) || [],
+          };
+          }) || [],
           meta: {
             pageUrl: pageUrl,
             tenant: data.tenant_id,
@@ -3152,7 +3232,11 @@ export const PromptDetailView: React.FC = () => {
         original_step_count: generatedSteps.plan?.meta?.originalStepCount,
         processing_time_ms: generatedSteps.metadata?.processingTimeMs,
         generation_success: true,
-        created_by: 'user'
+        created_by: 'user',
+        // Include platform variants if any exist
+        ...(Object.keys(platformVariants).length > 0 && {
+          platform_variants: platformVariants,
+        }),
       };const token = localStorage.getItem('auth_token');
   const response = await fetch(`${config.apiBaseUrl}/api/v1/generated-test-plans`, {
         method: 'POST',
@@ -3583,13 +3667,38 @@ export const PromptDetailView: React.FC = () => {
               </TitleLeft>
 
               <ActionsBar>
-                <BrowserSelector
-                  value={selectedBrowser}
-                  onChange={setSelectedBrowser}
-                  disabled={isRunning}
-                  showIcon={false}
-                  variant="header"
-                />
+                {prompt.test_type === 'app' ? (
+                  <select
+                    value={selectedAppiumConfigId}
+                    onChange={e => setSelectedAppiumConfigId(e.target.value)}
+                    disabled={isRunning}
+                    style={{
+                      padding: '8px 12px',
+                      borderRadius: '8px',
+                      border: '1px solid #dee2e6',
+                      background: '#f8f9fa',
+                      color: '#495057',
+                      fontSize: '13px',
+                      cursor: 'pointer',
+                      minWidth: '180px',
+                    }}
+                  >
+                    <option value="">Select Appium Config...</option>
+                    {appiumConfigs.map(c => (
+                      <option key={c.id} value={c.id}>
+                        📱 {c.name} ({c.config_type})
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <BrowserSelector
+                    value={selectedBrowser}
+                    onChange={setSelectedBrowser}
+                    disabled={isRunning}
+                    showIcon={false}
+                    variant="header"
+                  />
+                )}
                 {availableRunners.length > 0 && (
                   <select
                     value={selectedRunnerId}
@@ -3790,7 +3899,60 @@ export const PromptDetailView: React.FC = () => {
                   </div>
                 )}
 
-                {/* Starting URL Section */}
+                {/* Test Type Section */}
+                <div style={detailStyles.descriptionSection}>
+                  <h2 style={{...detailStyles.sectionTitle, color: theme.colors.text}}>Test Type</h2>
+                  {isEditing ? (
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button
+                        type="button"
+                        onClick={() => setEditedTestType('web')}
+                        style={{
+                          flex: 1,
+                          padding: '10px',
+                          border: `2px solid ${editedTestType === 'web' ? '#3b82f6' : theme.colors.border}`,
+                          borderRadius: '6px',
+                          background: editedTestType === 'web' ? '#eff6ff' : 'transparent',
+                          cursor: 'pointer',
+                          fontWeight: editedTestType === 'web' ? 600 : 400,
+                          fontSize: '14px',
+                          color: theme.colors.text
+                        }}
+                      >
+                        🌐 Web Testing
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditedTestType('app')}
+                        style={{
+                          flex: 1,
+                          padding: '10px',
+                          border: `2px solid ${editedTestType === 'app' ? '#3b82f6' : theme.colors.border}`,
+                          borderRadius: '6px',
+                          background: editedTestType === 'app' ? '#eff6ff' : 'transparent',
+                          cursor: 'pointer',
+                          fontWeight: editedTestType === 'app' ? 600 : 400,
+                          fontSize: '14px',
+                          color: theme.colors.text
+                        }}
+                      >
+                        📱 App / Desktop
+                      </button>
+                    </div>
+                  ) : (
+                    <div style={{
+                      ...detailStyles.contentBox,
+                      backgroundColor: theme.colors.surface,
+                      color: theme.colors.text,
+                      borderColor: theme.colors.border
+                    }}>
+                      {(prompt.test_type || 'web') === 'web' ? '🌐 Web Testing' : '📱 App / Desktop Testing'}
+                    </div>
+                  )}
+                </div>
+
+                {/* Starting URL Section - only for web test type */}
+                {((isEditing ? editedTestType : (prompt.test_type || 'web')) === 'web') && (
                 <div style={detailStyles.descriptionSection}>
                   <h2 style={{...detailStyles.sectionTitle, color: theme.colors.text}}>Starting URL</h2>
                   {isEditing ? (
@@ -3821,6 +3983,7 @@ export const PromptDetailView: React.FC = () => {
                     </div>
                   )}
                 </div>
+                )}
 
                 {/* External ID (Jira/Xray) Section */}
                 <div style={detailStyles.descriptionSection}>
@@ -4071,6 +4234,38 @@ export const PromptDetailView: React.FC = () => {
                   <Zap size={20} />
                   Generated Test Steps
                 </StepsSectionTitle>
+
+                {/* Platform variant tabs — only shown for app tests */}
+                {prompt.test_type === 'app' && generatedSteps && (
+                  <div style={{ display: 'flex', gap: '0', marginBottom: '16px', borderBottom: `2px solid ${theme.colors.border}` }}>
+                    {(['shared', 'android', 'ios'] as const).map((plat) => {
+                      const label = plat === 'shared' ? '🔗 Shared Steps' : plat === 'android' ? '🤖 Android' : '🍎 iOS';
+                      const count = plat === 'shared'
+                        ? (generatedSteps.plan?.actions?.length || 0)
+                        : (platformVariants[plat]?.length || 0);
+                      const isActive = activePlatformTab === plat;
+                      return (
+                        <button
+                          key={plat}
+                          onClick={() => setActivePlatformTab(plat)}
+                          style={{
+                            padding: '10px 20px',
+                            border: 'none',
+                            borderBottom: isActive ? '3px solid #3b82f6' : '3px solid transparent',
+                            background: 'transparent',
+                            color: isActive ? '#3b82f6' : theme.colors.textSecondary,
+                            fontWeight: isActive ? 600 : 400,
+                            fontSize: '14px',
+                            cursor: 'pointer',
+                            transition: 'all 0.2s',
+                          }}
+                        >
+                          {label} {count > 0 && <span style={{ opacity: 0.7 }}>({count})</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
                 
                 {stepsError && (
                   <StepsErrorAlert>
@@ -4147,6 +4342,18 @@ export const PromptDetailView: React.FC = () => {
                     </StepsActionButtonsContainer>
                     
                     <ModernStepsContainer>
+                      {/* Empty state for platform variants with no steps yet */}
+                      {prompt.test_type === 'app' && activePlatformTab !== 'shared' && !(platformVariants[activePlatformTab]?.length) && (
+                        <StepsEmptyState>
+                          <EmptyStateIcon>{activePlatformTab === 'android' ? '🤖' : '🍎'}</EmptyStateIcon>
+                          <EmptyStateText>No {activePlatformTab === 'android' ? 'Android' : 'iOS'}-specific steps yet</EmptyStateText>
+                          <EmptyStateSubtext>
+                            Steps that differ between platforms will appear here. Shared steps are on the "Shared Steps" tab.
+                            <br /><br />
+                            To add platform-specific steps, click "Edit Steps" and add steps that use {activePlatformTab === 'android' ? 'Android' : 'iOS'}-specific selectors.
+                          </EmptyStateSubtext>
+                        </StepsEmptyState>
+                      )}
                       {isEditingSteps && (
                         <EditingModeAlert>
                           <EditingModeText>
@@ -4158,7 +4365,14 @@ export const PromptDetailView: React.FC = () => {
                         </EditingModeAlert>
                       )}
                       
-                      {(isEditingSteps ? editedSteps : generatedSteps.plan?.actions)?.map((action: any, index: number) => {
+                      {(() => {
+                        // Resolve which steps to show based on platform tab
+                        const sharedSteps = isEditingSteps ? editedSteps : generatedSteps.plan?.actions;
+                        const displaySteps = (prompt.test_type === 'app' && activePlatformTab !== 'shared')
+                          ? (platformVariants[activePlatformTab] || [])
+                          : sharedSteps;
+                        return displaySteps;
+                      })()?.map((action: any, index: number) => {
                         const hasRealElement = action.params?.selector || action.params?.elementId || action.params?.elementName || action.target;
                         const isEditing = editingStepIndex === index;
                         

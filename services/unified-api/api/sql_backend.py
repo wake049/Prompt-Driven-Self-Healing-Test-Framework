@@ -742,13 +742,14 @@ async def get_all_elements(
     limit: int = Query(100, description="Maximum number of elements to return"),
     offset: int = Query(0, description="Number of elements to skip"),
     page: Optional[str] = Query(None, description="Filter by page name"),
+    platform: Optional[str] = Query(None, description="Filter by platform (android, ios, web)"),
     current_user: CurrentUser = Depends(get_current_active_user)
 ):
     """
     Get all recorded elements for the current user's active project
     """
     try:
-        logger.debug(f"get_all_elements called with limit={limit}, offset={offset}, page={page}")
+        logger.debug(f"get_all_elements called with limit={limit}, offset={offset}, page={page}, platform={platform}")
         logger.debug(f"Current user: {current_user.user.email} (ID: {current_user.user.id})")
         if current_user.project:
             logger.debug(f"Current project: {current_user.project.name} (ID: {current_user.project.id})")
@@ -785,16 +786,28 @@ async def get_all_elements(
         )
 
         params = [project_id]
+        param_idx = 1
         if page:
+            param_idx += 1
             params.append(page)
             logger.debug(f"Added page filter: {page}")
+        page_param_idx = param_idx if page else None
+        
+        if platform:
+            param_idx += 1
+            params.append(platform)
+            logger.debug(f"Added platform filter: {platform}")
+        platform_param_idx = param_idx if platform else None
+        
         params.extend([limit, offset])
         limit_offset = f"LIMIT ${len(params)-1} OFFSET ${len(params)}"
 
         if has_primary_selector:
             where_clause = "WHERE e.is_active = true AND p.project_id = $1"
             if page:
-                where_clause += " AND p.name = $2"
+                where_clause += f" AND p.name = ${page_param_idx}"
+            if platform:
+                where_clause += f" AND e.platform = ${platform_param_idx}"
 
             query = f"""
                 SELECT
@@ -817,7 +830,9 @@ async def get_all_elements(
         else:
             where_clause = "WHERE e.is_active = true AND e.project_id = $1"
             if page:
-                where_clause += " AND e.page_name = $2"
+                where_clause += f" AND e.page_name = ${page_param_idx}"
+            if platform:
+                where_clause += f" AND e.platform = ${platform_param_idx}"
 
             query = f"""
                 SELECT
@@ -910,10 +925,20 @@ async def get_all_elements(
                 css_selector = primary_selector.get("css_selector", primary_selector.get("css", "")) if primary_selector else ""
                 xpath = primary_selector.get("xpath", "") if primary_selector else ""
                 
+                # Extract native mobile selectors from primary_selector
+                accessibility_id = primary_selector.get("accessibility_id", "") if primary_selector else ""
+                resource_id = primary_selector.get("id", "") if primary_selector else ""
+                
                 # Get tag from attributes or primary_selector
                 tag = attributes.get("tag", "unknown") if attributes else "unknown"
                 if tag == "unknown" or not tag:
                     tag = primary_selector.get("tag", "unknown") if primary_selector else "unknown"
+                
+                # Enrich attributes with native selectors so downstream consumers can find them
+                if accessibility_id:
+                    attributes["accessibility_id"] = accessibility_id
+                if resource_id:
+                    attributes["resource_id"] = resource_id
                 
                 logger.debug(f"Extracted - css_selector: {css_selector}, xpath: {xpath}, tag: {tag}")
                 
@@ -956,6 +981,8 @@ async def get_all_elements(
                     "attributes": attributes if attributes else {},
                     "xpath": xpath,
                     "css_selector": css_selector,
+                    "accessibility_id": accessibility_id,
+                    "resource_id": resource_id,
                     "position_x": 0,  # Not stored in new schema
                     "position_y": 0,  # Not stored in new schema
                     "selectors": selectors,
@@ -1399,16 +1426,16 @@ async def delete_element(
         
         db = await get_database()
         
-        # Try to find element by element_key first, then by UUID
+        # Try to find element by name first, then by UUID
         element = await db.fetchrow(
-            "SELECT id, element_key FROM repo.elements WHERE element_key = $1 OR id::text = $1",
+            "SELECT id, name FROM repo.elements WHERE name = $1 OR id::text = $1",
             element_id
         )
         
         if not element:
             raise HTTPException(status_code=404, detail=f"Element '{element_id}' not found")
         
-        element_key = element['element_key']
+        element_key = element['name']
         element_uuid = element['id']
         
         # Delete the element

@@ -13,22 +13,22 @@ export default defineConfig({
         secure: false
       },
       '/api': {
-        target: 'https://fluxtest.io',
+        target: 'http://127.0.0.1:8000',
         changeOrigin: true,
         secure: false
       },
       '/plan': {
-        target: 'https://fluxtest.io',
+        target: 'http://127.0.0.1:8000',
         changeOrigin: true,
         secure: false
       },
       '/catalog': {
-        target: 'https://fluxtest.io',
+        target: 'http://127.0.0.1:8000',
         changeOrigin: true,
         secure: false
       },
       '/health': {
-        target: 'https://fluxtest.io',
+        target: 'http://127.0.0.1:8000',
         changeOrigin: true,
         secure: false
       }

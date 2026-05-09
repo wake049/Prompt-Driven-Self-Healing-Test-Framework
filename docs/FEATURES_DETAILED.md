@@ -368,6 +368,61 @@ Transforms generated tests into auditable evidence. Teams can prove exactly whic
 - Prompt/test detail pages and suite-level test listings.
 - Compliance/report export surfaces.
 
+## 22) Mobile and Responsive Testing
+
+### What it does
+Runs tests against mobile and tablet device profiles using Chrome DevTools mobile emulation, providing viewport simulation, touch input, device-scale-factor rendering, and device-specific user agents.
+
+### Why it matters
+Ensures applications work correctly across device form factors without requiring physical device labs. Catches responsive layout issues, touch interaction bugs, and mobile-specific regressions early.
+
+### Key capabilities
+- Built-in device profiles for popular phones and tablets (iPhone 14, Galaxy S23, Pixel 7, iPad Air, iPad Pro, Galaxy Tab S9).
+- Custom device profile creation with configurable viewport, DPR, user agent, touch, and landscape settings.
+- Organization-scoped and built-in profile management.
+- Mobile/tablet execution via Chrome DevTools Protocol mobile emulation.
+- Browser type extensions: `chrome-mobile` and `chrome-tablet` for targeted execution.
+- Device-aware execution records with `device_config` metadata on run history.
+- Device profile selection at execution time via API parameter or runner dispatch.
+- Updated browser usage analytics with device breakdowns.
+- Runner capability registration for mobile-capable agents.
+
+### Primary surfaces
+- App route: `/mobile-testing`
+- Execution API: `?device_profile_id=...` parameter on execute-prompt
+- Device Profile API: `/api/v1/device-profiles` (CRUD)
+- Policy Engine: browser multi-select includes mobile and tablet options
+- Runner registration: capabilities array supports `chrome-mobile`, `chrome-tablet`
+
+## 23) Appium Testing (Real Devices, Native Apps, and Desktop)
+
+### What it does
+Extends the execution engine to support Appium-based testing across Android and iOS real devices/emulators, native mobile apps, Flutter apps, and Windows/Mac desktop applications. Provides a unified configuration management layer and native-gesture step execution alongside the existing Selenium browser testing.
+
+### Why it matters
+Moves the platform beyond browser-only testing into true cross-platform coverage. Teams can test native mobile apps, hybrid WebView apps, Flutter apps, and desktop applications using the same natural-language prompt workflow, self-healing engine, and analytics pipeline.
+
+### Key capabilities
+- Seven Appium execution targets: Android Web, iOS Web, Android Native, iOS Native, Flutter, Windows Desktop, Mac Desktop.
+- Appium configuration management — server URL, platform capabilities, app paths, cloud provider credentials (BrowserStack, Sauce Labs).
+- Organisation-scoped and built-in template configurations with CRUD API.
+- AppiumDriverFactory supporting UiAutomator2, XCUITest, Flutter, Windows, and Mac2 automation engines.
+- Native mobile gesture step actions: tap, long_press, swipe (up/down/left/right), pinch, spread, hide_keyboard, press_back, press_home, set_orientation.
+- App lifecycle actions: launch_app, close_app, background_app, activate_app, terminate_app.
+- Hybrid app context switching: switch_to_webview, switch_to_native for WebView-based hybrid apps.
+- Appium-specific locator support: accessibility ID, Android UIAutomator selector, iOS class chain, iOS predicate string.
+- Browser multi-select UI includes all Appium targets grouped under "Appium (Real Devices & Desktop)".
+- Execution API accepts `appium_config_id` parameter for automatic browser type and capability resolution.
+- Runner agent ZIP includes Appium configuration properties and documentation.
+- Runner poll response includes `appiumConfig` for agent-mode dispatch.
+
+### Primary surfaces
+- App route: `/appium-testing`
+- Execution API: `?appium_config_id=...` parameter on execute-prompt
+- Appium Config API: `/api/v1/appium-configs` (CRUD)
+- Browser multi-select: Appium section with 7 targets
+- Runner registration: capabilities array supports `appium-android-web`, `appium-ios-web`, `appium-android-native`, `appium-ios-native`, `appium-flutter`, `appium-windows`, `appium-mac`
+
 ---
 
 ## Feature Group Summary
@@ -381,6 +436,8 @@ Transforms generated tests into auditable evidence. Teams can prove exactly whic
 ### Execution and Reliability
 - Execution Dashboard and Run History
 - Multi-Browser Execution
+- Mobile and Responsive Testing
+- Appium Testing (Real Devices, Native Apps, and Desktop)
 - Runner Fleet and Agent Mode
 - Self-Healing and Review Queue
 

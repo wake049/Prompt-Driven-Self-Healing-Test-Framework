@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import styled from 'styled-components';
-import { Edit, X, Calendar, Globe, Target, FileText, Image as ImageIcon } from 'lucide-react';
+import { Edit, X, Calendar, Globe, Target, FileText, Image as ImageIcon, Smartphone, Search, Loader2 } from 'lucide-react';
 
 // ================================
 // Styled Components (matching existing app patterns)
@@ -58,6 +58,9 @@ const TypeBadge = styled.span<{ pageType: string }>`
       social: '#fce4ec',
       search: '#f8f9fa',
       streaming: '#e1f5fe',
+      'mobile-android': '#e8f5e9',
+      'mobile-ios': '#f3e5f5',
+      'mobile-web': '#e0f2f1',
       other: '#f8f9fa'
     };
     return colors[props.pageType] || colors.other;
@@ -72,6 +75,9 @@ const TypeBadge = styled.span<{ pageType: string }>`
       social: '#880e4f',
       search: '#6c757d',
       streaming: '#01579b',
+      'mobile-android': '#2e7d32',
+      'mobile-ios': '#6a1b9a',
+      'mobile-web': '#00695c',
       other: '#6c757d'
     };
     return colors[props.pageType] || colors.other;
@@ -280,6 +286,130 @@ const MetadataValue = styled.p`
   margin: 0;
 `;
 
+// --- Mobile Elements Section ---
+
+const MobileSection = styled.div`
+  margin-bottom: 32px;
+  border: 1px solid #e9ecef;
+  border-radius: 10px;
+  overflow: hidden;
+`;
+
+const MobileSectionHeader = styled.div`
+  background: #f0f7ff;
+  padding: 16px 20px;
+  border-bottom: 1px solid #e9ecef;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+`;
+
+const MobileSectionTitle = styled.h3`
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #1e40af;
+`;
+
+const MobileSectionBody = styled.div`
+  padding: 16px 20px;
+`;
+
+const GatherRow = styled.div`
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 16px;
+`;
+
+const ConfigSelect = styled.select`
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 14px;
+  background: #fff;
+`;
+
+const GatherButton = styled.button`
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: 6px;
+  background: #059669;
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 13px;
+  white-space: nowrap;
+  &:hover { background: #047857; }
+  &:disabled { background: #9ca3af; cursor: not-allowed; }
+`;
+
+const ElementsList = styled.div`
+  max-height: 400px;
+  overflow-y: auto;
+`;
+
+const ElementRow = styled.div<{ interactive?: boolean }>`
+  padding: 8px 12px;
+  border: 1px solid ${p => p.interactive ? '#bbf7d0' : '#e5e7eb'};
+  border-radius: 6px;
+  margin-bottom: 6px;
+  background: ${p => p.interactive ? '#f0fdf4' : '#fafafa'};
+  font-size: 13px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+`;
+
+const ElementTag = styled.span`
+  font-family: monospace;
+  font-size: 12px;
+  padding: 2px 6px;
+  background: #e0e7ff;
+  color: #3730a3;
+  border-radius: 4px;
+`;
+
+const ElementSelector = styled.span`
+  font-family: monospace;
+  font-size: 11px;
+  color: #6b7280;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+`;
+
+const StatBadge = styled.span`
+  font-size: 12px;
+  padding: 2px 8px;
+  background: #dbeafe;
+  color: #1e40af;
+  border-radius: 10px;
+  font-weight: 500;
+`;
+
+const GatherError = styled.div`
+  padding: 10px 14px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  color: #991b1b;
+  font-size: 13px;
+  margin-bottom: 12px;
+`;
+
+const EmptyState = styled.p`
+  color: #6c757d;
+  text-align: center;
+  margin: 20px 0;
+  font-size: 14px;
+`;
+
 // ================================
 // Types
 // ================================
@@ -299,6 +429,19 @@ interface PageContextItem {
   usageCount: number;
 }
 
+interface AppiumConfigOption {
+  id: string;
+  name: string;
+  config_type: string;
+}
+
+interface GatheredElement {
+  tag: string;
+  text: string | null;
+  interactive: boolean;
+  selectors: Record<string, string>;
+}
+
 interface PageContextViewProps {
   context: PageContextItem;
   onEdit: () => void;
@@ -314,6 +457,80 @@ export const PageContextView: React.FC<PageContextViewProps> = ({
   onEdit,
   onClose
 }) => {
+  // --- Mobile element gathering state ---
+  const [appiumConfigs, setAppiumConfigs] = useState<AppiumConfigOption[]>([]);
+  const [selectedConfigId, setSelectedConfigId] = useState<string>('');
+  const [gathering, setGathering] = useState(false);
+  const [gatherError, setGatherError] = useState<string | null>(null);
+  const [gatheredElements, setGatheredElements] = useState<GatheredElement[]>([]);
+  const [gatherStats, setGatherStats] = useState<Record<string, number> | null>(null);
+  const [storedElements, setStoredElements] = useState<any[]>([]);
+
+  // Fetch Appium configs on mount
+  useEffect(() => {
+    const token = localStorage.getItem('auth_token');
+    if (!token) return;
+    fetch('/api/v1/appium-configs', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : [])
+      .then(data => {
+        setAppiumConfigs(data);
+        if (data.length > 0) setSelectedConfigId(data[0].id);
+      })
+      .catch(() => {});
+  }, []);
+
+  // Fetch stored elements for this page context
+  useEffect(() => {
+    if (!context.id) return;
+    const token = localStorage.getItem('auth_token');
+    if (!token) return;
+    fetch(`/api/v1/page-context/${context.id}/elements`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.elements) setStoredElements(data.elements);
+      })
+      .catch(() => {});
+  }, [context.id]);
+
+  const handleGather = async () => {
+    if (!selectedConfigId || !context.id) return;
+    setGathering(true);
+    setGatherError(null);
+    setGatheredElements([]);
+    setGatherStats(null);
+    try {
+      const token = localStorage.getItem('auth_token');
+      const res = await fetch(`/api/v1/page-context/${context.id}/gather-elements`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ appium_config_id: selectedConfigId }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setGatherError(data.detail || 'Failed to gather elements');
+      } else {
+        setGatheredElements(data.elements || []);
+        setGatherStats(data.stats || null);
+        // Refresh stored elements
+        const elemRes = await fetch(`/api/v1/page-context/${context.id}/elements`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (elemRes.ok) {
+          const elemData = await elemRes.json();
+          if (elemData?.elements) setStoredElements(elemData.elements);
+        }
+      }
+    } catch (e: any) {
+      setGatherError(e.message || 'Network error');
+    } finally {
+      setGathering(false);
+    }
+  };
   const pageTypeLabels: Record<string, string> = {
     ecommerce: 'E-commerce',
     airline: 'Airlines',
@@ -323,6 +540,9 @@ export const PageContextView: React.FC<PageContextViewProps> = ({
     social: 'Social Media',
     search: 'Search',
     streaming: 'Streaming',
+    'mobile-android': 'Android App',
+    'mobile-ios': 'iOS App',
+    'mobile-web': 'Mobile Web',
     other: 'Other',
   };
 
@@ -443,6 +663,106 @@ export const PageContextView: React.FC<PageContextViewProps> = ({
             </NotesBox>
           </Section>
         )}
+
+        {/* Mobile Element Gathering */}
+        <MobileSection>
+          <MobileSectionHeader>
+            <Smartphone size={18} />
+            <MobileSectionTitle>Mobile Elements</MobileSectionTitle>
+            {storedElements.length > 0 && (
+              <StatBadge>{storedElements.length} stored</StatBadge>
+            )}
+          </MobileSectionHeader>
+          <MobileSectionBody>
+            {appiumConfigs.length > 0 ? (
+              <>
+                <GatherRow>
+                  <ConfigSelect
+                    value={selectedConfigId}
+                    onChange={e => setSelectedConfigId(e.target.value)}
+                    disabled={gathering}
+                  >
+                    {appiumConfigs.map(c => (
+                      <option key={c.id} value={c.id}>
+                        {c.name} ({c.config_type})
+                      </option>
+                    ))}
+                  </ConfigSelect>
+                  <GatherButton onClick={handleGather} disabled={gathering || !selectedConfigId}>
+                    {gathering ? (
+                      <><Loader2 size={14} className="spin" /> Scanning…</>
+                    ) : (
+                      <><Search size={14} /> Gather Elements</>
+                    )}
+                  </GatherButton>
+                </GatherRow>
+
+                {gatherError && <GatherError>{gatherError}</GatherError>}
+
+                {gatherStats && (
+                  <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                    <StatBadge>{gatherStats.total_elements || 0} found</StatBadge>
+                    <StatBadge style={{ background: '#dcfce7', color: '#166534' }}>
+                      {gatherStats.interactive_elements || 0} interactive
+                    </StatBadge>
+                    <StatBadge style={{ background: '#fef3c7', color: '#92400e' }}>
+                      {gatherStats.stored_count || 0} stored
+                    </StatBadge>
+                  </div>
+                )}
+
+                {gatheredElements.length > 0 && (
+                  <ElementsList>
+                    {gatheredElements.map((el, i) => (
+                      <ElementRow key={i} interactive={el.interactive}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 }}>
+                          <ElementTag>{el.tag}</ElementTag>
+                          <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {el.text || <span style={{ color: '#9ca3af', fontStyle: 'italic' }}>no text</span>}
+                          </span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                          {el.interactive && <span style={{ fontSize: 11, color: '#059669', fontWeight: 600 }}>interactive</span>}
+                          <ElementSelector title={Object.values(el.selectors || {})[0] as string}>
+                            {(Object.values(el.selectors || {})[0] as string) || '—'}
+                          </ElementSelector>
+                        </div>
+                      </ElementRow>
+                    ))}
+                  </ElementsList>
+                )}
+
+                {gatheredElements.length === 0 && storedElements.length > 0 && (
+                  <ElementsList>
+                    {storedElements.map((el) => (
+                      <ElementRow key={el.id} interactive={el.attributes?.interactive === 'True'}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 }}>
+                          <ElementTag>{el.attributes?.tag || '?'}</ElementTag>
+                          <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {el.attributes?.text || el.name}
+                          </span>
+                        </div>
+                        <ElementSelector title={JSON.stringify(el.primary_selector)}>
+                          {Object.values(el.primary_selector || {})[0] as string || '—'}
+                        </ElementSelector>
+                      </ElementRow>
+                    ))}
+                  </ElementsList>
+                )}
+
+                {gatheredElements.length === 0 && storedElements.length === 0 && !gathering && (
+                  <EmptyState>
+                    No elements gathered yet. Select an Appium config and click "Gather Elements" to scan the current mobile screen.
+                  </EmptyState>
+                )}
+              </>
+            ) : (
+              <EmptyState>
+                No Appium configurations found. Create one in the Appium Testing page first.
+              </EmptyState>
+            )}
+          </MobileSectionBody>
+        </MobileSection>
 
         {/* Metadata */}
         <MetadataSection>

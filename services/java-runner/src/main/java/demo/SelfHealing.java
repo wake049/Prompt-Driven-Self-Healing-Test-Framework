@@ -1,5 +1,6 @@
 package demo;
 
+import io.appium.java_client.AppiumBy;
 import org.openqa.selenium.By;
 import org.openqa.selenium.NoSuchElementException;
 import org.openqa.selenium.WebDriver;
@@ -86,6 +87,8 @@ public class SelfHealing {
         String originalLocator = step.getLocator();
         String elementId = step.getElementId();
         String page = step.getOriginalPage(); // Use original page value for database lookup
+        boolean mobileStep = isMobileStep(step);
+        String effectivePolicy = mobileStep ? "mobile" : step.getSelectorPolicy();
         
         System.out.println("🔧 Starting enhanced self-healing for element: " + elementId + " with locator: " + originalLocator);
         
@@ -102,7 +105,7 @@ public class SelfHealing {
         // Tier 1: Repository-based alternatives (only if policy allows)
         if (this.useRepositoryFallback) {
             if (useSqlBackend) {
-                List<String> repoAlternatives = sqlElementRepository.getAlternatives(elementId, page, step.getSelectorPolicy());
+                List<String> repoAlternatives = sqlElementRepository.getAlternatives(elementId, page, effectivePolicy);
                 alternatives.addAll(repoAlternatives);
                 System.out.println("📚 Tier 1: Found " + repoAlternatives.size() + " repository alternatives (policy: useRepositoryFallback=true)");
             } else {
@@ -114,10 +117,14 @@ public class SelfHealing {
             System.out.println("⏭️ Tier 1: Repository fallback DISABLED by policy (useRepositoryFallback=false)");
         }
         
-        // Tier 2: Intelligent selector variations based on original locator
-        List<String> intelligentVariations = generateIntelligentVariations(originalLocator, step.getSelectorPolicy());
-        alternatives.addAll(intelligentVariations);
-        System.out.println(" Tier 2: Generated " + intelligentVariations.size() + " intelligent variations");
+        // Tier 2: Intelligent selector variations based on original locator (web only)
+        if (!mobileStep) {
+            List<String> intelligentVariations = generateIntelligentVariations(originalLocator, effectivePolicy);
+            alternatives.addAll(intelligentVariations);
+            System.out.println(" Tier 2: Generated " + intelligentVariations.size() + " intelligent variations");
+        } else {
+            System.out.println("⏭️ Tier 2: Skipped web selector variations for mobile step");
+        }
         
         // Tier 3: AI-generated alternatives (fallback)
         if (alternatives.size() < 3) { // Only use AI if we don't have enough alternatives
@@ -126,10 +133,14 @@ public class SelfHealing {
             System.out.println(" Tier 3: AI generated " + aiAlternatives.size() + " additional alternatives");
         }
         
-        // Tier 4: Heuristic-based fallbacks
-        List<String> heuristicAlternatives = generateHeuristicAlternatives(originalLocator, step.getSelectorPolicy());
-        alternatives.addAll(heuristicAlternatives);
-        System.out.println("🔍 Tier 4: Generated " + heuristicAlternatives.size() + " heuristic alternatives");
+        // Tier 4: Heuristic-based fallbacks (web only)
+        if (!mobileStep) {
+            List<String> heuristicAlternatives = generateHeuristicAlternatives(originalLocator, effectivePolicy);
+            alternatives.addAll(heuristicAlternatives);
+            System.out.println("🔍 Tier 4: Generated " + heuristicAlternatives.size() + " heuristic alternatives");
+        } else {
+            System.out.println("⏭️ Tier 4: Skipped web heuristic alternatives for mobile step");
+        }
         
         if (alternatives.isEmpty()) {
             logEntry.setResult("NO_ALTERNATIVES");
@@ -169,7 +180,7 @@ public class SelfHealing {
                     
                     // Validate that healed selector aligns with policy preference
                     String healedSelectorType = getSelectorType(alternative);
-                    String expectedPolicy = step.getSelectorPolicy();
+                    String expectedPolicy = effectivePolicy;
                     
                     // Calculate healing quality score
                     int qualityScore = calculateHealingQuality(originalLocator, alternative, healedSelectorType, expectedPolicy);
@@ -188,7 +199,7 @@ public class SelfHealing {
                         continue; // Try next alternative
                     }
                     
-                    if (!healedSelectorType.equals(expectedPolicy)) {
+                    if (!"mobile".equals(expectedPolicy) && !healedSelectorType.equals(expectedPolicy)) {
                         System.out.println("⚠️ Policy mismatch: healed with " + healedSelectorType + " selector, but policy prefers " + expectedPolicy + " (quality: " + qualityScore + "%)");
                         System.out.println("   This may indicate a policy compliance issue or limited selector availability");
                     } else {
@@ -250,6 +261,16 @@ public class SelfHealing {
             return By.cssSelector(locator.substring(4));
         } else if (locator.startsWith("xpath=")) {
             return By.xpath(locator.substring(6));
+        } else if (locator.startsWith("accessibility-id:")) {
+            return AppiumBy.accessibilityId(locator.substring(17));
+        } else if (locator.startsWith("accessibility-id=")) {
+            return AppiumBy.accessibilityId(locator.substring(17));
+        } else if (locator.startsWith("resource-id:")) {
+            return By.id(locator.substring(12));
+        } else if (locator.startsWith("resource-id=")) {
+            return By.id(locator.substring(12));
+        } else if (locator.startsWith("android-uiautomator=")) {
+            return AppiumBy.androidUIAutomator(locator.substring(20));
         } else if (locator.startsWith("id=")) {
             return By.id(locator.substring(3));
         } else if (locator.startsWith("name=")) {
@@ -268,7 +289,13 @@ public class SelfHealing {
      * Determine the type of selector (css or xpath) for policy validation
      */
     private String getSelectorType(String locator) {
-        if (locator.startsWith("xpath=") || locator.startsWith("//") || locator.contains("//*[@") || locator.contains("[@")) {
+        if (locator.startsWith("accessibility-id:") || locator.startsWith("accessibility-id=")) {
+            return "accessibility-id";
+        } else if (locator.startsWith("resource-id:") || locator.startsWith("resource-id=")) {
+            return "resource-id";
+        } else if (locator.startsWith("android-uiautomator=")) {
+            return "android-uiautomator";
+        } else if (locator.startsWith("xpath=") || locator.startsWith("//") || locator.contains("//*[@") || locator.contains("[@")) {
             return "xpath";
         } else if (locator.startsWith("css=") || locator.startsWith("#") || locator.startsWith(".") || 
                    locator.startsWith("[") || (!locator.startsWith("id=") && !locator.startsWith("name=") && !locator.startsWith("class=") && !locator.startsWith("tag="))) {
@@ -795,7 +822,14 @@ public class SelfHealing {
         int score = 50; // Base score
         
         // Policy compliance bonus
-        if (healedSelectorType.equals(expectedPolicy)) {
+        if ("mobile".equals(expectedPolicy)) {
+            // For mobile, allow multiple locator families; avoid web CSS/XPath bias.
+            if ("accessibility-id".equals(healedSelectorType) || "resource-id".equals(healedSelectorType) ||
+                "android-uiautomator".equals(healedSelectorType) || "xpath".equals(healedSelectorType) ||
+                "id".equals(healedSelectorType) || "name".equals(healedSelectorType)) {
+                score += 20;
+            }
+        } else if (healedSelectorType.equals(expectedPolicy)) {
             score += 30;
         } else {
             score -= 20;
@@ -909,7 +943,11 @@ public class SelfHealing {
             alternativesJson.append("]");
             
             // Policy compliance information
-            boolean isPolicyCompliant = healedSelectorType.equals(expectedPolicy);
+            boolean isPolicyCompliant = "mobile".equals(expectedPolicy)
+                ? ("accessibility-id".equals(healedSelectorType) || "resource-id".equals(healedSelectorType) ||
+                   "android-uiautomator".equals(healedSelectorType) || "xpath".equals(healedSelectorType) ||
+                   "id".equals(healedSelectorType) || "name".equals(healedSelectorType))
+                : healedSelectorType.equals(expectedPolicy);
             
             String jsonPayload = String.format(
                 "{\"healing_attempts\":[{" +
@@ -954,8 +992,35 @@ public class SelfHealing {
     private void sendHealingSuccessRequest(Step step, String healedLocator, List<String> attemptedAlternatives) {
         // Fallback method without policy information for backward compatibility
         String healedSelectorType = getSelectorType(healedLocator);
-        String expectedPolicy = step.getSelectorPolicy();
+        String expectedPolicy = isMobileStep(step) ? "mobile" : step.getSelectorPolicy();
         sendHealingSuccessRequest(step, healedLocator, attemptedAlternatives, healedSelectorType, expectedPolicy);
+    }
+
+    private boolean isMobileStep(Step step) {
+        if (step == null) return false;
+
+        String locator = step.getLocator() != null ? step.getLocator().toLowerCase() : "";
+        String action = step.getAction() != null ? step.getAction().toLowerCase() : "";
+
+        // Locator-based detection
+        if (locator.startsWith("accessibility-id:") || locator.startsWith("accessibility-id=") ||
+            locator.startsWith("resource-id:") || locator.startsWith("resource-id=") ||
+            locator.startsWith("android-uiautomator=") || locator.startsWith("-ios class chain") ||
+            locator.startsWith("-ios predicate string")) {
+            return true;
+        }
+
+        // Action-based detection
+        return action.equals("tap") || action.equals("appium_tap") ||
+               action.equals("long_press") || action.equals("longpress") ||
+               action.equals("swipe_up") || action.equals("swipe_down") ||
+               action.equals("swipe_left") || action.equals("swipe_right") ||
+               action.equals("hide_keyboard") || action.equals("press_back") ||
+               action.equals("press_home") || action.equals("set_orientation") ||
+               action.equals("switch_to_webview") || action.equals("switch_to_native") ||
+               action.equals("launch_app") || action.equals("close_app") ||
+               action.equals("background_app") || action.equals("activate_app") ||
+               action.equals("terminate_app");
     }
 
     private void sendHealingFailureRequest(Step step, String error, List<String> attemptedAlternatives) {

@@ -36,16 +36,17 @@ class PageContextRepository:
             print(f"🔍 Extracted page_name: {page_name}")
             
             print(f"🔍 Creating page record...")
+            project_id = page_context_data.get('project_id')
+            if not project_id:
+                raise Exception("project_id is required to create a page context. Ensure the user is authenticated.")
             page_result = await self.db.execute_one(
                 """
                 INSERT INTO repo.pages (project_id, name, route_hint)
-                VALUES (
-                    (SELECT id FROM core.projects LIMIT 1),  -- Use first project for now
-                    $1, $2
-                )
+                VALUES ($1::uuid, $2, $3)
                 ON CONFLICT (project_id, name) DO UPDATE SET updated_at = NOW()
                 RETURNING id
                 """,
+                str(project_id),
                 page_name,
                 page_url  # Use full URL as route hint
             )
@@ -60,11 +61,11 @@ class PageContextRepository:
             # Use the actual columns that exist in the database
             query = """
                 INSERT INTO repo.page_contexts (
-                    id, page_id, screenshot_url, description, category, 
+                    id, page_id, context_type, screenshot_url, description, category, 
                     website_url, primary_actions, usage_count, 
                     last_used_at, created_at, updated_at
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
                 RETURNING *
             """
             
@@ -73,11 +74,12 @@ class PageContextRepository:
             params = [
                 context_id,
                 page_id,
+                'user_uploaded',  # context_type
                 page_context_data.get('screenshot_url'),
                 page_context_data.get('page_description', ''),
                 page_context_data.get('page_type'),
                 page_context_data.get('page_url'),
-                page_context_data.get('primary_actions', []),  # Pass list directly for JSONB column
+                json.dumps(page_context_data.get('primary_actions', [])),  # Serialize to JSON string for JSONB column
                 0,  # initial usage_count
                 None,  # last_used_at
                 datetime.utcnow(),

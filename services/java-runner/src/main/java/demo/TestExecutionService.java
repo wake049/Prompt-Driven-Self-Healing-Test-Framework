@@ -45,7 +45,7 @@ public class TestExecutionService {
             System.out.println("Creating WebDriver instance...");
             String browserType = request.getBrowserType();
             boolean headless = Boolean.parseBoolean(System.getProperty("headless", "false"));
-            driver = createWebDriverInstance(browserType, headless);
+            driver = createWebDriverInstance(browserType, headless, request.getDeviceConfig(), request.getAppiumConfig());
             System.out.println("WebDriver created successfully");
             
             // Create isolated execution context
@@ -334,10 +334,20 @@ public class TestExecutionService {
     }
     
     private WebDriver createWebDriverInstance() {
-        return createWebDriverInstance(null, false);
+        return createWebDriverInstance(null, false, null, null);
     }
     
     private WebDriver createWebDriverInstance(String browserTypeStr, boolean headless) {
+        return createWebDriverInstance(browserTypeStr, headless, null, null);
+    }
+    
+    private WebDriver createWebDriverInstance(String browserTypeStr, boolean headless, Map<String, Object> deviceConfig) {
+        return createWebDriverInstance(browserTypeStr, headless, deviceConfig, null);
+    }
+
+    private WebDriver createWebDriverInstance(String browserTypeStr, boolean headless,
+                                               Map<String, Object> deviceConfig,
+                                               Map<String, Object> appiumConfig) {
         // Parse browser type, default to Chrome
         BrowserType browserType = BrowserType.CHROME;
         if (browserTypeStr != null && !browserTypeStr.trim().isEmpty()) {
@@ -350,9 +360,27 @@ public class TestExecutionService {
         } else {
             System.out.println("No browser specified, defaulting to Chrome");
         }
+
+        // Appium path: delegate to AppiumDriverFactory
+        if (browserType.isAppium()) {
+            if (appiumConfig == null || appiumConfig.isEmpty()) {
+                throw new IllegalArgumentException(
+                    "Appium browser type " + browserType.getValue()
+                    + " requires an appiumConfig with server URL and capabilities.");
+            }
+            System.out.println("Creating Appium driver for " + browserType.getDisplayName());
+            return WebDriverFactory.createDriver(browserType, appiumConfig);
+        }
+        
+        // Build device profile from config map when mobile emulation is requested
+        DeviceProfile deviceProfile = null;
+        if (deviceConfig != null && !deviceConfig.isEmpty()) {
+            deviceProfile = DeviceProfile.fromMap(deviceConfig);
+            System.out.println("Mobile device profile: " + deviceProfile);
+        }
         
         // Create driver using factory
-        return WebDriverFactory.createDriver(browserType, headless);
+        return WebDriverFactory.createDriver(browserType, headless, deviceProfile);
     }
     
     private void executeSteps(TestExecutionContext context, List<Map<String, Object>> steps,
@@ -543,6 +571,39 @@ public class TestExecutionService {
                 case "wait_for":
                 case "extract_data":
                 case "calculate":
+                // Appium / mobile native actions
+                case "tap":
+                case "appium_tap":
+                case "long_press":
+                case "longpress":
+                case "swipe_up":
+                case "swipeup":
+                case "swipe_down":
+                case "swipedown":
+                case "swipe_left":
+                case "swipeleft":
+                case "swipe_right":
+                case "swiperight":
+                case "scroll":
+                case "scroll_up":
+                case "scroll_down":
+                case "pinch":
+                case "spread":
+                case "zoom_in":
+                case "hide_keyboard":
+                case "press_back":
+                case "back":
+                case "press_home":
+                case "set_orientation":
+                case "switch_to_webview":
+                case "switch_to_native":
+                case "launch_app":
+                case "close_app":
+                case "background_app":
+                case "activate_app":
+                case "terminate_app":
+                case "type_text":
+                case "wait_for_page_load":
                     System.out.println("Using ExecutionService for action: " + action);
                     // Use ExecutionService which handles self-healing automatically
                     result = executionService.executeStep(stepIndex, stepObj);  // Pass stepIndex as required

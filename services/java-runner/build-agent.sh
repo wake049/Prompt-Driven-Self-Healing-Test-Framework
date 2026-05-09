@@ -78,6 +78,15 @@ runner.capabilities=chrome
 # Run browsers in headless mode? (true/false)
 HEADLESS=false
 
+# Appium server URL (required for appium-* capabilities)
+runner.appium-server-url=http://localhost:4723
+
+# Auto-start Appium server when appium-* capabilities are configured
+runner.appium-auto-start=true
+
+# Max seconds to wait for Appium to start
+runner.appium-startup-timeout-seconds=120
+
 # Port for health check endpoint
 server.port=8080
 CONFIG

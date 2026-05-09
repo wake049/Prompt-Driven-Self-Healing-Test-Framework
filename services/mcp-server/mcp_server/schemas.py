@@ -300,6 +300,30 @@ TOOL_SCHEMAS = {
         "required": ["pageData"]
     },
 
+    "elements.process_gathered": {
+        "type": "object",
+        "properties": {
+            "elements": {
+                "type": "array",
+                "description": "Raw elements from the Java/Appium runner",
+                "items": {"type": "object"}
+            },
+            "page_info": {
+                "type": "object",
+                "description": "Page/screen metadata (platform, config_type, device_name, etc.)"
+            },
+            "page_id": {
+                "type": "string",
+                "description": "UUID of the repo.pages record to store elements under"
+            },
+            "auth_token": {
+                "type": "string",
+                "description": "Bearer token for authenticated API calls"
+            }
+        },
+        "required": ["elements", "page_id"]
+    },
+
     "get_review_queue": {
         "type": "object",
         "properties": {

@@ -5,6 +5,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ThemeProvider, useTheme } from './contexts/ThemeContext';
 import { MCPProvider } from './contexts/MCPContext';
 import { ToastProvider } from './shared/ui/Toast';
+import { UpgradeModalProvider } from './contexts/UpgradeModalContext';
 import ProtectedRoute from './components/auth/ProtectedRoute';
 import Login from './components/auth/Login';
 import Register from './components/auth/Register';
@@ -111,6 +112,7 @@ export default function App() {
     <ThemeProvider>
       <StyledThemeWrapper>
         <ToastProvider>
+          <UpgradeModalProvider>
           <MCPProvider autoConnect={false}>
             <AuthProvider>
               <Routes>
@@ -159,6 +161,7 @@ export default function App() {
               </Routes>
             </AuthProvider>
           </MCPProvider>
+          </UpgradeModalProvider>
         </ToastProvider>
       </StyledThemeWrapper>
     </ThemeProvider>

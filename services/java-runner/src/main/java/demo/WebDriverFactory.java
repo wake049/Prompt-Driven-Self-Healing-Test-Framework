@@ -32,12 +32,36 @@ public class WebDriverFactory {
      * @return Configured WebDriver instance
      */
     public static WebDriver createDriver(BrowserType browserType, boolean headless) {
-        System.out.println("Creating " + browserType.getDisplayName() + " driver (headless: " + headless + ")");
+        return createDriver(browserType, headless, null);
+    }
+
+    /**
+     * Create a WebDriver for an Appium target using a configuration map.
+     * Delegates entirely to {@link AppiumDriverFactory}.
+     */
+    public static WebDriver createDriver(BrowserType browserType, Map<String, Object> appiumConfig) {
+        return AppiumDriverFactory.createDriver(browserType, appiumConfig);
+    }
+
+    /**
+     * Create a WebDriver instance with optional mobile device emulation.
+     * @param browserType The type of browser to create
+     * @param headless Whether to run in headless mode
+     * @param deviceProfile Optional mobile/tablet device profile for emulation (Chrome-only)
+     * @return Configured WebDriver instance
+     */
+    public static WebDriver createDriver(BrowserType browserType, boolean headless, DeviceProfile deviceProfile) {
+        System.out.println("Creating " + browserType.getDisplayName() + " driver (headless: " + headless
+                + (deviceProfile != null ? ", device: " + deviceProfile : "") + ")");
         
         WebDriver driver;
         switch (browserType) {
             case CHROME:
                 driver = createChromeDriver(headless);
+                break;
+            case CHROME_MOBILE:
+            case CHROME_TABLET:
+                driver = createChromeMobileDriver(headless, deviceProfile, browserType);
                 break;
             case FIREFOX:
                 driver = createFirefoxDriver(headless);
@@ -49,6 +73,11 @@ public class WebDriverFactory {
                 driver = createSafariDriver(headless);
                 break;
             default:
+                if (browserType.isAppium()) {
+                    throw new IllegalArgumentException(
+                        "Appium browser type " + browserType + " requires an appiumConfig map. "
+                        + "Use createDriver(BrowserType, Map) instead.");
+                }
                 throw new IllegalArgumentException("Unsupported browser: " + browserType);
         }
         
@@ -100,6 +129,55 @@ public class WebDriverFactory {
         
         options.setPageLoadStrategy(org.openqa.selenium.PageLoadStrategy.EAGER);
         
+        return new ChromeDriver(options);
+    }
+    
+    /**
+     * Create Chrome WebDriver with mobile device emulation via Chrome DevTools Protocol.
+     * Falls back to a default device profile when none is provided.
+     */
+    private static WebDriver createChromeMobileDriver(boolean headless, DeviceProfile deviceProfile, BrowserType browserType) {
+        WebDriverManager.chromedriver().setup();
+        
+        // Resolve device profile: explicit > env var > default for the browser type
+        if (deviceProfile == null) {
+            String envDevice = System.getenv("MOBILE_DEVICE");
+            if (envDevice != null && !envDevice.trim().isEmpty()) {
+                deviceProfile = DeviceProfile.getBuiltin(envDevice.trim());
+            }
+        }
+        if (deviceProfile == null) {
+            deviceProfile = (browserType == BrowserType.CHROME_TABLET)
+                    ? DeviceProfile.getBuiltin("ipad_air")
+                    : DeviceProfile.getBuiltin("iphone_14");
+        }
+        
+        ChromeOptions options = new ChromeOptions();
+        
+        // Headless mode
+        if (headless) {
+            options.addArguments("--headless=new");
+            options.addArguments("--no-gpu");
+            options.addArguments("--disable-gpu-sandbox");
+            options.addArguments("--disable-software-rasterizer");
+        }
+        
+        // Common stability arguments
+        options.addArguments("--no-sandbox");
+        options.addArguments("--disable-dev-shm-usage");
+        options.addArguments("--disable-blink-features=AutomationControlled");
+        options.setExperimentalOption("excludeSwitches", new String[]{"enable-automation"});
+        options.setExperimentalOption("useAutomationExtension", false);
+        
+        // Mobile emulation via Chrome DevTools
+        options.setExperimentalOption("mobileEmulation", deviceProfile.toChromeEmulationMap());
+        
+        // Set viewport size to match device dimensions
+        options.addArguments("--window-size=" + deviceProfile.getWidth() + "," + deviceProfile.getHeight());
+        
+        options.setPageLoadStrategy(org.openqa.selenium.PageLoadStrategy.EAGER);
+        
+        System.out.println("Mobile emulation enabled: " + deviceProfile);
         return new ChromeDriver(options);
     }
     

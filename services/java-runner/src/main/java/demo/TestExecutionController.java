@@ -24,6 +24,9 @@ public class TestExecutionController {
     
     @Autowired
     private TestExecutionService testExecutionService;
+
+    @Autowired
+    private AppiumServerManager appiumServerManager;
     
     @PostMapping("/execute")
     public ResponseEntity<ExecutionResponse> executeTest(@RequestBody ExecutionRequest request) {
@@ -140,6 +143,113 @@ public class TestExecutionController {
         stats.put("runningExecutions", executions.values().stream().mapToInt(s -> "running".equals(s.status) ? 1 : 0).sum());
         return ResponseEntity.ok(stats);
     }
+
+    @PostMapping("/gather-elements")
+    public ResponseEntity<Map<String, Object>> gatherElements(@RequestBody Map<String, Object> request) {
+        System.out.println("=== GATHER ELEMENTS REQUEST ===");
+        String browserType = (String) request.getOrDefault("browserType", "");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> appiumConfig = (Map<String, Object>) request.get("appiumConfig");
+
+        if (browserType.isEmpty() || appiumConfig == null) {
+            Map<String, Object> err = new HashMap<>();
+            err.put("success", false);
+            err.put("error", "browserType and appiumConfig are required");
+            return ResponseEntity.badRequest().body(err);
+        }
+
+        try {
+            BrowserType bt = BrowserType.fromValue(browserType);
+            if (!bt.isAppium()) {
+                Map<String, Object> err = new HashMap<>();
+                err.put("success", false);
+                err.put("error", "browserType must be an Appium type");
+                return ResponseEntity.badRequest().body(err);
+            }
+
+            Map<String, Object> elements = AppiumElementGatherer.gatherElements(bt, appiumConfig);
+            elements.put("success", true);
+            return ResponseEntity.ok(elements);
+        } catch (Exception e) {
+            System.err.println("Gather elements failed: " + e.getMessage());
+            e.printStackTrace();
+            Map<String, Object> err = new HashMap<>();
+            err.put("success", false);
+            err.put("error", "Element gathering failed: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(err);
+        }
+    }
+
+    @PostMapping("/check-appium-connection")
+    public ResponseEntity<Map<String, Object>> checkAppiumConnection(@RequestBody Map<String, Object> request) {
+        System.out.println("=== CHECK APPIUM CONNECTION ===");
+        String serverUrl = (String) request.getOrDefault("appiumServerUrl", "http://localhost:4723");
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("appium_server_url", serverUrl);
+
+        // 1. Check Appium server status
+        try {
+            java.net.URL url = new java.net.URL(serverUrl + "/status");
+            java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("GET");
+            conn.setConnectTimeout(5000);
+            conn.setReadTimeout(5000);
+            int code = conn.getResponseCode();
+
+            if (code == 200) {
+                java.io.BufferedReader br = new java.io.BufferedReader(
+                        new java.io.InputStreamReader(conn.getInputStream()));
+                StringBuilder sb = new StringBuilder();
+                String line;
+                while ((line = br.readLine()) != null) sb.append(line);
+                br.close();
+                result.put("server_reachable", true);
+                result.put("server_status", sb.toString());
+            } else {
+                result.put("server_reachable", false);
+                result.put("server_error", "HTTP " + code);
+            }
+            conn.disconnect();
+        } catch (Exception e) {
+            result.put("server_reachable", false);
+            result.put("server_error", e.getMessage());
+        }
+
+        // 2. Check connected Android devices via ADB
+        List<String> androidDevices = new ArrayList<>();
+        try {
+            ProcessBuilder pb = new ProcessBuilder("adb", "devices");
+            pb.redirectErrorStream(true);
+            Process proc = pb.start();
+            java.io.BufferedReader br = new java.io.BufferedReader(
+                    new java.io.InputStreamReader(proc.getInputStream()));
+            String line;
+            while ((line = br.readLine()) != null) {
+                line = line.trim();
+                if (!line.isEmpty() && !line.startsWith("List") && !line.startsWith("*")) {
+                    androidDevices.add(line);
+                }
+            }
+            proc.waitFor(5, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (Exception e) {
+            // ADB not available — not an error if testing iOS/desktop
+        }
+        result.put("android_devices", androidDevices);
+
+        // 3. Overall status
+        boolean serverOk = Boolean.TRUE.equals(result.get("server_reachable"));
+        boolean hasDevices = !androidDevices.isEmpty();
+        result.put("connected", serverOk);
+        result.put("has_devices", hasDevices);
+        result.put("success", true);
+
+        // 4. Managed server info
+        result.put("appium_managed", appiumServerManager.isManaged());
+        result.put("appium_auto_start", true);
+
+        System.out.println("Connection check result: server=" + serverOk + " devices=" + androidDevices.size());
+        return ResponseEntity.ok(result);
+    }
     
     // Data classes remain the same...
     public static class ExecutionRequest {
@@ -148,7 +258,9 @@ public class TestExecutionController {
         public String authToken;
         public String executionId;
         public Map<String, Object> policyConfig;  // Policy configuration
-        public String browserType;  // Browser type: chrome, firefox, edge, safari
+        public String browserType;  // Browser type: chrome, firefox, edge, safari, chrome-mobile, chrome-tablet, appium-*
+        public Map<String, Object> deviceConfig;  // Mobile device emulation profile
+        public Map<String, Object> appiumConfig;  // Appium server & capability configuration
         public TestDataConfig testDataConfig;  // API test data configuration
         
         public String getPromptId() { return promptId; }
@@ -168,6 +280,12 @@ public class TestExecutionController {
         
         public String getBrowserType() { return browserType; }
         public void setBrowserType(String browserType) { this.browserType = browserType; }
+        
+        public Map<String, Object> getDeviceConfig() { return deviceConfig; }
+        public void setDeviceConfig(Map<String, Object> deviceConfig) { this.deviceConfig = deviceConfig; }
+        
+        public Map<String, Object> getAppiumConfig() { return appiumConfig; }
+        public void setAppiumConfig(Map<String, Object> appiumConfig) { this.appiumConfig = appiumConfig; }
         
         public TestDataConfig getTestDataConfig() { return testDataConfig; }
         public void setTestDataConfig(TestDataConfig testDataConfig) { this.testDataConfig = testDataConfig; }

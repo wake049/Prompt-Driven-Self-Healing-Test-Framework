@@ -807,7 +807,8 @@ async def submit_healing_data(submission: HealingSubmission):
 async def get_all_elements(
     limit: int = Query(100, description="Maximum number of elements to return"),
     offset: int = Query(0, description="Number of elements to skip"),
-    page: Optional[str] = Query(None, description="Filter by page name")
+    page: Optional[str] = Query(None, description="Filter by page name"),
+    platform: Optional[str] = Query(None, description="Filter by platform (android, ios, web)")
 ):
     """
     Get all recorded elements
@@ -818,14 +819,24 @@ async def get_all_elements(
         
         where_clause = "WHERE e.is_active = true"
         params = []
+        param_idx = 0
         
         if page:
-            where_clause += " AND p.name = $1"
+            param_idx += 1
+            where_clause += f" AND p.name = ${param_idx}"
             params.append(page)
         
+        if platform:
+            param_idx += 1
+            where_clause += f" AND e.platform = ${param_idx}"
+            params.append(platform)
+        
         # Add pagination
+        param_idx += 1
+        limit_param = f"${param_idx}"
+        param_idx += 1
+        offset_param = f"${param_idx}"
         params.extend([limit, offset])
-        limit_offset = f"LIMIT ${len(params)-1} OFFSET ${len(params)}"
         
         result = await db.execute(
             f"""
@@ -844,7 +855,7 @@ async def get_all_elements(
             JOIN repo.pages p ON e.page_id = p.id
             {where_clause}
             ORDER BY e.updated_at DESC
-            {limit_offset}
+            LIMIT {limit_param} OFFSET {offset_param}
             """,
             *params
         )

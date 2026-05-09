@@ -82,6 +82,7 @@ async def get_prompts(
             "usage_count",
             "estimated_duration",
             "external_id",
+            "test_type",
         ]
         existing_optional = set(
             await db.fetchval(
@@ -173,6 +174,7 @@ async def get_prompts(
                 "priority": row_data.get("priority") or 0,
                 "estimated_duration": row_data.get("estimated_duration"),
                 "starting_url": row_data.get("starting_url") or "",
+                "test_type": row_data.get("test_type") or "web",
                 "author_id": str(row_data["user_id"]) if row_data.get("user_id") else None,
                 "version": row_data.get("version") or 1,
                 "project_id": str(row_data["project_id"]) if row_data.get("project_id") else None,
@@ -202,6 +204,15 @@ async def get_prompt(
                 p.id,
                 p.text,
                 p.intent,
+                p.starting_url,
+                p.category,
+                p.tags,
+                p.test_type,
+                p.version,
+                p.usage_count,
+                p.priority,
+                p.estimated_duration,
+                p.external_id,
                 p.created_at,
                 p.updated_at,
                 p.project_id,
@@ -241,19 +252,20 @@ async def get_prompt(
             "title": title,
             "content": row["text"] or "",
             "description": row["intent"] or "",
-            "category": "",
+            "category": row.get("category") or "",
             "tags": tags,
             "status": row["status"] or "pending",
             "created_at": created_at,
             "updated_at": updated_at,
-            "usage_count": 0,
-            "priority": 0,
-            "estimated_duration": None,
-            "starting_url": "",
+            "usage_count": row.get("usage_count") or 0,
+            "priority": row.get("priority") or 0,
+            "estimated_duration": row.get("estimated_duration"),
+            "starting_url": row.get("starting_url") or "",
+            "test_type": row.get("test_type") or "web",
             "author_id": str(row["user_id"]) if row.get("user_id") else None,
-            "version": 1,
+            "version": row.get("version") or 1,
             "project_id": str(row["project_id"]) if row.get("project_id") else None,
-            "external_id": None,
+            "external_id": row.get("external_id"),
             "parsed_plan": row.get("parsed_plan"),
         }
         
@@ -280,6 +292,9 @@ async def create_prompt(
         category = prompt_data.get("category", "")
         tags = prompt_data.get("tags", [])
         starting_url = prompt_data.get("starting_url", "")
+        test_type = prompt_data.get("test_type", "web")
+        if test_type not in ("web", "app"):
+            test_type = "web"
         
         # Build text from title + content
         text = f"{title}\n{content}" if content else title
@@ -294,10 +309,10 @@ async def create_prompt(
         
         row = await db.execute_one(
             """
-            INSERT INTO planner.prompts (project_id, user_id, text, intent, starting_url, category, tags, status)
-            VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, 'pending')
+            INSERT INTO planner.prompts (project_id, user_id, text, intent, starting_url, category, tags, status, test_type)
+            VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, 'pending', $8)
             RETURNING id, text, intent, starting_url, category, tags, status, created_at, updated_at,
-                      project_id, user_id, version, usage_count, estimated_duration, priority, external_id, parsed_plan
+                      project_id, user_id, version, usage_count, estimated_duration, priority, external_id, parsed_plan, test_type
             """,
             project_id,
             user_id,
@@ -306,6 +321,7 @@ async def create_prompt(
             starting_url,
             category,
             tags_json,
+            test_type,
         )
         
         created_at = row["created_at"].isoformat().replace('+00:00', 'Z') if row["created_at"] else None
@@ -334,6 +350,7 @@ async def create_prompt(
             "priority": row.get("priority") or 0,
             "estimated_duration": row.get("estimated_duration"),
             "starting_url": starting_url,
+            "test_type": test_type,
             "author_id": user_id,
             "version": row.get("version") or 1,
             "project_id": project_id,
@@ -397,6 +414,13 @@ async def update_prompt(
             params.append(prompt_data["starting_url"])
             param_idx += 1
         
+        if "test_type" in prompt_data:
+            val = prompt_data["test_type"]
+            if val in ("web", "app"):
+                set_clauses.append(f"test_type = ${param_idx}")
+                params.append(val)
+                param_idx += 1
+        
         if "status" in prompt_data:
             set_clauses.append(f"status = ${param_idx}")
             params.append(prompt_data["status"])
@@ -419,7 +443,7 @@ async def update_prompt(
             SET {', '.join(set_clauses)}
             WHERE id = ${param_idx}
             RETURNING id, text, intent, starting_url, category, tags, status, created_at, updated_at,
-                      project_id, user_id, version, usage_count, estimated_duration, priority, external_id, parsed_plan
+                      project_id, user_id, version, usage_count, estimated_duration, priority, external_id, parsed_plan, test_type
         """
         
         row = await db.execute_one(query, *params)
@@ -469,6 +493,7 @@ async def update_prompt(
             "priority": row.get("priority") or 0,
             "estimated_duration": row.get("estimated_duration"),
             "starting_url": row.get("starting_url") or "",
+            "test_type": row.get("test_type") or "web",
             "author_id": str(row["user_id"]) if row.get("user_id") else None,
             "version": row.get("version") or 1,
             "project_id": str(row["project_id"]) if row.get("project_id") else None,
@@ -523,7 +548,7 @@ async def get_test_plans_by_prompt(prompt_id: str, db: DatabaseManager) -> Dict[
     try:
         rows = await db.fetch(
             """
-            SELECT id, prompt_id, plan_json, confidence_score, model_used,
+            SELECT id, prompt_id, plan_json, platform_variants, confidence_score, model_used,
                    generation_time_ms, status, approved_by, approved_at,
                    created_at, updated_at
             FROM planner.plans
@@ -539,6 +564,7 @@ async def get_test_plans_by_prompt(prompt_id: str, db: DatabaseManager) -> Dict[
                 "id": str(row["id"]),
                 "prompt_id": str(row["prompt_id"]),
                 "plan_json": row["plan_json"],
+                "platform_variants": row.get("platform_variants"),
                 "confidence_score": float(row["confidence_score"]) if row.get("confidence_score") else None,
                 "model_used": row.get("model_used"),
                 "generation_time_ms": row.get("generation_time_ms"),
@@ -581,6 +607,7 @@ async def create_or_update_test_plan(test_plan_data: Dict[str, Any], db: Databas
         generation_time_ms = test_plan_data.get("generation_time_ms") or test_plan_data.get("processing_time_ms")
         status = test_plan_data.get("status", "draft")
         plan_id = test_plan_data.get("id")
+        platform_variants = test_plan_data.get("platform_variants")
         
         # Convert steps to dual selector format
         if isinstance(plan_json, dict):
@@ -588,32 +615,36 @@ async def create_or_update_test_plan(test_plan_data: Dict[str, Any], db: Databas
             if steps:
                 plan_json["steps"] = convert_steps_to_dual_selector_format(steps)
         
+        platform_variants_json = json.dumps(platform_variants) if platform_variants else None
+
         if plan_id:
             # Update existing plan
             row = await db.execute_one(
                 """
                 UPDATE planner.plans
                 SET plan_json = $1::jsonb, confidence_score = $2, model_used = $3,
-                    generation_time_ms = $4, status = $5, updated_at = NOW()
-                WHERE id = $6
+                    generation_time_ms = $4, status = $5, platform_variants = $6::jsonb,
+                    updated_at = NOW()
+                WHERE id = $7
                 RETURNING id, prompt_id, plan_json, confidence_score, model_used,
-                          generation_time_ms, status, created_at, updated_at
+                          generation_time_ms, status, platform_variants, created_at, updated_at
                 """,
                 json.dumps(plan_json),
                 confidence_score,
                 model_used,
                 generation_time_ms,
                 status,
+                platform_variants_json,
                 plan_id,
             )
         else:
             # Create new plan
             row = await db.execute_one(
                 """
-                INSERT INTO planner.plans (prompt_id, plan_json, confidence_score, model_used, generation_time_ms, status)
-                VALUES ($1, $2::jsonb, $3, $4, $5, $6)
+                INSERT INTO planner.plans (prompt_id, plan_json, confidence_score, model_used, generation_time_ms, status, platform_variants)
+                VALUES ($1, $2::jsonb, $3, $4, $5, $6, $7::jsonb)
                 RETURNING id, prompt_id, plan_json, confidence_score, model_used,
-                          generation_time_ms, status, created_at, updated_at
+                          generation_time_ms, status, platform_variants, created_at, updated_at
                 """,
                 prompt_id,
                 json.dumps(plan_json),
@@ -621,6 +652,7 @@ async def create_or_update_test_plan(test_plan_data: Dict[str, Any], db: Databas
                 model_used,
                 generation_time_ms,
                 status,
+                platform_variants_json,
             )
         
         if not row:
@@ -630,6 +662,7 @@ async def create_or_update_test_plan(test_plan_data: Dict[str, Any], db: Databas
             "id": str(row["id"]),
             "prompt_id": str(row["prompt_id"]),
             "plan_json": row["plan_json"],
+            "platform_variants": row.get("platform_variants"),
             "confidence_score": float(row["confidence_score"]) if row.get("confidence_score") else None,
             "model_used": row.get("model_used"),
             "generation_time_ms": row.get("generation_time_ms"),

@@ -830,11 +830,14 @@ async def _save_scenarios_as_prompts(
         # Insert each prompt
         for prompt in prompts:
             try:
+                test_type = prompt.get("test_type", "web")
+                if test_type not in ("web", "app"):
+                    test_type = "web"
                 result = await db.execute_one(
                     """
                     INSERT INTO planner.prompts (
-                        project_id, user_id, text, intent, status, starting_url, category, tags
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                        project_id, user_id, text, intent, status, starting_url, category, tags, test_type
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                     RETURNING id
                     """,
                     project_id,
@@ -844,7 +847,8 @@ async def _save_scenarios_as_prompts(
                     "draft",
                     starting_url or "",
                     prompt.get("category", "Functional"),
-                    json.dumps(prompt.get("tags", []))
+                    json.dumps(prompt.get("tags", [])),
+                    test_type
                 )
                 
                 if result:

@@ -499,7 +499,9 @@ async def rerun_execution(
     execution_id: str,
     background_tasks: BackgroundTasks,
     authorization: Optional[str] = Header(None),
-    browser: Optional[str] = Query(default=None, description="Specific browser to rerun: chrome, firefox, edge, safari"),
+    browser: Optional[str] = Query(default=None, description="Specific browser to rerun: chrome, firefox, edge, safari, chrome-mobile, chrome-tablet, appium-*"),
+    device_profile_id: Optional[str] = Query(default=None, description="Device profile UUID for mobile/tablet emulation"),
+    appium_config_id: Optional[str] = Query(default=None, description="Appium config UUID for Appium-based testing"),
     db: DatabaseManager = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_active_user)
 ):
@@ -511,7 +513,7 @@ async def rerun_execution(
     try:
         # Get the original execution details
         exec_query = """
-        SELECT r.id, r.test_case_id, tc.plan_id, p.prompt_id
+        SELECT r.id, r.test_case_id, r.device_config, tc.plan_id, p.prompt_id
         FROM exec.runs r
         LEFT JOIN tests.test_cases tc ON r.test_case_id = tc.id
         LEFT JOIN planner.plans p ON tc.plan_id = p.id
@@ -535,6 +537,8 @@ async def rerun_execution(
             background_tasks=background_tasks,
             authorization=authorization,
             browser=browser,
+            device_profile_id=device_profile_id,
+            appium_config_id=appium_config_id,
             db=db,
             current_user=current_user
         )
@@ -551,8 +555,10 @@ async def execute_prompt(
     prompt_id: str,
     background_tasks: BackgroundTasks,
     authorization: Optional[str] = Header(None),
-    browser: Optional[str] = Query(default=None, description="Browser type: chrome, firefox, edge, safari"),
+    browser: Optional[str] = Query(default=None, description="Browser type: chrome, firefox, edge, safari, chrome-mobile, chrome-tablet, appium-*"),
     runner_id: Optional[str] = Query(default=None, description="Target runner agent ID. When set, forces agent dispatch mode and assigns work to this specific runner."),
+    device_profile_id: Optional[str] = Query(default=None, description="Device profile UUID for mobile/tablet emulation"),
+    appium_config_id: Optional[str] = Query(default=None, description="Appium config UUID for Appium-based testing"),
     db: DatabaseManager = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_active_user)
 ):
@@ -595,6 +601,7 @@ async def execute_prompt(
             p.prompt_id,
             p.status,
             p.plan_json,
+            p.platform_variants,
             p.created_at
         FROM planner.plans p
         WHERE p.prompt_id = $1
@@ -615,10 +622,34 @@ async def execute_prompt(
         try:
             plan_data = json.loads(plan_result['plan_json'])
             steps_data = plan_data.get('steps', [])
-            logger.info(f"Found {len(steps_data)} steps in plan")
+            logger.info(f"Found {len(steps_data)} shared steps in plan")
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse plan JSON: {e}")
             raise HTTPException(status_code=500, detail="Invalid plan data format")
+
+        # Resolve platform-specific steps when running with an Appium config
+        if appium_config_id and plan_result.get('platform_variants'):
+            try:
+                variants = plan_result['platform_variants']
+                if isinstance(variants, str):
+                    variants = json.loads(variants)
+                # Determine platform from the Appium config
+                config_row = await db.execute_one(
+                    "SELECT config_type FROM exec.appium_configs WHERE id = $1::uuid",
+                    appium_config_id,
+                )
+                if config_row:
+                    cfg_type = config_row['config_type'] or ''
+                    if 'android' in cfg_type and variants.get('android'):
+                        platform_steps = variants['android']
+                        logger.info(f"Appending {len(platform_steps)} Android-specific steps")
+                        steps_data = steps_data + platform_steps
+                    elif 'ios' in cfg_type and variants.get('ios'):
+                        platform_steps = variants['ios']
+                        logger.info(f"Appending {len(platform_steps)} iOS-specific steps")
+                        steps_data = steps_data + platform_steps
+            except Exception as e:
+                logger.warning(f"Failed to resolve platform variants: {e}")
         
         # Fix corrupted XPath selectors in existing plan data
         logger.info("Processing and fixing selectors...")
@@ -983,6 +1014,80 @@ async def execute_prompt(
                 additional_runs=len(browsers_to_run),
             )
 
+        # Resolve device profile for mobile/tablet emulation
+        device_config = None
+        if device_profile_id:
+            org_id = str(current_user.tenant.id) if current_user.tenant else "00000000-0000-0000-0000-000000000000"
+            dp_row = await db.execute_one(
+                """SELECT device_name, device_type, width, height, device_scale_factor,
+                          user_agent, is_mobile, has_touch, is_landscape
+                   FROM exec.device_profiles
+                   WHERE id = $1 AND organization_id IN ($2, '00000000-0000-0000-0000-000000000000')""",
+                device_profile_id, org_id,
+            )
+            if dp_row:
+                device_config = {
+                    "device_name": dp_row["device_name"],
+                    "device_type": dp_row["device_type"],
+                    "width": dp_row["width"],
+                    "height": dp_row["height"],
+                    "device_scale_factor": float(dp_row["device_scale_factor"]),
+                    "user_agent": dp_row["user_agent"],
+                    "is_mobile": dp_row["is_mobile"],
+                    "has_touch": dp_row["has_touch"],
+                    "is_landscape": dp_row["is_landscape"],
+                }
+                # Auto-set browser to chrome-mobile/chrome-tablet if not explicitly specified
+                if not browser:
+                    auto_browser = "chrome-tablet" if dp_row["device_type"] == "tablet" else "chrome-mobile"
+                    browsers_to_run = [auto_browser]
+                    logger.info(f"Auto-selected browser {auto_browser} for device profile {dp_row['device_name']}")
+                logger.info(f"Device profile resolved: {dp_row['device_name']} ({dp_row['width']}x{dp_row['height']})")
+            else:
+                logger.warning(f"Device profile {device_profile_id} not found, proceeding without mobile emulation")
+
+        # Resolve Appium configuration
+        appium_config = None
+        if appium_config_id:
+            org_id = str(current_user.tenant.id) if current_user.tenant else "00000000-0000-0000-0000-000000000000"
+            ac_row = await db.execute_one(
+                """SELECT config_type, appium_server_url, platform_name, platform_version,
+                          device_name, automation_name, app_path, app_package,
+                          app_activity, bundle_id, browser_name,
+                          cloud_provider, cloud_username, cloud_access_key,
+                          extra_capabilities
+                   FROM exec.appium_configs
+                   WHERE id = $1 AND organization_id IN ($2, '00000000-0000-0000-0000-000000000000')""",
+                appium_config_id, org_id,
+            )
+            if ac_row:
+                appium_config = {k: v for k, v in dict(ac_row).items() if v is not None}
+                # Ensure extra_capabilities is a proper dict, not a JSON string
+                if 'extra_capabilities' in appium_config:
+                    ec = appium_config['extra_capabilities']
+                    if isinstance(ec, str):
+                        try:
+                            appium_config['extra_capabilities'] = json.loads(ec)
+                        except (json.JSONDecodeError, TypeError):
+                            appium_config['extra_capabilities'] = {}
+                # Auto-select the matching browser type from config_type
+                type_to_browser = {
+                    "android-web": "appium-android-web",
+                    "ios-web": "appium-ios-web",
+                    "android-native": "appium-android-native",
+                    "ios-native": "appium-ios-native",
+                    "flutter": "appium-flutter",
+                    "windows": "appium-windows",
+                    "mac": "appium-mac",
+                }
+                if not browser:
+                    auto_browser = type_to_browser.get(ac_row["config_type"], "appium-android-web")
+                    browsers_to_run = [auto_browser]
+                    logger.info(f"Auto-selected browser {auto_browser} for Appium config type {ac_row['config_type']}")
+                logger.info(f"Appium config resolved: {ac_row['config_type']} → {ac_row['appium_server_url']}")
+            else:
+                logger.warning(f"Appium config {appium_config_id} not found, proceeding without Appium")
+
         # Call Java runner service directly (much faster than ECS tasks)
         dispatch_mode = os.getenv("DISPATCH_MODE", "push")  # "push" or "agent"
 
@@ -1033,6 +1138,7 @@ async def execute_prompt(
                     SET status = 'queued',
                         dispatch_mode = 'agent',
                         assigned_runner_id = $3,
+                        device_config = $4,
                         runner_meta = $2
                     WHERE id = $1
                     """,
@@ -1043,9 +1149,12 @@ async def execute_prompt(
                         "steps_count": len(test_steps),
                         "execution_type": "agent_queued",
                         "browser": browser_type,
+                        "device_config": device_config,
+                        "appium_config": appium_config,
                         "target_runner_id": runner_id,
                     }),
                     runner_id,  # NULL if not targeting a specific runner
+                    json.dumps(device_config) if device_config else None,
                 )
 
                 all_executions.append({
@@ -1109,8 +1218,7 @@ async def execute_prompt(
                 "screenshot": "screenshot"
             }
             
-            logger.info(f"Starting step mapping. test_steps count: {len(test_steps)}, step_ids count: {len(step_ids)}")
-            logger.info(f"Step IDs: {step_ids}")
+            logger.info(f"Starting step mapping. test_steps count: {len(test_steps)}")
 
             # Determine selector policy from configuration
             selector_policy_value = "css" if policy_config.get("preferCssOverXpath", True) else "xpath"
@@ -1124,13 +1232,6 @@ async def execute_prompt(
                     logger.info(f"Step {i+1}: Mapped action '{original_action}' -> '{mapped_step['action']}'")
                 else:
                     logger.info(f"Step {i+1}: Action '{original_action}' passed through unchanged")
-                
-                # Add the actual step ID from the database
-                if i < len(step_ids):
-                    mapped_step["id"] = step_ids[i]
-                    logger.info(f"Step {i+1}: Added step ID {step_ids[i]}")
-                else:
-                    logger.error(f"Step {i+1}: No step ID available! step_ids length: {len(step_ids)}, current index: {i}")
                 
                 # Apply selector policy to each step
                 mapped_step["selectorPolicy"] = selector_policy_value
@@ -1162,7 +1263,9 @@ async def execute_prompt(
                     "steps": browser_mapped_steps,
                     "authToken": auth_token or "",
                     "policyConfig": policy_config,
-                    "browserType": browser_type
+                    "browserType": browser_type,
+                    "deviceConfig": device_config,
+                    "appiumConfig": appium_config
                 }
                 
                 logger.info(f"Calling Java runner for browser: {browser_type} at: {target_url}")
@@ -1232,24 +1335,18 @@ async def execute_prompt(
             logger.error(f"Unexpected error calling Java runner service: {type(e).__name__}: {e}")
             logger.error(f"Target URL was: {target_url}")
             
-            # Fallback to background task execution
-            logger.info("Falling back to background task execution")
-            background_tasks.add_task(
-                execute_java_test_background_wrapper,
-                prompt_id,
-                test_steps,
-                execution_id,
-                active_bindings
-            )
+            # Re-raise so the outer handler returns a proper error
+            raise HTTPException(status_code=500, detail=f"Java runner service unavailable: {e}")
         
-        # Return success response (either from Java runner or fallback)
+        # Return success response from Java runner
         return {
             "success": True,
-            "message": "Test execution started",
-            "execution_id": execution_id,
+            "message": f"Test execution started on {len([e for e in all_executions if e['success']])}/{len(browsers_to_run)} browsers",
+            "executions": all_executions,
+            "successful_count": len([e for e in all_executions if e['success']]),
+            "failed_count": len([e for e in all_executions if not e['success']]),
             "steps_count": len(test_steps),
-            "prompt_text": f"Plan execution for prompt {prompt_id}",
-            "note": "Check logs for execution method used (Java runner vs background task)"
+            "prompt_text": f"Plan execution for prompt {prompt_id}"
         }
         
     except HTTPException as he:

@@ -35,6 +35,9 @@ public class StepResult {
     @JsonProperty("attemptedAlternatives")
     private List<String> attemptedAlternatives;
 
+    @JsonProperty("details")
+    private String details;
+
     // Default constructor for Jackson
     public StepResult() {
         this.attemptedAlternatives = new ArrayList<>();
@@ -128,6 +131,14 @@ public class StepResult {
     
     public void setAttemptedAlternatives(List<String> attemptedAlternatives) {
         this.attemptedAlternatives = attemptedAlternatives;
+    }
+
+    public String getDetails() {
+        return details;
+    }
+
+    public void setDetails(String details) {
+        this.details = details;
     }
 
     @Override

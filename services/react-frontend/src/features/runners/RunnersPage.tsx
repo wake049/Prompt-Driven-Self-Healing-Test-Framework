@@ -17,6 +17,7 @@ import {
   X,
   Play,
   Pause,
+  Trash2,
 } from 'lucide-react';
 import { config } from '../../app/config';
 
@@ -501,6 +502,28 @@ const RunnersPage: React.FC = () => {
     setTimeout(() => setCopied(null), 2000);
   };
 
+  const deleteRunner = async (runnerId: string, runnerName: string) => {
+    if (!window.confirm(`Delete runner "${runnerName}"? This will also remove its logs.`)) return;
+    try {
+      const response = await fetch(`${apiBase}/api/v1/runners/${runnerId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      });
+      if (response.ok) {
+        if (selectedRunnerId === runnerId) {
+          setSelectedRunnerId(null);
+          setLogs([]);
+        }
+        fetchRunners();
+      } else {
+        const data = await response.json();
+        alert(`Failed to delete runner: ${data.detail || 'Unknown error'}`);
+      }
+    } catch (err) {
+      console.error('Failed to delete runner:', err);
+    }
+  };
+
   const onlineRunners = runners.filter(r => r.status === 'online');
   const offlineRunners = runners.filter(r => r.status === 'offline');
   const allCapabilities = [...new Set(runners.flatMap(r => parseCapabilities(r.capabilities)))];
@@ -523,6 +546,34 @@ const RunnersPage: React.FC = () => {
           </RefreshButton>
         </HeaderActions>
       </Header>
+
+      {/* Quick-reference: Org ID & API URL — always visible */}
+      <div style={{
+        display: 'flex', gap: '16px', flexWrap: 'wrap',
+        padding: '12px 16px', marginBottom: '16px',
+        background: '#f0f7ff', border: '1px solid #bfdbfe', borderRadius: '8px',
+        fontSize: '13px', color: '#1e40af', alignItems: 'center'
+      }}>
+        <span style={{ fontWeight: 600 }}>Runner Setup Info</span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          Organization ID:{' '}
+          <CodeBlock>{tenant?.id || '<not available>'}</CodeBlock>
+          {tenant?.id && (
+            <CopyButton onClick={() => copyToClipboard(tenant.id, 'org-id-bar')}>
+              {copied === 'org-id-bar' ? <CheckCircle size={12} /> : <Copy size={12} />}
+              {copied === 'org-id-bar' ? 'Copied!' : 'Copy'}
+            </CopyButton>
+          )}
+        </span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          API URL:{' '}
+          <CodeBlock>{apiBase}</CodeBlock>
+          <CopyButton onClick={() => copyToClipboard(apiBase, 'api-url-bar')}>
+            {copied === 'api-url-bar' ? <CheckCircle size={12} /> : <Copy size={12} />}
+            {copied === 'api-url-bar' ? 'Copied!' : 'Copy'}
+          </CopyButton>
+        </span>
+      </div>
 
       {/* Stats */}
       <StatsRow>
@@ -608,6 +659,7 @@ const RunnersPage: React.FC = () => {
                 <Th>Browsers</Th>
                 <Th>Last Seen</Th>
                 <Th>Registered</Th>
+                <Th>Actions</Th>
               </tr>
             </thead>
             <tbody>
@@ -645,6 +697,18 @@ const RunnersPage: React.FC = () => {
                     </Td>
                     <Td>
                       <TimeAgo>{formatTimeAgo(runner.registered_at)}</TimeAgo>
+                    </Td>
+                    <Td>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); deleteRunner(runner.id, runner.runner_name); }}
+                        title="Delete runner"
+                        style={{
+                          background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer',
+                          padding: '4px', borderRadius: '4px', display: 'flex', alignItems: 'center',
+                        }}
+                      >
+                        <Trash2 size={15} />
+                      </button>
                     </Td>
                   </RunnerRow>
                 );
