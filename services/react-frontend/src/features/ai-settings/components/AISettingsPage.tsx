@@ -674,6 +674,10 @@ const AISettingsPage: React.FC = () => {
       </Header>
 
       <ContentArea>
+        <div style={{ marginBottom: '20px', padding: '16px 20px', borderRadius: '12px', background: '#f5f3ff', border: '1px solid #ddd6fe', color: '#4c1d95', display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <Zap size={18} />
+          Ollama is available here as a local provider. Enable it, set the model and base URL, then save and switch to it from this screen.
+        </div>
         {error && (
           <ErrorMessage>
             <AlertCircle size={16} />

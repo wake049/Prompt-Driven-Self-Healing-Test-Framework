@@ -277,14 +277,34 @@ uploads_dir = Path("uploads")
 uploads_dir.mkdir(exist_ok=True)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
-# Mount screenshots directory - point to Java runner's screenshots directory
-# This allows the API to serve screenshots created by the Java test runner
-java_screenshots_dir = Path("../java-runner/screenshots")
-if not java_screenshots_dir.exists():
-    # Fallback to local directory if Java runner not found
-    java_screenshots_dir = Path("screenshots")
-    java_screenshots_dir.mkdir(exist_ok=True)
-app.mount("/screenshots", StaticFiles(directory=str(java_screenshots_dir)), name="screenshots")
+# Mount screenshots directory used by the Java runner.
+# Priority order:
+# 1) SCREENSHOTS_DIR env var
+# 2) /app/screenshots (shared Docker volume)
+# 3) ../java-runner/screenshots (local monorepo runs)
+# 4) local ./screenshots fallback
+configured_screenshots_dir = os.getenv("SCREENSHOTS_DIR")
+screenshot_dir_candidates = []
+if configured_screenshots_dir:
+    screenshot_dir_candidates.append(Path(configured_screenshots_dir))
+screenshot_dir_candidates.extend([
+    Path("/app/screenshots"),
+    Path("../java-runner/screenshots"),
+    Path("screenshots"),
+])
+
+resolved_screenshots_dir = None
+for candidate in screenshot_dir_candidates:
+    if candidate.exists():
+        resolved_screenshots_dir = candidate
+        break
+
+if resolved_screenshots_dir is None:
+    resolved_screenshots_dir = Path("screenshots")
+    resolved_screenshots_dir.mkdir(parents=True, exist_ok=True)
+
+logger.info("Serving screenshots from: %s", resolved_screenshots_dir)
+app.mount("/screenshots", StaticFiles(directory=str(resolved_screenshots_dir)), name="screenshots")
 
 # Global exception handler — returns structured JSON instead of raw 500s
 @app.exception_handler(Exception)

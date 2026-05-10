@@ -39,7 +39,15 @@ public class ExecutionService {
     private WebDriverWait wait;
     private SelfHealing selfHealing;
     private static final int DEFAULT_TIMEOUT = 10;
-    private static final String SCREENSHOTS_DIR = "screenshots";
+    private static final String SCREENSHOTS_DIR = resolveScreenshotsDir();
+
+    private static String resolveScreenshotsDir() {
+        String configuredDir = System.getenv("SCREENSHOTS_DIR");
+        if (configuredDir != null && !configuredDir.trim().isEmpty()) {
+            return configuredDir.trim();
+        }
+        return "screenshots";
+    }
     
     // Variables storage for data extraction
     private Map<String, String> extractedVariables;
@@ -65,6 +73,7 @@ public class ExecutionService {
         if (!screenshotsDir.exists()) {
             screenshotsDir.mkdirs();
         }
+        System.out.println("📸 Screenshot directory: " + screenshotsDir.getAbsolutePath());
         
         // Capture initial performance snapshot
         profiler.captureSnapshot("ExecutionService_Initialized");
@@ -3253,8 +3262,9 @@ public class ExecutionService {
             
             FileUtils.copyFile(sourceFile, destinationFile);
             System.out.println("    Screenshot saved: " + destinationFile.getPath());
-            
-            return destinationFile.getPath();
+
+            // Persist a portable web path so DB values are stable across machines/containers.
+            return "/screenshots/" + filename;
         } catch (IOException e) {
             System.err.println("    Failed to capture screenshot: " + e.getMessage());
             return null;

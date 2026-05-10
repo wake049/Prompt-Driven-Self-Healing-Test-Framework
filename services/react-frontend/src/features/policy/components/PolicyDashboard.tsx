@@ -1218,12 +1218,6 @@ export const PolicyDashboard: React.FC = () => {
             >
               🛡️ Policy Engine
             </Tab>
-            <Tab 
-              active={activeTab === 'ai-config'} 
-              onClick={() => setActiveTab('ai-config')}
-            >
-               AI Configuration
-            </Tab>
           </TabContainer>
 
           {activeTab === 'policy' && (

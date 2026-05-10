@@ -54,14 +54,18 @@ const FilterBtn = styled.button<{ active: boolean }>`
   &:hover { border-color: #185FA5; }
 `;
 
-const Grid = styled.div`display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px;`;
+const List = styled.div`display: flex; flex-direction: column; gap: 12px;`;
 const Card = styled.div<{ builtin?: boolean }>`
-  border: 1px solid ${p => p.builtin ? '#e2e8f0' : '#dee2e6'}; border-radius: 10px;
-  padding: 20px; background: ${p => p.builtin ? '#f8fafc' : '#fff'};
-  &:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+  border: 1px solid ${p => p.builtin ? '#e2e8f0' : '#dee2e6'}; border-radius: 8px;
+  padding: 14px 16px; background: ${p => p.builtin ? '#f8fafc' : '#fff'};
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  cursor: pointer;
+  &:hover { box-shadow: 0 2px 6px rgba(0,0,0,0.06); border-color: #185FA5; }
 `;
-const CardHeader = styled.div`display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;`;
-const CardTitle = styled.h3`font-size: 15px; font-weight: 600; color: #1a1a2e; margin: 0;`;
+const CardMain = styled.div`display: flex; align-items: center; gap: 16px; flex: 1; min-width: 0;`;
+const CardMeta = styled.div`font-size: 11px; color: #94a3b8; margin-top: 6px;`;
+const CardHeader = styled.div`display: flex; align-items: center; gap: 12px; flex: 1;`;
+const CardTitle = styled.h3`font-size: 14px; font-weight: 600; color: #1a1a2e; margin: 0;`;
 const CardBadge = styled.span<{ color?: string }>`
   font-size: 11px; padding: 2px 8px; border-radius: 10px;
   background: ${p => p.color || '#f1f5f9'}; color: #475569; font-weight: 500;
@@ -88,10 +92,31 @@ const SecondaryBtn = styled.button`padding: 8px 16px; border-radius: 8px; backgr
 
 const BuiltinTag = styled.span`font-size: 10px; padding: 2px 6px; background: #fef3c7; color: #92400e; border-radius: 4px; font-weight: 600;`;
 
+const CardSummary = styled.div`
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  flex-wrap: wrap;
+  min-width: 0;
+  color: #6b7280;
+  font-size: 12px;
+`;
+
+const SummaryItem = styled.div`
+  white-space: nowrap;
+`;
+
+const CardActions = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+`;
+
 const GatherBtn = styled.button`
   display: flex; align-items: center; gap: 5px; padding: 6px 12px; border-radius: 6px;
   background: #059669; color: #fff; border: none; cursor: pointer; font-size: 12px; font-weight: 600;
-  margin-top: 10px; width: 100%;  justify-content: center;
+  width: auto; justify-content: center;
   &:hover { background: #047857; }
   &:disabled { background: #9ca3af; cursor: not-allowed; }
 `;
@@ -99,7 +124,7 @@ const GatherBtn = styled.button`
 const ConnectBtn = styled.button`
   display: flex; align-items: center; gap: 5px; padding: 6px 12px; border-radius: 6px;
   background: #2563eb; color: #fff; border: none; cursor: pointer; font-size: 12px; font-weight: 600;
-  margin-top: 6px; width: 100%; justify-content: center;
+  width: auto; justify-content: center;
   &:hover { background: #1d4ed8; }
   &:disabled { background: #9ca3af; cursor: not-allowed; }
 `;
@@ -142,6 +167,7 @@ export const AppiumTestingPage: React.FC = () => {
   const [gatherResult, setGatherResult] = useState<any>(null);
   const [gatherError, setGatherError] = useState<string | null>(null);
   const [testingConnectionId, setTestingConnectionId] = useState<string | null>(null);
+  const [selectedConfig, setSelectedConfig] = useState<AppiumConfig | null>(null);
   const [connectionResults, setConnectionResults] = useState<Record<string, any>>({});
   const [form, setForm] = useState<Record<string, string>>({
     name: '', config_type: 'android-web', appium_server_url: 'http://localhost:4723',
@@ -228,6 +254,12 @@ export const AppiumTestingPage: React.FC = () => {
   const isBuiltin = (c: AppiumConfig) => c.organization_id === '00000000-0000-0000-0000-000000000000';
   const typeLabel = (t: string) => CONFIG_TYPES.find(ct => ct.value === t)?.label || t;
   const typeIcon = (t: string) => CONFIG_TYPES.find(ct => ct.value === t)?.icon || '⚙️';
+  const sortedConfigs = [...configs].sort((a, b) => {
+    const aTemplate = isBuiltin(a) ? 1 : 0;
+    const bTemplate = isBuiltin(b) ? 1 : 0;
+    if (aTemplate !== bTemplate) return aTemplate - bTemplate;
+    return a.name.localeCompare(b.name);
+  });
 
   const selectedType = CONFIG_TYPES.find(ct => ct.value === form.config_type);
   const showAppFields = ['android-native', 'ios-native', 'flutter'].includes(form.config_type);
@@ -249,49 +281,56 @@ export const AppiumTestingPage: React.FC = () => {
         ))}
       </FilterRow>
 
-      <Grid>
-        {configs.map(c => (
-          <Card key={c.id} builtin={isBuiltin(c)}>
-            <CardHeader>
-              <div>
-                <CardTitle>{typeIcon(c.config_type)} {c.name}</CardTitle>
-                <CardBadge>{typeLabel(c.config_type)}</CardBadge>
-                {isBuiltin(c) && <> <BuiltinTag>TEMPLATE</BuiltinTag></>}
-                {c.is_default && <> <BuiltinTag>DEFAULT</BuiltinTag></>}
-              </div>
-              {!isBuiltin(c) && (
-                <DeleteBtn onClick={() => handleDelete(c.id)} title="Delete"><Trash2 size={16} /></DeleteBtn>
-              )}
-            </CardHeader>
-            <Field><FieldLabel>Server:</FieldLabel> {c.appium_server_url}</Field>
-            {c.platform_name && <Field><FieldLabel>Platform:</FieldLabel> {c.platform_name} {c.platform_version}</Field>}
-            {c.device_name && <Field><FieldLabel>Device:</FieldLabel> {c.device_name}</Field>}
-            {c.automation_name && <Field><FieldLabel>Engine:</FieldLabel> {c.automation_name}</Field>}
-            {c.app_path && <Field><FieldLabel>App:</FieldLabel> {c.app_path}</Field>}
-            {c.app_package && <Field><FieldLabel>Package:</FieldLabel> {c.app_package}</Field>}
-            {c.bundle_id && <Field><FieldLabel>Bundle:</FieldLabel> {c.bundle_id}</Field>}
-            {c.browser_name && <Field><FieldLabel>Browser:</FieldLabel> {c.browser_name}</Field>}
-            {c.cloud_provider && <Field><FieldLabel>Cloud:</FieldLabel> {c.cloud_provider}</Field>}
-            <GatherBtn
-              onClick={() => handleGatherElements(c.id)}
-              disabled={gatheringId !== null}
-            >
-              {gatheringId === c.id ? (
-                <><Loader2 size={14} className="spin" /> Scanning Screen…</>
-              ) : (
-                <><Search size={14} /> Gather All Elements</>
-              )}
-            </GatherBtn>
-            <ConnectBtn
-              onClick={() => handleTestConnection(c.id)}
-              disabled={testingConnectionId !== null}
-            >
-              {testingConnectionId === c.id ? (
-                <><Loader2 size={14} className="spin" /> Checking…</>
-              ) : (
-                <><Wifi size={14} /> Test Connection</>
-              )}
-            </ConnectBtn>
+      <List>
+        {sortedConfigs.map(c => (
+          <Card key={c.id} builtin={isBuiltin(c)} onClick={() => setSelectedConfig(c)}>
+            <CardMain>
+              <CardHeader>
+                <div>
+                  <CardTitle>{typeIcon(c.config_type)} {c.name}</CardTitle>
+                  <CardMeta>Click row for details</CardMeta>
+                </div>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <CardBadge>{typeLabel(c.config_type)}</CardBadge>
+                  {isBuiltin(c) && <BuiltinTag>TEMPLATE</BuiltinTag>}
+                  {c.is_default && <BuiltinTag>DEFAULT</BuiltinTag>}
+                </div>
+              </CardHeader>
+              <CardSummary>
+                {c.platform_name && <SummaryItem><FieldLabel>Platform:</FieldLabel> {c.platform_name} {c.platform_version || ''}</SummaryItem>}
+                {c.device_name && <SummaryItem><FieldLabel>Device:</FieldLabel> {c.device_name}</SummaryItem>}
+                {c.browser_name && <SummaryItem><FieldLabel>Browser:</FieldLabel> {c.browser_name}</SummaryItem>}
+                {c.automation_name && <SummaryItem><FieldLabel>Engine:</FieldLabel> {c.automation_name}</SummaryItem>}
+              </CardSummary>
+            </CardMain>
+            <CardActions>
+              <GatherBtn
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleGatherElements(c.id);
+                }}
+                disabled={gatheringId !== null}
+              >
+                {gatheringId === c.id ? (
+                  <><Loader2 size={14} className="spin" /> Scanning…</>
+                ) : (
+                  <><Search size={14} /> Gather</>
+                )}
+              </GatherBtn>
+              <ConnectBtn
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleTestConnection(c.id);
+                }}
+                disabled={testingConnectionId !== null}
+              >
+                {testingConnectionId === c.id ? (
+                  <><Loader2 size={14} className="spin" /> Checking…</>
+                ) : (
+                  <><Wifi size={14} /> Test</>
+                )}
+              </ConnectBtn>
+            </CardActions>
             {connectionResults[c.id] && (
               <ConnectionStatus ok={connectionResults[c.id].connected}>
                 {connectionResults[c.id].connected ? (
@@ -323,7 +362,7 @@ export const AppiumTestingPage: React.FC = () => {
             )}
           </Card>
         ))}
-      </Grid>
+      </List>
 
       {gatherError && (
         <ResultsPanel style={{ marginTop: 24, border: '1px solid #fca5a5' }}>
@@ -453,8 +492,42 @@ export const AppiumTestingPage: React.FC = () => {
           </Modal>
         </Overlay>
       )}
+
+      {selectedConfig && (
+        <Overlay onClick={() => setSelectedConfig(null)}>
+          <Modal onClick={e => e.stopPropagation()}>
+            <ModalTitle>{typeIcon(selectedConfig.config_type)} {selectedConfig.name}</ModalTitle>
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+                <CardBadge>{typeLabel(selectedConfig.config_type)}</CardBadge>
+                {isBuiltin(selectedConfig) && <BuiltinTag>TEMPLATE</BuiltinTag>}
+                {selectedConfig.is_default && <BuiltinTag>DEFAULT</BuiltinTag>}
+              </div>
+              <div style={{ fontSize: 12, color: '#6b7280', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div><span style={{ fontWeight: 600, color: '#374151' }}>Server:</span> {selectedConfig.appium_server_url}</div>
+                {selectedConfig.platform_name && <div><span style={{ fontWeight: 600, color: '#374151' }}>Platform:</span> {selectedConfig.platform_name} {selectedConfig.platform_version || ''}</div>}
+                {selectedConfig.device_name && <div><span style={{ fontWeight: 600, color: '#374151' }}>Device:</span> {selectedConfig.device_name}</div>}
+                {selectedConfig.automation_name && <div><span style={{ fontWeight: 600, color: '#374151' }}>Engine:</span> {selectedConfig.automation_name}</div>}
+                {selectedConfig.app_path && <div><span style={{ fontWeight: 600, color: '#374151' }}>App Path:</span> {selectedConfig.app_path}</div>}
+                {selectedConfig.app_package && <div><span style={{ fontWeight: 600, color: '#374151' }}>App Package:</span> {selectedConfig.app_package}</div>}
+                {selectedConfig.app_activity && <div><span style={{ fontWeight: 600, color: '#374151' }}>App Activity:</span> {selectedConfig.app_activity}</div>}
+                {selectedConfig.bundle_id && <div><span style={{ fontWeight: 600, color: '#374151' }}>Bundle ID:</span> {selectedConfig.bundle_id}</div>}
+                {selectedConfig.browser_name && <div><span style={{ fontWeight: 600, color: '#374151' }}>Browser:</span> {selectedConfig.browser_name}</div>}
+                {selectedConfig.cloud_provider && <div><span style={{ fontWeight: 600, color: '#374151' }}>Cloud Provider:</span> {selectedConfig.cloud_provider}</div>}
+                {selectedConfig.cloud_username && <div><span style={{ fontWeight: 600, color: '#374151' }}>Cloud Username:</span> {selectedConfig.cloud_username}</div>}
+                {selectedConfig.created_at && <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 4 }}>Created: {new Date(selectedConfig.created_at).toLocaleString()}</div>}
+              </div>
+            </div>
+            <BtnRow>
+              <SecondaryBtn onClick={() => setSelectedConfig(null)}>Close</SecondaryBtn>
+              <CreateBtn onClick={() => handleDelete(selectedConfig.id)}>Delete</CreateBtn>
+            </BtnRow>
+          </Modal>
+        </Overlay>
+      )}
     </Page>
   );
 };
 
 export default AppiumTestingPage;
+

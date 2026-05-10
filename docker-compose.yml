@@ -32,6 +32,8 @@ services:
       - JAVA_RUNNER_URL=${JAVA_RUNNER_URL:-http://java-runner:8080}
       - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS}
     restart: unless-stopped
+    volumes:
+      - ./services/java-runner/screenshots:/app/screenshots
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s

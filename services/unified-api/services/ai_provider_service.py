@@ -8,6 +8,7 @@ provider to use for test generation, healing, and other AI operations.
 
 import asyncpg
 import logging
+import json
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 import os
@@ -114,14 +115,32 @@ class AIProviderService:
                     provider_config['provider']
                 )
                 
+                # Handle API key - may be NULL for providers like Ollama that don't need one
+                api_key = None
+                if provider_config.get('api_key'):
+                    api_key = _decrypt_api_key(provider_config['api_key'])
+
+                # asyncpg may return JSONB as a string in some environments; normalize to dict.
+                raw_config_options = provider_config.get('config_options')
+                if isinstance(raw_config_options, str):
+                    try:
+                        parsed_config_options = json.loads(raw_config_options)
+                    except Exception:
+                        logger.warning("Invalid config_options JSON for tenant %s, provider %s; using empty object", tenant_id, provider_config['provider'])
+                        parsed_config_options = {}
+                elif isinstance(raw_config_options, dict):
+                    parsed_config_options = raw_config_options
+                else:
+                    parsed_config_options = {}
+                
                 return {
                     "provider": provider_config['provider'],
-                    "api_key": _decrypt_api_key(provider_config['api_key']),
+                    "api_key": api_key,
                     "model": provider_config['model'] or AIProviderService._get_default_model(provider_config['provider']),
                     "endpoint_url": provider_config['endpoint_url'],
                     "temperature": float(provider_config['temperature']) if provider_config['temperature'] else 0.1,
                     "max_tokens": provider_config['max_tokens'] or 4000,
-                    "config_options": provider_config['config_options'] or {},
+                    "config_options": parsed_config_options,
                     "source": "database"
                 }
             
@@ -415,3 +434,129 @@ class AIProviderService:
             )
         except Exception as e:
             logger.debug(f"Failed to update provider usage: {e}")
+    
+    @staticmethod
+    async def save_provider_settings(
+        db: asyncpg.Connection,
+        tenant_id: str,
+        providers: Dict[str, bool],
+        default_provider: Optional[str] = None
+    ) -> List[str]:
+        """
+        Save provider enable/disable settings for a tenant.
+        
+        Only ONE provider can be enabled at a time. Enabling a provider
+        automatically disables all others.
+        
+        Creates provider records if they don't exist, updates enable/disable status,
+        and optionally sets a default provider.
+        
+        Args:
+            db: Database connection
+            tenant_id: Tenant UUID
+            providers: Dictionary mapping provider names to enabled status
+            default_provider: Optional provider name to set as default (or auto-detect from enabled providers)
+            
+        Returns:
+            List of provider names that were updated
+        """
+        try:
+            updated = []
+            
+            # First, ensure the tenant exists
+            tenant_check = await db.fetchval(
+                "SELECT id FROM core.tenants WHERE id = $1",
+                tenant_id
+            )
+            if not tenant_check:
+                logger.warning(f"Tenant {tenant_id} not found, skipping provider settings save")
+                return []
+            
+            # Find which provider should be enabled (the one marked True)
+            enabled_providers = [p for p, is_enabled in providers.items() if is_enabled]
+            if len(enabled_providers) > 1:
+                # If multiple enabled, use only the first one (or default_provider if specified)
+                if default_provider and default_provider in enabled_providers:
+                    active_provider = default_provider
+                else:
+                    active_provider = enabled_providers[0]
+                logger.info(f"Multiple providers marked enabled; activating only {active_provider}")
+            elif len(enabled_providers) == 1:
+                active_provider = enabled_providers[0]
+            else:
+                # No providers enabled - keep current default or fall back to openai
+                logger.warning(f"No providers enabled for tenant {tenant_id}")
+                active_provider = default_provider or "openai"
+            
+            # For each provider, create or update its record
+            for provider_name in providers.keys():
+                try:
+                    is_now_enabled = provider_name == active_provider
+                    is_now_default = provider_name == active_provider
+                    default_model = AIProviderService._get_default_model(provider_name)
+                    default_endpoint = None
+                    if provider_name == "ollama":
+                        default_endpoint = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+                    
+                    # Check if provider config exists for this tenant
+                    existing = await db.fetchrow(
+                        """
+                        SELECT id FROM core.ai_provider_configs
+                        WHERE tenant_id = $1 AND provider = $2
+                        """,
+                        tenant_id,
+                        provider_name
+                    )
+                    
+                    if existing:
+                        # Update existing provider
+                        await db.execute(
+                            """
+                            UPDATE core.ai_provider_configs
+                            SET is_active = $2,
+                                is_default = $3,
+                                is_verified = $4,
+                                model = COALESCE(model, $5),
+                                endpoint_url = COALESCE(endpoint_url, $6),
+                                updated_at = NOW()
+                            WHERE id = $1
+                            """,
+                            existing['id'],
+                            is_now_enabled,
+                            is_now_default,
+                            is_now_default,  # Mark as verified if it's now the default
+                            default_model,
+                            default_endpoint,
+                        )
+                    else:
+                        # Create new provider record
+
+                        await db.execute(
+                            """
+                            INSERT INTO core.ai_provider_configs 
+                            (tenant_id, provider, provider_name, model, endpoint_url, is_active, is_default, is_verified)
+                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                            """,
+                            tenant_id,
+                            provider_name,
+                            provider_name.capitalize(),
+                            default_model,
+                            default_endpoint,
+                            is_now_enabled,
+                            is_now_default,
+                            is_now_default  # Mark as verified if it's the default
+                        )
+                    
+                    updated.append(provider_name)
+                    logger.info(f"✅ Saved provider {provider_name} (enabled={is_now_enabled}, default={is_now_default}) for tenant {tenant_id}")
+                    
+                except Exception as e:
+                    logger.error(f"❌ Error saving provider {provider_name}: {e}")
+                    continue
+            
+            logger.info(f"✅ Set {active_provider} as active provider for tenant {tenant_id}")
+            return updated
+            
+        except Exception as e:
+            logger.error(f"Error saving provider settings: {e}")
+            raise

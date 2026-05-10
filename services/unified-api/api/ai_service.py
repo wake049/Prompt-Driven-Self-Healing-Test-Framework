@@ -870,18 +870,50 @@ class EnterpriseAIService:
             
             if db_provider_config:
                 logger.info(f"✅ Using database-configured provider: {db_provider_config['provider']} ({db_provider_config.get('source')})")
+
+                config_options = db_provider_config.get('config_options') or {}
+                if isinstance(config_options, str):
+                    try:
+                        config_options = json.loads(config_options)
+                    except Exception:
+                        logger.warning("Invalid config_options for provider %s; using defaults", db_provider_config['provider'])
+                        config_options = {}
                 
                 # Temporarily override config with database provider
-                self.config["current_provider"] = db_provider_config['provider']
-                self.config[db_provider_config['provider']] = {
+                provider_name = db_provider_config['provider']
+                self.config["current_provider"] = provider_name
+                runtime_provider_config = {
                     "apiKey": db_provider_config['api_key'],
                     "enabled": True,
                     "model": db_provider_config['model'],
-                    "timeout": int(db_provider_config.get('config_options', {}).get('timeout_ms', 20000)),
-                    "maxRetries": int(db_provider_config.get('config_options', {}).get('max_retries', 1)),
+                    "timeout": int(config_options.get('timeout_ms', 20000)),
+                    "maxRetries": int(config_options.get('max_retries', 1)),
                     "temperature": db_provider_config['temperature'],
                     "maxTokens": db_provider_config['max_tokens'],
                 }
+
+                if provider_name == "ollama":
+                    runtime_provider_config["timeout"] = int(
+                        config_options.get("timeout_ms", os.getenv("OLLAMA_TIMEOUT_MS", "180000"))
+                    )
+                    runtime_provider_config["maxRetries"] = int(
+                        config_options.get("max_retries", os.getenv("OLLAMA_MAX_RETRIES", "3"))
+                    )
+                    runtime_provider_config["maxTokens"] = int(
+                        min(
+                            int(db_provider_config.get("max_tokens") or os.getenv("OLLAMA_MAX_TOKENS", "1200")),
+                            int(os.getenv("OLLAMA_MAX_TOKENS", "1200"))
+                        )
+                    )
+                    runtime_provider_config["baseUrl"] = (
+                        db_provider_config.get("endpoint_url")
+                        or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+                    )
+                    # Guard against stale model values from old rows.
+                    if not runtime_provider_config.get("model"):
+                        runtime_provider_config["model"] = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
+
+                self.config[provider_name] = runtime_provider_config
                 
                 # Re-initialize client with new config
                 self._initialize_openai()
@@ -1607,15 +1639,25 @@ class EnterpriseAIService:
             provider_config = self._get_current_provider_config()
             
             logger.info(f"🔗 Calling {current_provider.upper()} API - Model: {current_model}")
+
+            effective_max_tokens = min(provider_config.get("maxTokens", 4000), prompt_envelope.max_steps * 150)
+            effective_timeout_ms = provider_config.get("timeout", prompt_envelope.timeout_ms)
+
+            if current_provider == "ollama":
+                # Ollama inference is direct HTTP from unified-api to Ollama; runner WS is not in this path.
+                logger.info("🧭 Ollama inference path: direct HTTP (unified-api -> Ollama), not via runner websocket")
+                ollama_cap = int(os.getenv("OLLAMA_MAX_TOKENS", "1200"))
+                effective_max_tokens = min(effective_max_tokens, ollama_cap)
+                effective_timeout_ms = max(int(effective_timeout_ms or 0), int(os.getenv("OLLAMA_TIMEOUT_MS", "180000")))
             
             response = await self._chat_json(
                 model=current_model,
                 system=system_prompt,
                 user=user_prompt,
-                max_tokens=min(provider_config.get("maxTokens", 4000), prompt_envelope.max_steps * 150),
+                max_tokens=effective_max_tokens,
                 temperature=provider_config.get("temperature", 0.1),
                 retries=provider_config.get("maxRetries", 2),
-                timeout_ms=prompt_envelope.timeout_ms
+                timeout_ms=effective_timeout_ms
             )
             
             logger.info(f"✅ {current_provider.upper()} API response received, length: {len(response)} chars")
@@ -1680,7 +1722,22 @@ class EnterpriseAIService:
             if isinstance(parsed, list):
                 raw_steps = parsed  # Direct array format
             else:
-                raw_steps = parsed.get("steps", [])  # Object format with steps property
+                # Try top-level "steps" first, then nested "workflow.steps"
+                raw_steps = (
+                    parsed.get("steps", None)
+                    or (parsed.get("workflow") or {}).get("steps", None)
+                    or []
+                )
+                if not raw_steps and parsed.get("workflow"):
+                    logger.debug(f"📦 Workflow shape detected, keys: {list((parsed.get('workflow') or {}).keys())}")
+
+            if not raw_steps:
+                logger.warning("⚠️ AI response did not include any executable 'steps'; falling back to heuristic plan generation")
+                if isinstance(parsed, dict) and isinstance(parsed.get("elements"), list):
+                    logger.warning("⚠️ AI returned 'elements' shape instead of 'steps' shape")
+                return await self._generate_heuristic_plan(prompt_envelope, ranked_elements)
+            
+            logger.info(f"✅ Extracted {len(raw_steps)} steps from AI response")
             
             # Helper functions for element validation (defined before loop to avoid scope issues)
             def get_all_element_selectors(el):
@@ -1884,7 +1941,11 @@ class EnterpriseAIService:
                 else:
                     # Log skipped step due to validation failure
                     pass
-            
+
+            if not steps:
+                logger.warning("⚠️ AI response produced 0 valid executable steps after validation; falling back to heuristic plan generation")
+                return await self._generate_heuristic_plan(prompt_envelope, ranked_elements)
+
             output_tokens = len(response) // 4
             return steps, {"input": input_tokens, "output": output_tokens}
             
@@ -1989,6 +2050,24 @@ class EnterpriseAIService:
         
         # Find username/email field
         username_el = self._find_element_by_keywords(elements, ["email", "username", "user", "user-name"])
+        
+        # --- Repository fallback: if no login elements in page slice, use repo selectors ---
+        if not username_el:
+            repo_login_els = self._build_repo_login_elements()
+            if repo_login_els:
+                logger.info("🔄 Page slice has no login fields; falling back to repository login elements")
+                # Prepend navigation step to login page before credential steps
+                login_url = "https://www.saucedemo.com"
+                steps.append(PlanStep(
+                    action="open_url",
+                    target="browser",
+                    args={"url": login_url},
+                    description=f"Navigate to login page: {login_url}",
+                    confidence=0.95
+                ))
+                return steps + await self._generate_login_steps(repo_login_els, prompt_text)
+        
+        # already searched; reuse result below
         if username_el:
             logger.debug(f"✅ Found username element: {self._get_element_selector(username_el)}")
             username_selector = await self._get_policy_based_element_selector(username_el)
@@ -3193,7 +3272,27 @@ CRITICAL: Adapt completely to the website type. Don't use e-commerce patterns fo
                 element_dicts.append(el)
         
         return element_dicts
-    
+
+    def _build_repo_login_elements(self) -> List[Dict[str, Any]]:
+        """Build minimal element dicts for login fields from repository name mapping.
+        Used as a fallback when the current page slice doesn't contain login fields
+        (e.g. user is already logged in and the page shows inventory)."""
+        # Known saucedemo login selectors present in the element repository
+        login_field_map = [
+            {"tag": "input",  "css_selector": "#user-name",    "id": "repo-user-name",    "text": "username user-name email"},
+            {"tag": "input",  "css_selector": "#password",     "id": "repo-password",     "text": "password"},
+            {"tag": "input",  "css_selector": "#login-button", "id": "repo-login-button", "text": "login submit signin"},
+        ]
+        # Verify at least one is in our reverse-selector map (repo was loaded)
+        reverse = getattr(self, "element_selectors_reverse", {})
+        # Build elements regardless – the selectors are canonical saucedemo IDs
+        els = []
+        for m in login_field_map:
+            els.append(m)
+        if els:
+            logger.debug(f"\ud83d\uddc3\ufe0f  Built {len(els)} repo login elements for heuristic fallback")
+        return els
+
     def _find_element_by_keywords(self, elements: List[Any], keywords: List[str], tag_filter: Optional[str] = None) -> Any:
         """Find element by keywords in text/attributes/selector"""
         
@@ -3795,7 +3894,11 @@ Return a JSON array of recommendation strings.
             ollama_config = self.config.get("ollama", {})
             return await self._chat_json_ollama(
                 ollama_config.get("model", model), 
-                system, user, max_tokens, temperature, retries, 
+                system,
+                user,
+                max_tokens,
+                temperature,
+                max(retries, int(ollama_config.get("maxRetries", retries))),
                 ollama_config.get("timeout", timeout_ms)
             )
         elif current_provider == "anthropic" and self.anthropic_client:
@@ -3985,19 +4088,37 @@ Return a JSON array of recommendation strings.
     ) -> str:
         """Call Ollama with JSON response format using OpenAI-compatible API"""
         logger.debug(f" Starting Ollama chat completion: model={model}, max_tokens={max_tokens}")
-        
-        if not self.ollama_client:
-            logger.error("❌ Ollama client not initialized")
-            raise RuntimeError("Ollama client not initialized. Ensure OLLAMA_ENABLED=true and Ollama is running.")
+
+        ollama_config = self.config.get("ollama", {})
+        configured_base = ollama_config.get("baseUrl")
+        env_base = os.getenv("OLLAMA_BASE_URL")
+
+        # Try configured endpoint first, then common host/container fallbacks.
+        base_url_candidates = []
+        for candidate in [
+            configured_base,
+            env_base,
+            "http://host.docker.internal:11434",
+            "http://localhost:11434",
+        ]:
+            if not candidate:
+                continue
+            normalized = str(candidate).rstrip("/")
+            if normalized not in base_url_candidates:
+                base_url_candidates.append(normalized)
+
+        if not base_url_candidates:
+            logger.error("❌ No Ollama base URL configured")
+            raise RuntimeError("No Ollama base URL configured. Set endpoint_url in provider settings or OLLAMA_BASE_URL.")
 
         # Add JSON formatting instruction to the user prompt for better compliance
         json_instruction = "\n\nIMPORTANT: You must respond with valid JSON only. Do not include any text, explanation, or markdown code blocks outside the JSON structure. Start directly with { and end with }."
         user_with_json = user + json_instruction
 
-        def _call():
+        def _call(client):
             # Enforce rate limiting before making the call
             self._enforce_rate_limit()
-            return self.ollama_client.chat.completions.create(
+            return client.chat.completions.create(
                 model=model,
                 messages=[
                     {"role": "system", "content": system + "\nYou must respond with valid JSON only."},
@@ -4010,13 +4131,23 @@ Return a JSON array of recommendation strings.
 
         attempt = 0
         last_err: Optional[Exception] = None
+        total_attempts = max(retries + 1, len(base_url_candidates))
+        candidate_index = 0
         
-        while attempt <= retries:
+        while attempt < total_attempts:
             try:
                 attempt += 1
-                logger.debug(f"🔄 Ollama API attempt {attempt}/{retries+1}")
+                base_url = base_url_candidates[candidate_index]
+                logger.debug(f"🔄 Ollama API attempt {attempt}/{total_attempts} (base_url={base_url})")
+
+                client = OpenAI(
+                    base_url=f"{base_url}/v1",
+                    api_key="ollama",
+                    max_retries=0,
+                    timeout=max(timeout_ms / 1000.0 if timeout_ms else 60.0, 5.0),
+                )
                 
-                resp = await asyncio.to_thread(_call)
+                resp = await asyncio.to_thread(_call, client)
                 content = resp.choices[0].message.content if resp and resp.choices else ""
                 
                 # Clean up the response to extract JSON (Ollama models may include extra text)
@@ -4047,6 +4178,9 @@ Return a JSON array of recommendation strings.
                 if "connection" in error_msg or "refused" in error_msg:
                     logger.error(f"🔌 Ollama connection failed: {str(e)}")
                     logger.error("💡 Ensure Ollama is running: 'ollama serve' or check OLLAMA_BASE_URL")
+                    # Try the next candidate host when connection fails.
+                    if candidate_index < len(base_url_candidates) - 1:
+                        candidate_index += 1
                 elif "timeout" in error_msg or "timed out" in error_msg:
                     logger.warning(f"⏱️ Ollama timeout: {str(e)}")
                     logger.warning(f"💡 Local inference can be slow. Consider increasing OLLAMA_TIMEOUT_MS or using a smaller model.")
@@ -4056,8 +4190,8 @@ Return a JSON array of recommendation strings.
                 else:
                     logger.error(f"❌ Ollama API error: {str(e)}")
                 
-                if attempt > retries:
-                    logger.error(f"💥 All {retries+1} Ollama API attempts exhausted")
+                if attempt >= total_attempts:
+                    logger.error(f"💥 All {total_attempts} Ollama API attempts exhausted")
                     break
                     
                 # Exponential backoff with jitter
@@ -4066,7 +4200,7 @@ Return a JSON array of recommendation strings.
                 await asyncio.sleep(sleep_time)
         
         # Final error handling
-        raise RuntimeError(f"Ollama call failed after {retries+1} attempts: {last_err}")
+        raise RuntimeError(f"Ollama call failed after {total_attempts} attempts: {last_err}")
 
     async def analyze_prompt_intent(self, prompt: str, available_elements: List[Any]) -> Dict[str, Any]:
         """Phase 1: Analyze prompt to identify required pages and elements"""

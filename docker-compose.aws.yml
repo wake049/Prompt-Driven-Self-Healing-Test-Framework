@@ -26,6 +26,8 @@ services:
       - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o}
       - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-3-5-sonnet-20241022}
     restart: unless-stopped
+    volumes:
+      - screenshots-volume:/app/screenshots
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s

@@ -272,11 +272,23 @@ const RunDetails: React.FC = () => {
             } else {
               // Local file path - normalize and construct URL through API
               const cleanPath = step.screenshot_path.replace(/\\/g, '/');
-              
-              // Remove 'screenshots/' prefix if it exists (path might be "screenshots/file.png" or just "file.png")
-              const filename = cleanPath.replace(/^screenshots\//, '');
-              
-              screenshotUrl = `${config.apiBaseUrl}/screenshots/${filename}`;
+
+              if (cleanPath.startsWith('/screenshots/')) {
+                screenshotUrl = `${config.apiBaseUrl}${cleanPath}`;
+              } else if (cleanPath.startsWith('screenshots/')) {
+                screenshotUrl = `${config.apiBaseUrl}/${cleanPath}`;
+              } else {
+                const marker = '/screenshots/';
+                const markerIndex = cleanPath.toLowerCase().lastIndexOf(marker);
+                const filename = markerIndex >= 0
+                  ? cleanPath.substring(markerIndex + marker.length)
+                  : cleanPath.split('/').pop();
+
+                if (filename) {
+                  screenshotUrl = `${config.apiBaseUrl}/screenshots/${filename}`;
+                }
+              }
+
               console.log('Constructed screenshot URL:', screenshotUrl);
             }
           }

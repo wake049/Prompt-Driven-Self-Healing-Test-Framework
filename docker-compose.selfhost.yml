@@ -61,6 +61,8 @@ services:
       - SELF_HOST_VALIDATION_URL=${SELF_HOST_VALIDATION_URL:-}
       - SELF_HOST_LICENSE_VALIDATION_TOKEN=${SELF_HOST_LICENSE_VALIDATION_TOKEN:-}
     restart: unless-stopped
+    volumes:
+      - ./services/java-runner/screenshots:/app/screenshots
     depends_on:
       postgres:
         condition: service_healthy

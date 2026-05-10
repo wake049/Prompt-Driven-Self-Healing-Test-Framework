@@ -349,9 +349,34 @@ interface Member {
   joined_at: string;
 }
 
+interface AiProviderConfig {
+  id: string;
+  provider: string;
+  provider_name: string;
+  model: string;
+  api_key_last_4: string;
+  is_active: boolean;
+  is_default: boolean;
+  is_verified: boolean;
+  total_requests: number;
+  last_used_at: string | null;
+  created_at: string;
+}
+
+interface AiProviderForm {
+  provider: string;
+  provider_name: string;
+  api_key: string;
+  model: string;
+  endpoint_url: string;
+  temperature: string;
+  max_tokens: string;
+  is_default: boolean;
+}
+
 const OrganizationSettings: React.FC = () => {
   const { user, tenant, project, token, logout } = useAuth();
-  const [activeTab, setActiveTab] = useState<'members' | 'roles' | 'subscription' | 'license'>('members');
+  const [activeTab, setActiveTab] = useState<'members' | 'roles' | 'subscription' | 'ai' | 'license'>('members');
   const [members, setMembers] = useState<Member[]>([]);
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [showInviteLinkModal, setShowInviteLinkModal] = useState(false);
@@ -381,6 +406,23 @@ const OrganizationSettings: React.FC = () => {
   const [issuedLicenseKey, setIssuedLicenseKey] = useState<string | null>(null);
   const [revokeReason, setRevokeReason] = useState('manual_revoke');
   const [licenseNotes, setLicenseNotes] = useState('');
+
+  const [aiProviders, setAiProviders] = useState<AiProviderConfig[]>([]);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiSaving, setAiSaving] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiSuccess, setAiSuccess] = useState<string | null>(null);
+  const [aiSelectedProviderId, setAiSelectedProviderId] = useState<string | null>(null);
+  const [aiForm, setAiForm] = useState<AiProviderForm>({
+    provider: 'openai',
+    provider_name: 'OpenAI Configuration',
+    api_key: '',
+    model: 'gpt-4o',
+    endpoint_url: '',
+    temperature: '0.1',
+    max_tokens: '4000',
+    is_default: true,
+  });
 
   const planTier = useMemo(() => {
     if (!subscription?.plan_tier) return undefined;
@@ -431,6 +473,172 @@ const OrganizationSettings: React.FC = () => {
 
     return 'Trial is active.';
   }, [subscription]);
+
+  const defaultModelForProvider = (provider: string) => {
+    switch (provider) {
+      case 'anthropic':
+        return 'claude-3-5-sonnet-20241022';
+      case 'google':
+        return 'gemini-2.0-flash-exp';
+      case 'azure':
+        return 'gpt-4o';
+      case 'ollama':
+        return 'llama3.1:8b';
+      default:
+        return 'gpt-4o';
+    }
+  };
+
+  const loadAiProviders = async () => {
+    if (!tenant?.id || !token) return;
+
+    setAiLoading(true);
+    setAiError(null);
+
+    try {
+      const response = await fetch(
+        `${config.apiBaseUrl}/api/ai-providers/list?tenant_id=${tenant.id}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(await parseApiError(response, 'Failed to load AI providers.'));
+      }
+
+      const data = await response.json();
+      setAiProviders(data);
+
+      const activeProvider = data.find((provider: AiProviderConfig) => provider.is_default);
+      if (activeProvider) {
+        setAiSelectedProviderId(activeProvider.id);
+      }
+    } catch (err: any) {
+      setAiError(err?.message || 'Unable to load AI providers right now.');
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'ai') {
+      loadAiProviders();
+    }
+  }, [activeTab, tenant?.id, token]);
+
+  const handleAiProviderChange = (provider: string) => {
+    setAiForm(prev => ({
+      ...prev,
+      provider,
+      provider_name: prev.provider_name || `${provider.charAt(0).toUpperCase()}${provider.slice(1)} Configuration`,
+      model: defaultModelForProvider(provider),
+      endpoint_url: provider === 'ollama' ? prev.endpoint_url || 'http://localhost:11434' : prev.endpoint_url,
+    }));
+  };
+
+  const handleCreateAiProvider = async (event: React.FormEvent) => {
+    event.preventDefault();
+
+    if (!tenant?.id || !token) {
+      setAiError('Organization context is missing.');
+      return;
+    }
+
+    if (!aiForm.api_key.trim() && aiForm.provider !== 'ollama') {
+      setAiError('API key is required for this provider.');
+      return;
+    }
+
+    setAiSaving(true);
+    setAiError(null);
+    setAiSuccess(null);
+
+    try {
+      const response = await fetch(
+        `${config.apiBaseUrl}/api/ai-providers/create?tenant_id=${tenant.id}`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            provider: aiForm.provider,
+            provider_name: aiForm.provider_name.trim() || `${aiForm.provider.charAt(0).toUpperCase()}${aiForm.provider.slice(1)} Configuration`,
+            api_key: aiForm.provider === 'ollama' ? aiForm.api_key || 'ollama' : aiForm.api_key,
+            model: aiForm.model.trim() || defaultModelForProvider(aiForm.provider),
+            endpoint_url: aiForm.endpoint_url.trim() || undefined,
+            temperature: Number(aiForm.temperature) || 0.1,
+            max_tokens: Number(aiForm.max_tokens) || 4000,
+            is_default: aiForm.is_default,
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(await parseApiError(response, 'Failed to create provider configuration.'));
+      }
+
+      const data = await response.json();
+      setAiSuccess(data?.message || 'Provider configuration created successfully.');
+      setAiForm({
+        provider: 'openai',
+        provider_name: 'OpenAI Configuration',
+        api_key: '',
+        model: 'gpt-4o',
+        endpoint_url: '',
+        temperature: '0.1',
+        max_tokens: '4000',
+        is_default: true,
+      });
+      await loadAiProviders();
+    } catch (err: any) {
+      setAiError(err?.message || 'Unable to create provider configuration.');
+    } finally {
+      setAiSaving(false);
+    }
+  };
+
+  const handleSetDefaultAiProvider = async (providerId: string) => {
+    if (!tenant?.id || !token) {
+      setAiError('Organization context is missing.');
+      return;
+    }
+
+    setAiSaving(true);
+    setAiError(null);
+    setAiSuccess(null);
+
+    try {
+      const response = await fetch(
+        `${config.apiBaseUrl}/api/ai-providers/set-default?tenant_id=${tenant.id}`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ provider_id: providerId }),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(await parseApiError(response, 'Failed to update default provider.'));
+      }
+
+      const data = await response.json();
+      setAiSuccess(data?.message || 'Default provider updated successfully.');
+      await loadAiProviders();
+    } catch (err: any) {
+      setAiError(err?.message || 'Unable to update the default provider.');
+    } finally {
+      setAiSaving(false);
+    }
+  };
 
   // Fetch real members from API
   useEffect(() => {
@@ -940,6 +1148,10 @@ const OrganizationSettings: React.FC = () => {
           <CreditCard size={16} />
           Subscription
         </Tab>
+        <Tab $active={activeTab === 'ai'} onClick={() => setActiveTab('ai')}>
+          <Server size={16} />
+          AI Providers / BYOK
+        </Tab>
         <Tab $active={activeTab === 'license'} onClick={() => setActiveTab('license')}>
           <Key size={16} />
           Self-Host License
@@ -1307,6 +1519,179 @@ const OrganizationSettings: React.FC = () => {
               </InlineActions>
             </Card>
           )}
+        </>
+      )}
+
+      {activeTab === 'ai' && (
+        <>
+          <Card>
+            <CardHeader>
+              <CardTitle>AI Provider Management</CardTitle>
+              <Button $variant="secondary" onClick={loadAiProviders} disabled={aiLoading || aiSaving}>
+                <RefreshCw size={16} />
+                {aiLoading ? 'Refreshing...' : 'Refresh'}
+              </Button>
+            </CardHeader>
+
+            <div style={{ padding: '16px', background: '#f8fbff', border: '1px solid #dbeafe', borderRadius: '10px', color: '#1e3a8a', fontSize: '14px', marginBottom: '20px' }}>
+              <AlertCircle size={16} style={{ verticalAlign: 'middle', marginRight: '8px' }} />
+              BYOK providers are stored in <code>core.ai_provider_configs</code>. API keys are encrypted server-side and only the last four characters are shown here.
+            </div>
+
+            {aiError && (
+              <div style={{ padding: '12px', background: '#fee', border: '1px solid #fcc', borderRadius: '8px', color: '#c00', fontSize: '14px', marginBottom: '16px' }}>
+                {aiError}
+              </div>
+            )}
+
+            {aiSuccess && (
+              <div style={{ padding: '12px', background: '#eaf7ee', border: '1px solid #b9e3c5', borderRadius: '8px', color: '#1f6b3f', fontSize: '14px', marginBottom: '16px' }}>
+                {aiSuccess}
+              </div>
+            )}
+
+            {aiLoading ? (
+              <div style={{ padding: '24px', textAlign: 'center', color: '#666' }}>Loading AI provider configurations...</div>
+            ) : aiProviders.length === 0 ? (
+              <div style={{ padding: '24px', textAlign: 'center', color: '#666' }}>No provider configurations saved yet.</div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px', marginBottom: '24px' }}>
+                {aiProviders.map(provider => (
+                  <div key={provider.id} style={{ border: '1px solid #e5e7eb', borderRadius: '12px', padding: '18px', background: provider.is_default ? '#f8fbff' : 'white' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
+                      <div>
+                        <div style={{ fontSize: '16px', fontWeight: 700, color: '#111827' }}>{provider.provider_name}</div>
+                        <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '4px' }}>{provider.provider} • {provider.model}</div>
+                      </div>
+                      {provider.is_default && (
+                        <span style={{ padding: '4px 10px', borderRadius: '999px', background: '#dbeafe', color: '#1d4ed8', fontSize: '12px', fontWeight: 600 }}>
+                          Default
+                        </span>
+                      )}
+                    </div>
+
+                    <div style={{ fontSize: '13px', color: '#374151', marginBottom: '8px' }}>
+                      API key: <strong>{provider.api_key_last_4 ? `••••${provider.api_key_last_4}` : 'Not shown'}</strong>
+                    </div>
+                    <div style={{ fontSize: '13px', color: '#374151', marginBottom: '8px' }}>
+                      Status: <strong>{provider.is_active ? 'Active' : 'Disabled'}</strong> {provider.is_verified ? '• Verified' : '• Not verified'}
+                    </div>
+                    <div style={{ fontSize: '13px', color: '#374151', marginBottom: '16px' }}>
+                      Requests: <strong>{provider.total_requests ?? 0}</strong>
+                    </div>
+
+                    <Button
+                      $variant={provider.is_default ? 'secondary' : 'primary'}
+                      onClick={() => handleSetDefaultAiProvider(provider.id)}
+                      disabled={aiSaving || provider.is_default}
+                      style={{ width: '100%', justifyContent: 'center' }}
+                    >
+                      {provider.is_default ? 'Current Default' : 'Set as Default'}
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Add BYOK Provider</CardTitle>
+            </CardHeader>
+
+            <form onSubmit={handleCreateAiProvider}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
+                <FormGroup>
+                  <Label>Provider</Label>
+                  <Select value={aiForm.provider} onChange={(e) => handleAiProviderChange(e.target.value)}>
+                    <option value="openai">OpenAI</option>
+                    <option value="anthropic">Anthropic</option>
+                    <option value="google">Google</option>
+                    <option value="azure">Azure OpenAI</option>
+                    <option value="ollama">Ollama</option>
+                  </Select>
+                </FormGroup>
+
+                <FormGroup>
+                  <Label>Provider Name</Label>
+                  <Input
+                    type="text"
+                    value={aiForm.provider_name}
+                    onChange={(e) => setAiForm(prev => ({ ...prev, provider_name: e.target.value }))}
+                    placeholder="Friendly name for this key"
+                  />
+                </FormGroup>
+
+                <FormGroup>
+                  <Label>Model</Label>
+                  <Input
+                    type="text"
+                    value={aiForm.model}
+                    onChange={(e) => setAiForm(prev => ({ ...prev, model: e.target.value }))}
+                    placeholder={defaultModelForProvider(aiForm.provider)}
+                  />
+                </FormGroup>
+
+                <FormGroup>
+                  <Label>API Key</Label>
+                  <Input
+                    type="password"
+                    value={aiForm.api_key}
+                    onChange={(e) => setAiForm(prev => ({ ...prev, api_key: e.target.value }))}
+                    placeholder={aiForm.provider === 'ollama' ? 'Optional for Ollama' : 'Paste API key here'}
+                  />
+                </FormGroup>
+
+                <FormGroup>
+                  <Label>Endpoint URL</Label>
+                  <Input
+                    type="text"
+                    value={aiForm.endpoint_url}
+                    onChange={(e) => setAiForm(prev => ({ ...prev, endpoint_url: e.target.value }))}
+                    placeholder={aiForm.provider === 'ollama' ? 'http://localhost:11434' : 'Optional custom endpoint'}
+                  />
+                </FormGroup>
+
+                <FormGroup>
+                  <Label>Temperature</Label>
+                  <Input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    max="2"
+                    value={aiForm.temperature}
+                    onChange={(e) => setAiForm(prev => ({ ...prev, temperature: e.target.value }))}
+                  />
+                </FormGroup>
+
+                <FormGroup>
+                  <Label>Max Tokens</Label>
+                  <Input
+                    type="number"
+                    min="1"
+                    value={aiForm.max_tokens}
+                    onChange={(e) => setAiForm(prev => ({ ...prev, max_tokens: e.target.value }))}
+                  />
+                </FormGroup>
+              </div>
+
+              <div style={{ marginTop: '16px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <input
+                  id="default-provider"
+                  type="checkbox"
+                  checked={aiForm.is_default}
+                  onChange={(e) => setAiForm(prev => ({ ...prev, is_default: e.target.checked }))}
+                />
+                <Label htmlFor="default-provider" style={{ margin: 0 }}>Set as default provider for this tenant</Label>
+              </div>
+
+              <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'flex-end' }}>
+                <Button type="submit" disabled={aiSaving}>
+                  {aiSaving ? 'Saving...' : 'Save Provider'}
+                </Button>
+              </div>
+            </form>
+          </Card>
         </>
       )}
 

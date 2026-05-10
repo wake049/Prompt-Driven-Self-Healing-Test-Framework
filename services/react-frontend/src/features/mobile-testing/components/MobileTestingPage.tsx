@@ -128,22 +128,26 @@ const FilterBtn = styled.button<{ active: boolean }>`
   &:hover { border-color: #185FA5; }
 `;
 
-const Grid = styled.div`
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 20px;
+const List = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 `;
 
 const Card = styled.div<{ isBuiltin?: boolean }>`
   background: #fff;
-  border: 2px solid ${props => props.isBuiltin ? '#e2e8f0' : '#d0d7de'};
-  border-radius: 14px;
-  padding: 24px;
+  border: 1px solid ${props => props.isBuiltin ? '#e2e8f0' : '#d0d7de'};
+  border-radius: 10px;
+  padding: 16px 20px;
   transition: all 0.2s ease;
   position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
   &:hover {
     border-color: #185FA5;
-    box-shadow: 0 4px 16px rgba(24, 95, 165, 0.1);
+    box-shadow: 0 2px 8px rgba(24, 95, 165, 0.08);
   }
 `;
 
@@ -151,18 +155,19 @@ const CardHeader = styled.div`
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-bottom: 16px;
+  flex: 1;
 `;
 
 const DeviceIcon = styled.div`
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
   background: #f0f4ff;
   display: flex;
   align-items: center;
   justify-content: center;
   color: #185FA5;
+  flex-shrink: 0;
 `;
 
 const CardTitle = styled.div`
@@ -170,10 +175,15 @@ const CardTitle = styled.div`
 `;
 
 const DeviceName = styled.h3`
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 700;
   color: #1a1a2e;
-  margin: 0;
+  margin: 0 0 4px 0;
+`;
+
+const CardHint = styled.div`
+  font-size: 11px;
+  color: #94a3b8;
 `;
 
 const DeviceType = styled.span`
@@ -182,6 +192,8 @@ const DeviceType = styled.span`
   text-transform: uppercase;
   letter-spacing: 0.5px;
   color: #6c757d;
+  display: inline-block;
+  margin-right: 8px;
 `;
 
 const BuiltinBadge = styled.span`
@@ -190,44 +202,38 @@ const BuiltinBadge = styled.span`
   text-transform: uppercase;
   letter-spacing: 0.5px;
   padding: 3px 8px;
-  border-radius: 6px;
+  border-radius: 4px;
   background: #e8f5e9;
   color: #2e7d32;
+  display: inline-block;
+  margin-right: 6px;
 `;
 
 const SpecRow = styled.div`
   display: flex;
   gap: 12px;
-  margin-bottom: 8px;
   flex-wrap: wrap;
+  align-items: center;
 `;
 
 const Spec = styled.div`
-  font-size: 13px;
+  font-size: 12px;
   color: #495057;
   background: #f8f9fa;
-  padding: 4px 10px;
-  border-radius: 6px;
+  padding: 3px 8px;
+  border-radius: 4px;
   font-weight: 500;
 `;
 
 const UserAgentPreview = styled.div`
-  font-size: 11px;
-  color: #6c757d;
-  margin-top: 10px;
-  word-break: break-all;
-  line-height: 1.4;
-  max-height: 36px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  display: none;
 `;
 
 const CardActions = styled.div`
   display: flex;
   gap: 8px;
-  margin-top: 16px;
-  padding-top: 12px;
-  border-top: 1px solid #f0f0f0;
+  flex-shrink: 0;
+  margin-left: 16px;
 `;
 
 const SmallBtn = styled.button<{ variant?: string }>`
@@ -341,6 +347,7 @@ const EmptyState = styled.div`
 export const MobileTestingPage: React.FC = () => {
   const { token } = useAuth();
   const [profiles, setProfiles] = useState<DeviceProfile[]>([]);
+  const [selectedProfile, setSelectedProfile] = useState<DeviceProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'mobile' | 'tablet'>('all');
   const [showModal, setShowModal] = useState(false);
@@ -419,6 +426,12 @@ export const MobileTestingPage: React.FC = () => {
   };
 
   const filteredProfiles = profiles;
+  const sortedProfiles = [...filteredProfiles].sort((a, b) => {
+    const aBuiltin = a.is_builtin ? 1 : 0;
+    const bBuiltin = b.is_builtin ? 1 : 0;
+    if (aBuiltin !== bBuiltin) return aBuiltin - bBuiltin;
+    return a.device_name.localeCompare(b.device_name);
+  });
 
   return (
     <Container>
@@ -461,19 +474,20 @@ export const MobileTestingPage: React.FC = () => {
 
       {loading ? (
         <EmptyState>Loading device profiles...</EmptyState>
-      ) : filteredProfiles.length === 0 ? (
+      ) : sortedProfiles.length === 0 ? (
         <EmptyState>
           <Smartphone size={48} style={{ opacity: 0.3, marginBottom: 12 }} />
           <p>No device profiles found. Create a custom profile or run the database migration to load built-in devices.</p>
         </EmptyState>
       ) : (
-        <Grid>
-          {filteredProfiles.map(profile => (
-            <Card key={profile.id} isBuiltin={profile.is_builtin}>
+        <List>
+          {sortedProfiles.map(profile => (
+            <Card key={profile.id} isBuiltin={profile.is_builtin} onClick={() => setSelectedProfile(profile)}>
               <CardHeader>
                 <DeviceIcon>{getIcon(profile.device_type)}</DeviceIcon>
                 <CardTitle>
                   <DeviceName>{profile.device_name}</DeviceName>
+                  <CardHint>Click row for details</CardHint>
                   <DeviceType>{profile.device_type}</DeviceType>
                 </CardTitle>
                 {profile.is_builtin && <BuiltinBadge>Built-in</BuiltinBadge>}
@@ -492,14 +506,20 @@ export const MobileTestingPage: React.FC = () => {
 
               <CardActions>
                 {!profile.is_builtin && (
-                  <SmallBtn variant="danger" onClick={() => handleDelete(profile.id)}>
+                  <SmallBtn
+                    variant="danger"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDelete(profile.id);
+                    }}
+                  >
                     <Trash2 size={12} /> Delete
                   </SmallBtn>
                 )}
               </CardActions>
             </Card>
           ))}
-        </Grid>
+        </List>
       )}
 
       {/* Create Modal */}
@@ -603,6 +623,47 @@ export const MobileTestingPage: React.FC = () => {
               >
                 <Check size={14} /> Create Profile
               </Button>
+            </ModalActions>
+          </Modal>
+        </ModalOverlay>
+      )}
+
+      {selectedProfile && (
+        <ModalOverlay onClick={() => setSelectedProfile(null)}>
+          <Modal onClick={e => e.stopPropagation()}>
+            <ModalTitle>{getIcon(selectedProfile.device_type)} {selectedProfile.profile_name}</ModalTitle>
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+                <Button variant="secondary" disabled style={{ fontSize: 12, padding: '2px 8px' }}>
+                  {selectedProfile.device_type.charAt(0).toUpperCase() + selectedProfile.device_type.slice(1)}
+                </Button>
+                {selectedProfile.is_builtin && <BuiltinBadge>Built-in</BuiltinBadge>}
+              </div>
+              <div style={{ fontSize: 13, color: '#495057', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div><span style={{ fontWeight: 600, color: '#1a1a2e' }}>Device Name:</span> {selectedProfile.device_name}</div>
+                <div><span style={{ fontWeight: 600, color: '#1a1a2e' }}>Resolution:</span> {selectedProfile.width} × {selectedProfile.height}</div>
+                <div><span style={{ fontWeight: 600, color: '#1a1a2e' }}>Device Scale Factor:</span> {selectedProfile.device_scale_factor}x DPR</div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {selectedProfile.has_touch && <span style={{ fontSize: 12, background: '#e0e7ff', color: '#3730a3', padding: '2px 8px', borderRadius: 4 }}>Touch</span>}
+                  {selectedProfile.is_landscape && <span style={{ fontSize: 12, background: '#e0e7ff', color: '#3730a3', padding: '2px 8px', borderRadius: 4 }}>Landscape</span>}
+                </div>
+                <div style={{ marginTop: 4 }}>
+                  <div style={{ fontWeight: 600, color: '#1a1a2e', marginBottom: 4 }}>User Agent:</div>
+                  <div style={{ fontSize: 12, color: '#6b7280', fontFamily: 'monospace', background: '#f3f4f6', padding: 8, borderRadius: 4, wordBreak: 'break-all', maxHeight: 100, overflow: 'auto' }}>
+                    {selectedProfile.user_agent}
+                  </div>
+                </div>
+              </div>
+            </div>
+            <ModalActions>
+              <Button variant="secondary" onClick={() => setSelectedProfile(null)}>
+                <X size={14} /> Close
+              </Button>
+              {!selectedProfile.is_builtin && (
+                <Button variant="danger" onClick={() => { handleDelete(selectedProfile.id); setSelectedProfile(null); }}>
+                  <Trash2 size={14} /> Delete
+                </Button>
+              )}
             </ModalActions>
           </Modal>
         </ModalOverlay>

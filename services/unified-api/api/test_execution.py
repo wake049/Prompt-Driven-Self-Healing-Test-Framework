@@ -36,6 +36,38 @@ from services.subscription_limits import enforce_monthly_test_runs_limit, requir
 # Setup logger
 logger = logging.getLogger(__name__)
 
+
+def _normalize_screenshot_path(raw_path):
+    """Convert runner-local screenshot paths to portable web paths when possible."""
+    if not raw_path or not isinstance(raw_path, str):
+        return raw_path
+
+    normalized = raw_path.replace("\\", "/").strip()
+    if not normalized:
+        return normalized
+
+    if normalized.startswith("http://") or normalized.startswith("https://"):
+        return normalized
+
+    if normalized.startswith("/screenshots/"):
+        return normalized
+
+    if normalized.startswith("screenshots/"):
+        return f"/{normalized}"
+
+    marker = "/screenshots/"
+    marker_index = normalized.lower().rfind(marker)
+    if marker_index >= 0:
+        filename = normalized[marker_index + len(marker):].lstrip("/")
+        if filename:
+            return f"/screenshots/{filename}"
+
+    filename = normalized.split("/")[-1]
+    if "." in filename:
+        return f"/screenshots/{filename}"
+
+    return normalized
+
 router = APIRouter()
 
 # Initialize ECS client
@@ -2288,7 +2320,7 @@ async def update_step_status(
     try:
         status = request.get("status")
         error_details = request.get("error_details")
-        screenshot_path = request.get("screenshot_path")
+        screenshot_path = _normalize_screenshot_path(request.get("screenshot_path"))
         finished_at = request.get("finished_at")
         healed = request.get("healed", False)
         healing_attempts = request.get("healing_attempts", [])  # NEW: capture healing data

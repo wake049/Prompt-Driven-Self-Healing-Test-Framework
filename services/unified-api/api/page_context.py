@@ -4,7 +4,7 @@ Provides endpoints for managing page context and helping AI understand website t
 Connected to repo.page_contexts table in database.
 """
 
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, Request
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
 import json
@@ -45,6 +45,16 @@ async def get_page_context_repository():
     """Dependency to get page context repository"""
     db = await get_database()
     return PageContextRepository(db)
+
+
+def _to_public_asset_url(request: Request, value: Optional[str]) -> Optional[str]:
+    if not value:
+        return value
+    if value.startswith("http://") or value.startswith("https://"):
+        return value
+    if value.startswith("/"):
+        return f"{str(request.base_url).rstrip('/')}{value}"
+    return value
 
 @router.post("/upload", response_model=Dict[str, Any])
 async def upload_page_context(
@@ -168,6 +178,7 @@ async def context_from_url(url: str):
 
 @router.get("/list")
 async def get_page_contexts(
+    request: Request,
     limit: int = 100,
     category: Optional[str] = None,
     search: Optional[str] = None,
@@ -221,10 +232,7 @@ async def get_page_contexts(
                 elif not isinstance(primary_actions, list):
                     primary_actions = []
                 
-                # Convert relative screenshot URL to full URL
-                screenshot_url = ctx.get("screenshot_url")
-                if screenshot_url and screenshot_url.startswith("/uploads"):
-                    screenshot_url = f"https://fluxtest.io{screenshot_url}"
+                screenshot_url = _to_public_asset_url(request, ctx.get("screenshot_url"))
                 
                 result.append({
                     "id": str(ctx["id"]),
@@ -255,6 +263,7 @@ async def get_page_contexts(
 @router.get("/{context_id}")
 async def get_page_context(
     context_id: str,
+    request: Request,
     repository: PageContextRepository = Depends(get_page_context_repository)
 ):
     """
@@ -277,10 +286,7 @@ async def get_page_context(
         if not page_title:
             page_title = context.get("website_url", "").split("/")[-1] if context.get("website_url") else "Unknown"
         
-        # Convert relative screenshot URL to full URL
-        screenshot_url = context.get("screenshot_url")
-        if screenshot_url and screenshot_url.startswith("/uploads"):
-            screenshot_url = f"https://fluxtest.io{screenshot_url}"
+        screenshot_url = _to_public_asset_url(request, context.get("screenshot_url"))
         
         return {
             "success": True,
@@ -349,6 +355,7 @@ async def update_page_context(
 @router.put("/{context_id}/upload")
 async def update_page_context_with_files(
     context_id: str,
+    request: Request,
     page_url: str = Form(...),
     page_title: str = Form(...),
     page_type: str = Form(...),
@@ -396,10 +403,7 @@ async def update_page_context_with_files(
         if not result:
             raise HTTPException(status_code=404, detail="Page context not found")
         
-        # Convert relative screenshot URL to full URL
-        result_screenshot_url = result.get("screenshot_url")
-        if result_screenshot_url and result_screenshot_url.startswith("/uploads"):
-            result_screenshot_url = f"https://fluxtest.io{result_screenshot_url}"
+        result_screenshot_url = _to_public_asset_url(request, result.get("screenshot_url"))
         
         return {
             "success": True,

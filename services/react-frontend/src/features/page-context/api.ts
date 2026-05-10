@@ -1,7 +1,26 @@
 import { http } from "../../shared/api/http";
+import { config } from "../../app/config";
 import { PageContext } from "./types";
 
 const BASE_PATH = "/page-context";
+
+function resolveApiBaseUrl(): string {
+  return config.apiBaseUrl;
+}
+
+function normalizeScreenshotUrl(url?: string): string | undefined {
+  if (!url) return url;
+  if (url.startsWith("http://") || url.startsWith("https://")) return url;
+  if (url.startsWith("/")) return `${resolveApiBaseUrl()}${url}`;
+  return `${resolveApiBaseUrl()}/${url}`;
+}
+
+function normalizePageContext(context: PageContext): PageContext {
+  return {
+    ...context,
+    screenshotUrl: normalizeScreenshotUrl((context as any).screenshotUrl || (context as any).screenshot_url),
+  };
+}
 
 export const PageContextAPI = {
   // List all page contexts
@@ -22,7 +41,7 @@ export const PageContextAPI = {
       count: number;
     }>(`/api/v1${BASE_PATH}/list${query ? `?${query}` : ""}`);
     
-    return response.data;
+    return response.data.map(normalizePageContext);
   },
 
   // Get a specific page context
@@ -32,12 +51,12 @@ export const PageContextAPI = {
       data: PageContext;
     }>(`/api/v1${BASE_PATH}/${id}`);
     
-    return response.data;
+    return normalizePageContext(response.data);
   },
 
   // Create a new page context
   create: async (data: FormData) => {
-    const response = await fetch(`${import.meta.env.VITE_UNIFIED_API_URL || "https://fluxtest.io"}/api/v1${BASE_PATH}/upload`, {
+    const response = await fetch(`${resolveApiBaseUrl()}/api/v1${BASE_PATH}/upload`, {
       method: "POST",
       body: data,
       headers: {
@@ -51,7 +70,11 @@ export const PageContextAPI = {
       throw new Error(`HTTP ${response.status}: ${error}`);
     }
 
-    return response.json();
+    const json = await response.json();
+    if (json?.data?.screenshot_url || json?.data?.screenshotUrl) {
+      json.data.screenshotUrl = normalizeScreenshotUrl(json.data.screenshotUrl || json.data.screenshot_url);
+    }
+    return json;
   },
 
   // Update a page context
@@ -70,7 +93,7 @@ export const PageContextAPI = {
 
   // Update a page context with file uploads (like screenshots)
   updateWithFiles: async (id: string, data: FormData) => {
-    const response = await fetch(`${import.meta.env.VITE_UNIFIED_API_URL || "https://fluxtest.io"}/api/v1${BASE_PATH}/${id}/upload`, {
+    const response = await fetch(`${resolveApiBaseUrl()}/api/v1${BASE_PATH}/${id}/upload`, {
       method: "PUT",
       body: data,
       headers: {
@@ -84,7 +107,11 @@ export const PageContextAPI = {
       throw new Error(`HTTP ${response.status}: ${error}`);
     }
 
-    return response.json();
+    const json = await response.json();
+    if (json?.data?.screenshot_url || json?.data?.screenshotUrl) {
+      json.data.screenshotUrl = normalizeScreenshotUrl(json.data.screenshotUrl || json.data.screenshot_url);
+    }
+    return json;
   },
 
   // Delete a page context

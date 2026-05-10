@@ -3099,7 +3099,7 @@ export const PromptDetailView: React.FC = () => {
       const promptEnvelope: Record<string, any> = {
         prompt: primaryPrompt,
         prompt_id: prompt.id,  // Include prompt ID so AI can load existing bindings
-        tenant_id: "frontend-user", // Default tenant for frontend usage
+        tenant_id: tenant?.id || "frontend-user", // Use actual tenant's organization from auth context
         page_url: isAppTest ? undefined : pageUrl, // No URL for native app tests
         max_steps: 50,
         include_screenshots: false,

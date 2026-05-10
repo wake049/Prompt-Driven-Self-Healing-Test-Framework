@@ -17,6 +17,35 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+
+def normalize_screenshot_path(raw_path: Optional[str]) -> Optional[str]:
+    if not raw_path:
+        return raw_path
+
+    normalized = raw_path.replace("\\", "/").strip()
+    if not normalized:
+        return normalized
+
+    if normalized.startswith("http://") or normalized.startswith("https://"):
+        return normalized
+    if normalized.startswith("/screenshots/"):
+        return normalized
+    if normalized.startswith("screenshots/"):
+        return f"/{normalized}"
+
+    marker = "/screenshots/"
+    marker_index = normalized.lower().rfind(marker)
+    if marker_index >= 0:
+        filename = normalized[marker_index + len(marker):].lstrip("/")
+        if filename:
+            return f"/screenshots/{filename}"
+
+    filename = normalized.split("/")[-1]
+    if "." in filename:
+        return f"/screenshots/{filename}"
+
+    return normalized
+
 def safe_parse_action_data(action_data_str: str) -> Dict[str, Any]:
     """Safely parse action_data JSON string"""
     if not action_data_str:
@@ -765,7 +794,7 @@ async def get_execution_steps(
                     'description': safe_parse_action_data(step['action_data']).get('description', ''),
                     'status': step['status'],
                     'error_message': step['error_details'],
-                    'screenshot_path': step['screenshot_path'],
+                    'screenshot_path': normalize_screenshot_path(step['screenshot_path']),
                     'healing_attempts': healing_by_step.get(str(step['id']), []),
                     'created_at': step['created_at'].isoformat() if step['created_at'] else None
                 }
